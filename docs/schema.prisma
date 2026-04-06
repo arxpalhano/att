@@ -1,0 +1,181 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  admin
+  internal_ops
+  internal_modeling
+  internal_programming
+  client
+}
+
+enum ServiceType { standard; plus; ultra }
+enum BlockStatus { draft; awaiting_client_files; client_files_under_review; ready_to_start; in_modeling; awaiting_client_material_validation; approved_for_programming; in_programming; internal_review; awaiting_client_final_validation; approved; published; blocked; on_hold; archived }
+enum AssetCategory { cad; finishing; photos; videos; technical_drawing; three_d_block; extra_reference }
+enum AssetStatus { active; replaced; deleted }
+enum ApprovalType { material_validation; final_validation }
+enum ApprovalStatus { pending; approved; rejected }
+enum Priority { low; normal; high; urgent }
+enum ActivityType { block_created; asset_uploaded; asset_revision; status_changed; owner_assigned; approval_requested; approval_approved; approval_rejected; publication_updated; comment_added; readiness_changed; block_archived }
+enum PublicationEnvironment { staging; production }
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      UserRole
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  avatarUrl String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  createdBlocks    ProductBlock[] @relation("CreatedBy")
+  primaryBlocks    ProductBlock[] @relation("PrimaryOwner")
+  backupBlocks     ProductBlock[] @relation("BackupOwner")
+  uploadedAssets   Asset[]
+  approvalDecisions Approval[] @relation("DecidedBy")
+  approvalRequests  Approval[] @relation("RequestedBy")
+  activityLogs     ActivityLog[]
+  publications     Publication[]
+  @@index([email])
+  @@index([role])
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  name         String
+  code         String   @unique
+  contactEmail String
+  contactPhone String?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  users        User[]
+  contracts    Contract[]
+  productBlocks ProductBlock[]
+}
+
+model Contract {
+  id          String   @id @default(cuid())
+  clientId    String
+  client      Client   @relation(fields: [clientId], references: [id])
+  title       String
+  description String?
+  totalBlocks Int
+  usedBlocks  Int      @default(0)
+  startDate   DateTime
+  endDate     DateTime?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  productBlocks ProductBlock[]
+  @@index([clientId])
+}
+
+model ProductBlock {
+  id                   String       @id @default(cuid())
+  clientId             String
+  client               Client       @relation(fields: [clientId], references: [id])
+  contractId           String
+  contract             Contract     @relation(fields: [contractId], references: [id])
+  internalBlockNumber  Int
+  internalSku          String       @unique
+  clientSku            String
+  title                String
+  description          String?
+  serviceType          ServiceType
+  status               BlockStatus  @default(draft)
+  priority             Priority     @default(normal)
+  createdById          String
+  createdBy            User         @relation("CreatedBy", fields: [createdById], references: [id])
+  currentPrimaryOwnerId String?
+  currentPrimaryOwner   User?       @relation("PrimaryOwner", fields: [currentPrimaryOwnerId], references: [id])
+  currentBackupOwnerId  String?
+  currentBackupOwner    User?       @relation("BackupOwner", fields: [currentBackupOwnerId], references: [id])
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  publishedAt          DateTime?
+  archivedAt           DateTime?
+  assets       Asset[]
+  approvals    Approval[]
+  activityLogs ActivityLog[]
+  publications Publication[]
+  @@index([clientId])
+  @@index([contractId])
+  @@index([status])
+  @@index([currentPrimaryOwnerId])
+}
+
+model Asset {
+  id              String        @id @default(cuid())
+  productBlockId  String
+  productBlock    ProductBlock  @relation(fields: [productBlockId], references: [id])
+  category        AssetCategory
+  originalFilename String
+  storedFilename   String
+  storedPath       String?
+  mimeType        String
+  size            Int
+  versionNumber   Int           @default(1)
+  uploadedById    String
+  uploadedBy      User          @relation(fields: [uploadedById], references: [id])
+  createdAt       DateTime      @default(now())
+  status          AssetStatus   @default(active)
+  notes           String?
+  @@index([productBlockId])
+  @@index([productBlockId, category])
+}
+
+model Approval {
+  id              String         @id @default(cuid())
+  productBlockId  String
+  productBlock    ProductBlock   @relation(fields: [productBlockId], references: [id])
+  approvalType    ApprovalType
+  status          ApprovalStatus @default(pending)
+  comment         String?
+  requestedById   String
+  requestedBy     User           @relation("RequestedBy", fields: [requestedById], references: [id])
+  decidedById     String?
+  decidedBy       User?          @relation("DecidedBy", fields: [decidedById], references: [id])
+  requestedAt     DateTime       @default(now())
+  decidedAt       DateTime?
+  @@index([productBlockId])
+  @@index([status])
+}
+
+model ActivityLog {
+  id              String       @id @default(cuid())
+  productBlockId  String
+  productBlock    ProductBlock @relation(fields: [productBlockId], references: [id])
+  userId          String
+  user            User         @relation(fields: [userId], references: [id])
+  type            ActivityType
+  description     String
+  metadata        Json?
+  createdAt       DateTime     @default(now())
+  @@index([productBlockId])
+  @@index([createdAt])
+}
+
+model Publication {
+  id              String                 @id @default(cuid())
+  productBlockId  String
+  productBlock    ProductBlock           @relation(fields: [productBlockId], references: [id])
+  url             String?
+  embedCode       String?
+  environment     PublicationEnvironment @default(staging)
+  version         Int                    @default(1)
+  notes           String?
+  publishedById   String
+  publishedBy     User                   @relation(fields: [publishedById], references: [id])
+  publishedAt     DateTime               @default(now())
+  @@index([productBlockId])
+}
