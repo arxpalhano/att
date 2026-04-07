@@ -123,21 +123,34 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
 // ============================================================
 // SEED DATA
 // ============================================================
-const USERS: SeedUser[] = [
-  { id: "u1", email: "paulo@archtechtour.com", name: "Paulo Dau", role: "admin", active: true },
-  { id: "u2", email: "igor@archtechtour.com", name: "Igor Augusto", role: "internal_modeling", active: true },
-  { id: "u3", email: "jessica@archtechtour.com", name: "Jessica Ribeiro", role: "internal_programming", active: true },
-  { id: "u4", email: "mariana@archtechtour.com", name: "Mariana Pesca", role: "internal_ops", active: true },
-  { id: "u5", email: "lucas@archtechtour.com", name: "Lucas Liles", role: "internal_modeling", active: true },
-  { id: "u6", email: "contato@verget.com.br", name: "Rafael Verget", role: "client", clientId: "c1", active: true },
-  { id: "u7", email: "contato@boobam.com.br", name: "Amanda Boobam", role: "client", clientId: "c2", active: true },
-  { id: "u8", email: "danielli@archtechtour.com", name: "Danielli Nunes", role: "internal_ops", active: true },
+let USERS: SeedUser[] = [
+  { id: "u1", email: "mpesca@archtechtour.com", name: "Mariana Pesca", role: "admin", active: true },
+  { id: "u2", email: "mpalhano@archtechtour.com", name: "Matheus Palhano", role: "admin", active: true },
+  { id: "u3", email: "vsalles@archtechtour.com", name: "Victor Salles", role: "internal_modeling", active: true },
+  { id: "u4", email: "ijesus@archtechtour.com", name: "Igor Augusto", role: "internal_modeling", active: true },
+  { id: "u5", email: "lliles@archtechtour.com", name: "Lucas Liles", role: "internal_programming", active: true },
+  { id: "u6", email: "info@archtechtour.com", name: "Jéssica Ribeiro", role: "internal_ops", active: true },
+  { id: "u7", email: "financeiro@archtechtour.com", name: "Danielli Nunes", role: "internal_ops", active: true },
+  { id: "u8", email: "contato@escal.com.br", name: "Escal Móveis", role: "client", clientId: "c1", active: true },
+  { id: "u9", email: "contato@estudiobola.com.br", name: "Estúdio Bola", role: "client", clientId: "c2", active: true },
+  { id: "u10", email: "contato@wentz.com.br", name: "Wentz", role: "client", clientId: "c3", active: true },
+  { id: "u11", email: "contato@minimaldesign.com.br", name: "Minimal Design", role: "client", clientId: "c4", active: true },
+  { id: "u12", email: "contato@rsdesign.com.br", name: "RS Design", role: "client", clientId: "c5", active: true },
 ];
 
 const CLIENTS: SeedClient[] = [
-  { id: "c1", name: "Verget Móveis", code: "VERGET", contactEmail: "contato@verget.com.br", active: true },
-  { id: "c2", name: "Boobam Design", code: "BOOBAM", contactEmail: "contato@boobam.com.br", active: true },
-  { id: "c3", name: "Haus Concept", code: "HAUS", contactEmail: "contato@hausconcept.com.br", active: true },
+  { id: "c1", name: "Escal Móveis", code: "ESCAL", contactEmail: "contato@escal.com.br", active: true },
+  { id: "c2", name: "Estúdio Bola", code: "EB", contactEmail: "contato@estudiobola.com.br", active: true },
+  { id: "c3", name: "Wentz", code: "WENTZ", contactEmail: "contato@wentz.com.br", active: true },
+  { id: "c4", name: "Minimal Design", code: "MINIMAL", contactEmail: "contato@minimaldesign.com.br", active: true },
+  { id: "c5", name: "RS Design", code: "RSDESIGN", contactEmail: "contato@rsdesign.com.br", active: true },
+  { id: "c6", name: "Tidelli", code: "TIDELLI", contactEmail: "contato@tidelli.com.br", active: true },
+  { id: "c7", name: "Hunter Douglas", code: "HD", contactEmail: "contato@hunterdouglas.com.br", active: true },
+  { id: "c8", name: "Docol", code: "DOCOL", contactEmail: "contato@docol.com.br", active: true },
+  { id: "c9", name: "Pedro Franco", code: "PF", contactEmail: "contato@pedrofranco.com.br", active: true },
+  { id: "c10", name: "DEXCO", code: "DEXCO", contactEmail: "contato@dexco.com.br", active: true },
+  { id: "c11", name: "WJ Luminárias", code: "WJ", contactEmail: "contato@wjluminarias.com.br", active: true },
+  { id: "c12", name: "Christie", code: "CHRISTIE", contactEmail: "contato@christie.com.br", active: true },
 ];
 
 const CONTRACTS: SeedContract[] = [
@@ -147,72 +160,90 @@ const CONTRACTS: SeedContract[] = [
 ];
 
 const INITIAL_BLOCKS: SeedBlock[] = [
-  { id: "pb1", clientId: "c1", contractId: "ct1", n: 1, sku: "VERGET-001", csku: "VRG-MESA-01", title: "Mesa de Jantar Elegance 1.8m", svc: "plus", status: "published", pri: "normal", owner: "u3", backup: "u2", created: "2025-02-01", published: "2025-04-10" },
-  { id: "pb2", clientId: "c1", contractId: "ct1", n: 2, sku: "VERGET-002", csku: "VRG-SOF-01", title: "Sofá L Premium 3 Lugares", svc: "ultra", status: "in_programming", pri: "high", owner: "u3", backup: "u5", created: "2025-02-10" },
-  { id: "pb3", clientId: "c1", contractId: "ct1", n: 3, sku: "VERGET-003", csku: "VRG-CAD-01", title: "Cadeira Escritório Ergo", svc: "standard", status: "in_modeling", pri: "normal", owner: "u2", created: "2025-03-01" },
-  { id: "pb4", clientId: "c1", contractId: "ct1", n: 4, sku: "VERGET-004", csku: "VRG-ARM-01", title: "Armário Modular 2P", svc: "plus", status: "awaiting_client_files", pri: "normal", created: "2025-03-15" },
-  { id: "pb5", clientId: "c1", contractId: "ct1", n: 5, sku: "VERGET-005", csku: "VRG-EST-01", title: "Estante Vazada Industrial", svc: "standard", status: "awaiting_client_material_validation", pri: "high", owner: "u5", created: "2025-04-01" },
-  { id: "pb6", clientId: "c1", contractId: "ct1", n: 6, sku: "VERGET-006", csku: "VRG-BAN-01", title: "Bancada Cozinha Gourmet", svc: "ultra", status: "ready_to_start", pri: "urgent", created: "2025-04-10" },
-  { id: "pb7", clientId: "c1", contractId: "ct1", n: 7, sku: "VERGET-007", csku: "VRG-CRIB-01", title: "Criado-Mudo Minimalista", svc: "standard", status: "draft", pri: "low", created: "2025-05-01" },
-  { id: "pb8", clientId: "c1", contractId: "ct1", n: 8, sku: "VERGET-008", csku: "VRG-RAK-01", title: "Rack TV Suspenso", svc: "plus", status: "blocked", pri: "normal", owner: "u2", created: "2025-05-05" },
-  { id: "pb9", clientId: "c1", contractId: "ct1", n: 9, sku: "VERGET-009", csku: "VRG-CAM-01", title: "Cama Box King Luxo", svc: "ultra", status: "internal_review", pri: "high", owner: "u3", created: "2025-05-10" },
-  { id: "pb10", clientId: "c1", contractId: "ct1", n: 10, sku: "VERGET-010", csku: "VRG-POL-01", title: "Poltrona Leitura Classic", svc: "standard", status: "approved", pri: "normal", owner: "u3", created: "2025-05-15" },
-  { id: "pb11", clientId: "c1", contractId: "ct1", n: 11, sku: "VERGET-011", csku: "VRG-COM-01", title: "Cômoda 5 Gavetas", svc: "standard", status: "awaiting_client_final_validation", pri: "normal", owner: "u3", created: "2025-06-01" },
-  { id: "pb12", clientId: "c1", contractId: "ct1", n: 12, sku: "VERGET-012", csku: "VRG-SAP-01", title: "Sapateira Slim", svc: "standard", status: "client_files_under_review", pri: "low", created: "2025-06-15" },
-  { id: "pb13", clientId: "c2", contractId: "ct2", n: 1, sku: "BOOBAM-001", csku: "BBM-CADX-01", title: "Cadeira X Gamer", svc: "plus", status: "in_modeling", pri: "high", owner: "u5", created: "2025-04-15" },
-  { id: "pb14", clientId: "c2", contractId: "ct2", n: 2, sku: "BOOBAM-002", csku: "BBM-DESK-01", title: "Mesa Gamer RGB", svc: "ultra", status: "awaiting_client_files", pri: "normal", created: "2025-05-01" },
-  { id: "pb15", clientId: "c2", contractId: "ct2", n: 3, sku: "BOOBAM-003", csku: "BBM-MON-01", title: "Suporte Monitor Articulado", svc: "standard", status: "published", pri: "normal", owner: "u3", created: "2025-04-20", published: "2025-06-10" },
-  { id: "pb16", clientId: "c2", contractId: "ct2", n: 4, sku: "BOOBAM-004", csku: "BBM-GAV-01", title: "Gaveteiro Organizador", svc: "standard", status: "on_hold", pri: "low", created: "2025-05-10" },
-  { id: "pb17", clientId: "c2", contractId: "ct2", n: 5, sku: "BOOBAM-005", csku: "BBM-PAI-01", title: "Painel LED Gamer", svc: "plus", status: "draft", pri: "normal", created: "2025-06-01" },
-  { id: "pb18", clientId: "c3", contractId: "ct3", n: 1, sku: "HAUS-001", csku: "HC-SOFA-01", title: "Sofá Modular Premium", svc: "ultra", status: "in_programming", pri: "urgent", owner: "u3", backup: "u2", created: "2025-06-10" },
-  { id: "pb19", clientId: "c3", contractId: "ct3", n: 2, sku: "HAUS-002", csku: "HC-MESA-01", title: "Mesa Centro Vidro", svc: "standard", status: "awaiting_client_files", pri: "normal", created: "2025-06-15" },
+  // ESCAL
+  { id: "pb1", clientId: "c1", contractId: "ct1", n: 1, sku: "ESCAL-001", csku: "BANCO-NUB", title: "Banco Nub", svc: "plus", status: "published", pri: "normal", owner: "u3", backup: "u5", created: "2025-03-15", published: "2025-07-23" },
+  { id: "pb2", clientId: "c1", contractId: "ct1", n: 2, sku: "ESCAL-002", csku: "BANQUETA-LOAI", title: "Banqueta Loai", svc: "plus", status: "in_programming", pri: "high", owner: "u5", created: "2025-05-01" },
+  { id: "pb3", clientId: "c1", contractId: "ct1", n: 3, sku: "ESCAL-003", csku: "PUFF-UMMA", title: "Puff Umma", svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-06-01" },
+  { id: "pb4", clientId: "c1", contractId: "ct1", n: 4, sku: "ESCAL-004", csku: "POLTRONA-MARGOT", title: "Poltrona Margot", svc: "plus", status: "awaiting_client_material_validation", pri: "high", owner: "u3", created: "2025-06-15" },
+  { id: "pb5", clientId: "c1", contractId: "ct1", n: 5, sku: "ESCAL-005", csku: "MESA-AUX-MARY", title: "Mesa Auxiliar Mary", svc: "standard", status: "published", pri: "normal", owner: "u5", created: "2025-04-01", published: "2025-08-15" },
+  { id: "pb6", clientId: "c1", contractId: "ct1", n: 6, sku: "ESCAL-006", csku: "MESA-AUX-STEEL", title: "Mesa Auxiliar Steel", svc: "standard", status: "internal_review", pri: "normal", owner: "u5", created: "2025-07-01" },
+  // ESTÚDIO BOLA
+  { id: "pb7", clientId: "c2", contractId: "ct2", n: 1, sku: "EB-001", csku: "POLTRONA-ACACIA", title: "Poltrona Acácia", svc: "ultra", status: "awaiting_client_final_validation", pri: "high", owner: "u3", created: "2024-08-01" },
+  { id: "pb8", clientId: "c2", contractId: "ct2", n: 2, sku: "EB-002", csku: "BANCO-PIAO", title: "Banco Pião", svc: "plus", status: "published", pri: "normal", owner: "u5", created: "2024-09-01", published: "2025-02-10" },
+  { id: "pb9", clientId: "c2", contractId: "ct2", n: 3, sku: "EB-003", csku: "POLTRONA-LALA", title: "Poltrona Lalá", svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2024-10-01", published: "2025-03-20" },
+  { id: "pb10", clientId: "c2", contractId: "ct2", n: 4, sku: "EB-004", csku: "BANCO-LESS", title: "Banco Less", svc: "standard", status: "published", pri: "normal", owner: "u4", created: "2024-11-01", published: "2025-04-05" },
+  { id: "pb11", clientId: "c2", contractId: "ct2", n: 5, sku: "EB-005", csku: "CADEIRA-COTA", title: "Cadeira Cota", svc: "plus", status: "in_programming", pri: "high", owner: "u5", created: "2025-08-01" },
+  { id: "pb12", clientId: "c2", contractId: "ct2", n: 6, sku: "EB-006", csku: "LATERAL-ARDEA", title: "Lateral Ardea", svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-09-15" },
+  { id: "pb13", clientId: "c2", contractId: "ct2", n: 7, sku: "EB-007", csku: "SOFA-BLOCK", title: "Sofá Block", svc: "ultra", status: "ready_to_start", pri: "urgent", created: "2025-11-01" },
+  { id: "pb14", clientId: "c2", contractId: "ct2", n: 8, sku: "EB-008", csku: "JANTAR-TRIZ", title: "Jantar Triz Madeira", svc: "plus", status: "approved", pri: "normal", owner: "u3", created: "2025-10-01" },
+  // WENTZ
+  { id: "pb15", clientId: "c3", contractId: "ct3", n: 1, sku: "WENTZ-001", csku: "CADEIRA-CAPA", title: "Cadeira Capa", svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-01-15", published: "2025-06-10" },
+  { id: "pb16", clientId: "c3", contractId: "ct3", n: 2, sku: "WENTZ-002", csku: "POLTRONA-DAMA", title: "Poltrona Dama", svc: "ultra", status: "in_programming", pri: "high", owner: "u5", backup: "u3", created: "2025-03-01" },
+  // MINIMAL DESIGN
+  { id: "pb17", clientId: "c4", contractId: "ct4", n: 1, sku: "MINIMAL-001", csku: "CABINE-PLAY-XP", title: "Cabine Play Extra Pequena", svc: "standard", status: "published", pri: "normal", owner: "u5", created: "2025-07-15", published: "2025-11-01" },
+  { id: "pb18", clientId: "c4", contractId: "ct4", n: 2, sku: "MINIMAL-002", csku: "CABINE-PLAY-P", title: "Cabine Play Pequena", svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-08-01" },
+  { id: "pb19", clientId: "c4", contractId: "ct4", n: 3, sku: "MINIMAL-003", csku: "CABINE-BINE-P", title: "Cabine Bine Pequena", svc: "standard", status: "awaiting_client_files", pri: "normal", created: "2025-09-01" },
+  // DEXCO
+  { id: "pb20", clientId: "c10", contractId: "ct7", n: 1, sku: "DEXCO-001", csku: "PROD-VALIDACAO", title: "Produto Validação Dexco", svc: "standard", status: "draft", pri: "normal", created: "2026-03-02" },
+  // WJ LUMINÁRIAS
+  { id: "pb21", clientId: "c11", contractId: "ct8", n: 1, sku: "WJ-001", csku: "UMBRA", title: "Luminária Umbra", svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-06-15", published: "2025-12-10" },
+  { id: "pb22", clientId: "c11", contractId: "ct8", n: 2, sku: "WJ-002", csku: "PENDENTE-ARCO", title: "Pendente Arco", svc: "standard", status: "blocked", pri: "high", owner: "u4", created: "2025-08-01" },
 ];
 
 const ASSETS: SeedAsset[] = [
-  { id: "a1", blockId: "pb1", cat: "cad", name: "mesa_elegance.dwg", size: 2500000, v: 1, by: "u6" },
-  { id: "a2", blockId: "pb1", cat: "finishing", name: "acabamentos_mesa.pdf", size: 1200000, v: 1, by: "u6" },
-  { id: "a3", blockId: "pb1", cat: "photos", name: "foto_referencia.jpg", size: 450000, v: 1, by: "u6" },
-  { id: "a4", blockId: "pb1", cat: "technical_drawing", name: "desenho_tecnico.pdf", size: 890000, v: 1, by: "u6" },
-  { id: "a5", blockId: "pb2", cat: "cad", name: "sofa_premium_v2.step", size: 5200000, v: 2, by: "u6" },
-  { id: "a6", blockId: "pb2", cat: "finishing", name: "materiais_sofa.pdf", size: 2100000, v: 1, by: "u6" },
-  { id: "a7", blockId: "pb2", cat: "photos", name: "sofa_ref.jpg", size: 680000, v: 1, by: "u6" },
-  { id: "a8", blockId: "pb2", cat: "videos", name: "video_sofa_360.mp4", size: 15000000, v: 1, by: "u6" },
-  { id: "a9", blockId: "pb2", cat: "technical_drawing", name: "sofa_desenho.pdf", size: 1100000, v: 1, by: "u6" },
-  { id: "a10", blockId: "pb2", cat: "3d_block", name: "sofa_bloco.glb", size: 8000000, v: 1, by: "u6" },
-  { id: "a11", blockId: "pb3", cat: "cad", name: "cadeira_ergo.dwg", size: 1800000, v: 1, by: "u6" },
-  { id: "a12", blockId: "pb3", cat: "photos", name: "cadeira_foto.jpg", size: 320000, v: 1, by: "u6" },
-  { id: "a13", blockId: "pb13", cat: "cad", name: "cadeira_gamer.step", size: 3200000, v: 1, by: "u7" },
-  { id: "a14", blockId: "pb13", cat: "finishing", name: "materiais_gamer.pdf", size: 950000, v: 1, by: "u7" },
-  { id: "a15", blockId: "pb13", cat: "photos", name: "cadeira_ref.jpg", size: 400000, v: 1, by: "u7" },
-  { id: "a16", blockId: "pb13", cat: "technical_drawing", name: "cadeira_gamer_tech.pdf", size: 720000, v: 1, by: "u7" },
+  { id: "a1", blockId: "pb1", cat: "cad", name: "banco_nub_v3.step", size: 3200000, v: 3, by: "u8" },
+  { id: "a2", blockId: "pb1", cat: "finishing", name: "acabamentos_nub.pdf", size: 1800000, v: 1, by: "u8" },
+  { id: "a3", blockId: "pb1", cat: "photos", name: "banco_nub_ref.jpg", size: 520000, v: 1, by: "u8" },
+  { id: "a4", blockId: "pb1", cat: "technical_drawing", name: "nub_desenho_tecnico.pdf", size: 980000, v: 1, by: "u8" },
+  { id: "a5", blockId: "pb2", cat: "cad", name: "banqueta_loai.step", size: 2800000, v: 2, by: "u8" },
+  { id: "a6", blockId: "pb2", cat: "finishing", name: "acabamentos_loai.pdf", size: 1500000, v: 1, by: "u8" },
+  { id: "a7", blockId: "pb2", cat: "photos", name: "loai_foto.jpg", size: 450000, v: 1, by: "u8" },
+  { id: "a8", blockId: "pb7", cat: "cad", name: "poltrona_acacia_v4.step", size: 5800000, v: 4, by: "u9" },
+  { id: "a9", blockId: "pb7", cat: "finishing", name: "acabamentos_acacia.pdf", size: 2200000, v: 2, by: "u9" },
+  { id: "a10", blockId: "pb7", cat: "photos", name: "acacia_ambientada.jpg", size: 890000, v: 1, by: "u9" },
+  { id: "a11", blockId: "pb7", cat: "videos", name: "acacia_360.mp4", size: 18000000, v: 1, by: "u9" },
+  { id: "a12", blockId: "pb7", cat: "technical_drawing", name: "acacia_tecnico.pdf", size: 1100000, v: 1, by: "u9" },
+  { id: "a13", blockId: "pb7", cat: "3d_block", name: "acacia_bloco.glb", size: 9500000, v: 1, by: "u9" },
+  { id: "a14", blockId: "pb15", cat: "cad", name: "cadeira_capa.step", size: 3500000, v: 2, by: "u10" },
+  { id: "a15", blockId: "pb15", cat: "finishing", name: "acabamentos_capa.pdf", size: 1200000, v: 1, by: "u10" },
+  { id: "a16", blockId: "pb15", cat: "photos", name: "capa_foto_ref.jpg", size: 670000, v: 1, by: "u10" },
+  { id: "a17", blockId: "pb15", cat: "technical_drawing", name: "capa_desenho.pdf", size: 900000, v: 1, by: "u10" },
+  { id: "a18", blockId: "pb3", cat: "cad", name: "puff_umma.dwg", size: 1800000, v: 1, by: "u8" },
+  { id: "a19", blockId: "pb3", cat: "photos", name: "umma_ref.jpg", size: 340000, v: 1, by: "u8" },
 ];
 
 const APPROVALS: SeedApproval[] = [
-  { id: "ap1", blockId: "pb1", type: "material_validation", status: "approved", comment: "Materiais ok.", by: "u2", decided: "u6", at: "2025-03-12" },
-  { id: "ap2", blockId: "pb1", type: "final_validation", status: "approved", comment: "Perfeito! Pode publicar.", by: "u3", decided: "u6", at: "2025-04-08" },
-  { id: "ap3", blockId: "pb5", type: "material_validation", status: "pending", by: "u5", at: "2025-06-01" },
-  { id: "ap4", blockId: "pb11", type: "final_validation", status: "pending", by: "u3", at: "2025-07-10" },
-  { id: "ap5", blockId: "pb9", type: "material_validation", status: "approved", comment: "Modelagem ficou boa.", by: "u2", decided: "u6", at: "2025-06-12" },
+  { id: "ap1", blockId: "pb1", type: "material_validation", status: "approved", comment: "Materiais e acabamentos ok.", by: "u3", decided: "u8", at: "2025-05-20" },
+  { id: "ap2", blockId: "pb1", type: "final_validation", status: "approved", comment: "Aprovado pela marca. Publicar.", by: "u5", decided: "u8", at: "2025-07-15" },
+  { id: "ap3", blockId: "pb4", type: "material_validation", status: "pending", by: "u3", at: "2025-09-01" },
+  { id: "ap4", blockId: "pb7", type: "final_validation", status: "pending", comment: "Aguardando revisão da Acácia.", by: "u3", at: "2026-03-20" },
+  { id: "ap5", blockId: "pb14", type: "final_validation", status: "approved", comment: "Jantar Triz aprovado.", by: "u3", decided: "u9", at: "2025-12-15" },
 ];
 
 const ACTIVITIES: SeedActivity[] = [
-  { id: "al1", blockId: "pb1", userId: "u1", type: "block_created", desc: "Bloco criado", at: "2025-02-01T10:00" },
-  { id: "al2", blockId: "pb1", userId: "u6", type: "asset_uploaded", desc: "CAD enviado: mesa_elegance.dwg", at: "2025-02-05T10:00" },
-  { id: "al3", blockId: "pb1", userId: "u4", type: "status_changed", desc: "Status: Rascunho → Aguardando Arquivos", at: "2025-02-02T10:00" },
-  { id: "al4", blockId: "pb1", userId: "u2", type: "status_changed", desc: "Status: Pronto → Em Modelagem", at: "2025-02-20T10:00" },
-  { id: "al5", blockId: "pb1", userId: "u6", type: "approval_approved", desc: "Material aprovado pelo cliente", at: "2025-03-12T14:00" },
-  { id: "al6", blockId: "pb1", userId: "u3", type: "publication_updated", desc: "Publicação configurada", at: "2025-04-10T14:10" },
-  { id: "al7", blockId: "pb2", userId: "u1", type: "block_created", desc: "Bloco criado", at: "2025-02-10T10:00" },
-  { id: "al8", blockId: "pb2", userId: "u6", type: "asset_revision", desc: "Nova revisão CAD: sofa_premium_v2.step (r2)", at: "2025-03-01T10:00" },
-  { id: "al9", blockId: "pb8", userId: "u1", type: "status_changed", desc: "Bloqueado: Material incorreto do cliente.", at: "2025-05-20T10:00" },
-  { id: "al10", blockId: "pb13", userId: "u7", type: "asset_uploaded", desc: "CAD enviado: cadeira_gamer.step", at: "2025-04-20T10:00" },
-  { id: "al11", blockId: "pb3", userId: "u4", type: "block_created", desc: "Bloco criado", at: "2025-03-01T10:00" },
-  { id: "al12", blockId: "pb6", userId: "u4", type: "status_changed", desc: "Status: Pronto para iniciar", at: "2025-05-01T10:00" },
+  { id: "al1", blockId: "pb1", userId: "u1", type: "block_created", desc: "Bloco criado: Banco Nub", at: "2025-03-15T10:00" },
+  { id: "al2", blockId: "pb1", userId: "u8", type: "asset_uploaded", desc: "CAD enviado: banco_nub_v3.step", at: "2025-03-20T14:00" },
+  { id: "al3", blockId: "pb1", userId: "u3", type: "status_changed", desc: "Status: Em Modelagem → Concluído", at: "2025-05-15T10:00" },
+  { id: "al4", blockId: "pb1", userId: "u8", type: "approval_approved", desc: "Material aprovado pela Escal", at: "2025-05-20T16:00" },
+  { id: "al5", blockId: "pb1", userId: "u5", type: "publication_updated", desc: "Publicação v11 configurada", at: "2025-07-23T14:10" },
+  { id: "al6", blockId: "pb7", userId: "u2", type: "block_created", desc: "Bloco criado: Poltrona Acácia", at: "2024-08-01T10:00" },
+  { id: "al7", blockId: "pb7", userId: "u9", type: "asset_uploaded", desc: "CAD v4 enviado: poltrona_acacia_v4.step", at: "2025-06-10T10:00" },
+  { id: "al8", blockId: "pb22", userId: "u1", type: "status_changed", desc: "Bloqueado: Informações insuficientes do cliente", at: "2025-10-05T10:00" },
+  { id: "al9", blockId: "pb2", userId: "u5", type: "status_changed", desc: "Status: Modelagem → Em Programação", at: "2025-08-20T10:00" },
+  { id: "al10", blockId: "pb13", userId: "u6", type: "status_changed", desc: "Status: Pronto para iniciar (urgente)", at: "2025-11-15T10:00" },
+  { id: "al11", blockId: "pb11", userId: "u5", type: "status_changed", desc: "Cadeira Cota em programação", at: "2025-10-01T10:00" },
+  { id: "al12", blockId: "pb20", userId: "u2", type: "block_created", desc: "Bloco criado: Produto Validação Dexco", at: "2026-03-02T17:00" },
 ];
 
 const PUBLICATIONS: SeedPub[] = [
-  { id: "pub1", blockId: "pb1", url: "https://explorar.archtechtour.com/verget/mesa-elegance/index.html", embed: '<iframe src="https://explorar.archtechtour.com/verget/mesa-elegance/index.html" width="100%" height="600"></iframe>', env: "production", v: 1 },
-  { id: "pub2", blockId: "pb15", url: "https://explorar.archtechtour.com/boobam/suporte-monitor/index.html", embed: '<iframe src="https://explorar.archtechtour.com/boobam/suporte-monitor/index.html" width="100%" height="600"></iframe>', env: "production", v: 1 },
+  { id: "pub1", blockId: "pb1", url: "https://explorar.archtechtour.com/escal/ver-11/banco-nub/index.html", embed: '<iframe src="https://explorar.archtechtour.com/escal/ver-11/banco-nub/index.html" width="100%" height="600"></iframe>', env: "production", v: 11 },
+  { id: "pub2", blockId: "pb5", url: "https://explorar.archtechtour.com/escal/ver-7/mesa-auxiliar-mary/index.html", embed: '<iframe src="https://explorar.archtechtour.com/escal/ver-7/mesa-auxiliar-mary/index.html" width="100%" height="600"></iframe>', env: "production", v: 7 },
+  { id: "pub3", blockId: "pb8", url: "https://explorar.archtechtour.com/estudio-bola/ver-8/banco-piao/index.html", embed: '<iframe src="https://explorar.archtechtour.com/estudio-bola/ver-8/banco-piao/index.html" width="100%" height="600"></iframe>', env: "production", v: 8 },
+  { id: "pub4", blockId: "pb9", url: "https://explorar.archtechtour.com/estudio-bola/ver-8/poltrona-lala/index.html", embed: '<iframe src="https://explorar.archtechtour.com/estudio-bola/ver-8/poltrona-lala/index.html" width="100%" height="600"></iframe>', env: "production", v: 8 },
+  { id: "pub5", blockId: "pb10", url: "https://explorar.archtechtour.com/estudio-bola/ver-8/banco-less/index.html", embed: '<iframe src="https://explorar.archtechtour.com/estudio-bola/ver-8/banco-less/index.html" width="100%" height="600"></iframe>', env: "production", v: 8 },
+  { id: "pub6", blockId: "pb15", url: "https://explorar.archtechtour.com/wentz/ver-11/wentz-cadeira-capa/index.html", embed: '<iframe src="https://explorar.archtechtour.com/wentz/ver-11/wentz-cadeira-capa/index.html" width="100%" height="600"></iframe>', env: "production", v: 11 },
+  { id: "pub7", blockId: "pb17", url: "https://explorar.archtechtour.com/minimal-design/ver-3/cabine-play-xp/index.html", embed: '<iframe src="https://explorar.archtechtour.com/minimal-design/ver-3/cabine-play-xp/index.html" width="100%" height="600"></iframe>', env: "production", v: 3 },
+  { id: "pub8", blockId: "pb21", url: "https://explorar.archtechtour.com/wj/ver-5/umbra/index.html", embed: '<iframe src="https://explorar.archtechtour.com/wj/ver-5/umbra/index.html" width="100%" height="600"></iframe>', env: "production", v: 5 },
 ];
 
 // ============================================================
@@ -589,6 +620,25 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
             <StatusBadge status={b.status} />
           </div>
         ))}
+      </Card>
+      <Card className="p-5 border-l-4 border-l-emerald-400">
+        <div className="flex items-start gap-3">
+          <div className="p-2.5 rounded-lg bg-emerald-50"><Upload className="w-5 h-5 text-emerald-600" /></div>
+          <div className="flex-1">
+            <h3 className="text-sm font-semibold text-slate-700">Enviar Materiais</h3>
+            <p className="text-xs text-slate-500 mt-0.5 mb-3">Envie CAD, acabamentos, fotos e outros materiais para seus blocos em andamento.</p>
+            <button onClick={() => setPage("blocks")} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors">
+              <FileUp className="w-3.5 h-3.5" /> Ir para Meus Blocos
+            </button>
+          </div>
+        </div>
+      </Card>
+      <Card className="p-5">
+        <h3 className="text-sm font-semibold text-slate-700 mb-3">Precisa de ajuda?</h3>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500"><MessageSquare className="w-3.5 h-3.5 text-slate-400" /> Contato: info@archtechtour.com</div>
+          <div className="flex items-center gap-2 text-xs text-slate-500"><Globe className="w-3.5 h-3.5 text-slate-400" /> www.archtechtour.com</div>
+        </div>
       </Card>
     </div>
   );
@@ -1166,18 +1216,81 @@ function ActivityPage() {
 }
 
 function UsersPage() {
+  const { currentUser } = useContext(AppContext);
+  const [users, setUsers] = useState<SeedUser[]>([...USERS]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newRole, setNewRole] = useState<UserRole>("internal_ops");
+  const [newClientId, setNewClientId] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const handleAdd = () => {
+    if (!newName.trim() || !newEmail.trim()) return;
+    const u: SeedUser = {
+      id: `u_${Date.now()}`, name: newName.trim(), email: newEmail.trim(),
+      role: newRole, active: true, ...(newRole === "client" && newClientId ? { clientId: newClientId } : {}),
+    };
+    setUsers([...users, u]); USERS.push(u);
+    setNewName(""); setNewEmail(""); setNewRole("internal_ops"); setNewClientId(""); setShowAdd(false);
+  };
+  const handleDelete = (id: string) => {
+    setUsers(users.filter((u) => u.id !== id));
+    const idx = USERS.findIndex((u) => u.id === id);
+    if (idx >= 0) USERS.splice(idx, 1);
+    setConfirmDelete(null);
+  };
+
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-slate-800">Usuários</h1>
+      <div className="flex items-center justify-between">
+        <div><h1 className="text-xl font-bold text-slate-800">Usuários</h1><p className="text-sm text-slate-500">{users.length} registrados</p></div>
+        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors"><Plus className="w-3.5 h-3.5" /> Novo Usuário</button>
+      </div>
       <Card>
-        <DataTable data={USERS} columns={[
+        <DataTable data={users} columns={[
           { label: "Nome", render: (r: SeedUser) => <p className="text-sm font-medium text-slate-800">{r.name}</p> },
           { label: "Email", render: (r: SeedUser) => <span className="text-sm text-slate-500">{r.email}</span> },
           { label: "Perfil", render: (r: SeedUser) => <Badge className={r.role === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : r.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"}>{ROLE_LABELS[r.role]}</Badge> },
-          { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "—" },
-          { label: "Status", render: (r: SeedUser) => <Badge className="bg-green-50 text-green-700 border-green-200">Ativo</Badge> },
+          { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "\u2014" },
+          { label: "Ações", render: (r: SeedUser) => confirmDelete === r.id ? (
+            <div className="flex gap-1"><button onClick={() => handleDelete(r.id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirmar</button><button onClick={() => setConfirmDelete(null)} className="px-2 py-1 text-xs bg-slate-200 text-slate-600 rounded hover:bg-slate-300">Cancelar</button></div>
+          ) : (
+            <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>
+          )},
         ]} />
       </Card>
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAdd(false)}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <h2 className="text-lg font-bold text-slate-800">Novo Usuário</h2>
+              <button onClick={() => setShowAdd(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div><label className="block text-xs font-medium text-slate-500 mb-1">Nome *</label><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nome completo" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" /></div>
+              <div><label className="block text-xs font-medium text-slate-500 mb-1">Email *</label><input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email@archtechtour.com" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" /></div>
+              <div><label className="block text-xs font-medium text-slate-500 mb-1">Perfil</label>
+                <select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                  {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+              </div>
+              {newRole === "client" && (
+                <div><label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
+                  <select value={newClientId} onChange={(e) => setNewClientId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                    <option value="">Selecione...</option>
+                    {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
+              <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+              <button onClick={handleAdd} disabled={!newName.trim() || !newEmail.trim()} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">Criar Usuário</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -7,3 +7,6 @@ out/
 next-env.d.ts
 _b64.txt
 _decode.js
+src/Nova pasta/
+src/projeto.zip
+*.zip
