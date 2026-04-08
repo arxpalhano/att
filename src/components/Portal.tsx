@@ -25,7 +25,7 @@ type BlockStatus =
 type AssetCategory = "cad" | "finishing" | "photos" | "videos" | "technical_drawing" | "3d_block" | "extra_reference";
 
 interface SeedUser {
-  id: string; email: string; name: string; role: UserRole;
+  id: string; email: string; password: string; name: string; role: UserRole;
   clientId?: string; active: boolean;
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
@@ -38,6 +38,7 @@ interface SeedBlock {
   sku: string; csku: string; title: string; desc?: string;
   svc: ServiceType; status: BlockStatus; pri: Priority;
   owner?: string; backup?: string; created: string; published?: string;
+  clientRevisions?: number; // número de revisões solicitadas pelo cliente
 }
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
@@ -68,29 +69,29 @@ const STATUS_LABELS: Record<BlockStatus, string> = {
 };
 
 const STATUS_COLORS: Record<BlockStatus, string> = {
-  draft: "bg-slate-100 text-slate-600 border-slate-200",
-  awaiting_client_files: "bg-amber-50 text-amber-700 border-amber-200",
-  client_files_under_review: "bg-sky-50 text-sky-700 border-sky-200",
-  ready_to_start: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  in_modeling: "bg-violet-50 text-violet-700 border-violet-200",
-  awaiting_client_material_validation: "bg-orange-50 text-orange-700 border-orange-200",
-  approved_for_programming: "bg-cyan-50 text-cyan-700 border-cyan-200",
-  in_programming: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  internal_review: "bg-pink-50 text-pink-700 border-pink-200",
-  awaiting_client_final_validation: "bg-amber-50 text-amber-700 border-amber-200",
-  approved: "bg-green-50 text-green-700 border-green-200",
-  published: "bg-green-100 text-green-800 border-green-300",
-  blocked: "bg-red-50 text-red-700 border-red-200",
-  on_hold: "bg-slate-50 text-slate-500 border-slate-200",
-  archived: "bg-slate-50 text-slate-400 border-slate-100",
+  draft: "bg-slate-100 text-slate-700 border-slate-300",
+  awaiting_client_files: "bg-amber-50 text-amber-800 border-amber-300",
+  client_files_under_review: "bg-sky-50 text-sky-800 border-sky-300",
+  ready_to_start: "bg-emerald-50 text-emerald-800 border-emerald-300",
+  in_modeling: "bg-violet-50 text-violet-800 border-violet-300",
+  awaiting_client_material_validation: "bg-orange-50 text-orange-800 border-orange-300",
+  approved_for_programming: "bg-cyan-50 text-cyan-800 border-cyan-300",
+  in_programming: "bg-indigo-50 text-indigo-800 border-indigo-300",
+  internal_review: "bg-fuchsia-50 text-fuchsia-800 border-fuchsia-300",
+  awaiting_client_final_validation: "bg-amber-50 text-amber-800 border-amber-300",
+  approved: "bg-emerald-50 text-emerald-800 border-emerald-300",
+  published: "bg-emerald-100 text-emerald-900 border-emerald-400",
+  blocked: "bg-red-50 text-red-800 border-red-300",
+  on_hold: "bg-slate-100 text-slate-700 border-slate-300",
+  archived: "bg-slate-100 text-slate-600 border-slate-300",
 };
 
 const PRIORITY_COLORS: Record<Priority, string> = {
-  low: "text-slate-400", normal: "text-blue-500", high: "text-orange-500", urgent: "text-red-500",
+  low: "text-slate-500", normal: "text-blue-600", high: "text-orange-600", urgent: "text-red-600",
 };
 const PRIORITY_LABELS: Record<Priority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
 const SERVICE_LABELS: Record<ServiceType, string> = { standard: "Standard", plus: "Plus", ultra: "Ultra" };
-const SERVICE_COLORS: Record<ServiceType, string> = { standard: "bg-slate-100 text-slate-600", plus: "bg-blue-100 text-blue-700", ultra: "bg-purple-100 text-purple-700" };
+const SERVICE_COLORS: Record<ServiceType, string> = { standard: "bg-slate-100 text-slate-700 border-slate-300", plus: "bg-blue-50 text-blue-800 border-blue-300", ultra: "bg-violet-50 text-violet-800 border-violet-300" };
 const ROLE_LABELS: Record<UserRole, string> = { admin: "Admin", internal_ops: "Operações", internal_modeling: "Modelagem", internal_programming: "Programação", client: "Cliente" };
 const CATEGORY_LABELS: Record<AssetCategory, string> = {
   cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos",
@@ -124,18 +125,18 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
 // SEED DATA
 // ============================================================
 let USERS: SeedUser[] = [
-  { id: "u1", email: "mpesca@archtechtour.com", name: "Mariana Pesca", role: "admin", active: true },
-  { id: "u2", email: "mpalhano@archtechtour.com", name: "Matheus Palhano", role: "admin", active: true },
-  { id: "u3", email: "vsalles@archtechtour.com", name: "Victor Salles", role: "internal_modeling", active: true },
-  { id: "u4", email: "ijesus@archtechtour.com", name: "Igor Augusto", role: "internal_modeling", active: true },
-  { id: "u5", email: "lliles@archtechtour.com", name: "Lucas Liles", role: "internal_programming", active: true },
-  { id: "u6", email: "info@archtechtour.com", name: "Jéssica Ribeiro", role: "internal_ops", active: true },
-  { id: "u7", email: "financeiro@archtechtour.com", name: "Danielli Nunes", role: "internal_ops", active: true },
-  { id: "u8", email: "contato@escal.com.br", name: "Escal Móveis", role: "client", clientId: "c1", active: true },
-  { id: "u9", email: "contato@estudiobola.com.br", name: "Estúdio Bola", role: "client", clientId: "c2", active: true },
-  { id: "u10", email: "contato@wentz.com.br", name: "Wentz", role: "client", clientId: "c3", active: true },
-  { id: "u11", email: "contato@minimaldesign.com.br", name: "Minimal Design", role: "client", clientId: "c4", active: true },
-  { id: "u12", email: "contato@rsdesign.com.br", name: "RS Design", role: "client", clientId: "c5", active: true },
+  { id: "u1", email: "mpesca@archtechtour.com", password: "arch@2025", name: "Mariana Pesca", role: "admin", active: true },
+  { id: "u2", email: "mpalhano@archtechtour.com", password: "arch@2025", name: "Matheus Palhano", role: "admin", active: true },
+  { id: "u3", email: "vsalles@archtechtour.com", password: "arch@2025", name: "Victor Salles", role: "internal_modeling", active: true },
+  { id: "u4", email: "ijesus@archtechtour.com", password: "arch@2025", name: "Igor Augusto", role: "internal_modeling", active: true },
+  { id: "u5", email: "lliles@archtechtour.com", password: "arch@2025", name: "Lucas Liles", role: "internal_programming", active: true },
+  { id: "u6", email: "info@archtechtour.com", password: "arch@2025", name: "Jéssica Ribeiro", role: "internal_ops", active: true },
+  { id: "u7", email: "financeiro@archtechtour.com", password: "arch@2025", name: "Danielli Nunes", role: "internal_ops", active: true },
+  { id: "u8", email: "contato@escal.com.br", password: "escal@2025", name: "Escal Móveis", role: "client", clientId: "c1", active: true },
+  { id: "u9", email: "contato@estudiobola.com.br", password: "bola@2025", name: "Estúdio Bola", role: "client", clientId: "c2", active: true },
+  { id: "u10", email: "contato@wentz.com.br", password: "wentz@2025", name: "Wentz", role: "client", clientId: "c3", active: true },
+  { id: "u11", email: "contato@minimaldesign.com.br", password: "minimal@2025", name: "Minimal Design", role: "client", clientId: "c4", active: true },
+  { id: "u12", email: "contato@rsdesign.com.br", password: "rsdesign@2025", name: "RS Design", role: "client", clientId: "c5", active: true },
 ];
 
 const CLIENTS: SeedClient[] = [
@@ -308,24 +309,24 @@ function ServiceBadge({ type }: { type: ServiceType }) {
 
 function Card({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={`bg-white rounded-xl border border-slate-200/80 shadow-sm ${onClick ? "cursor-pointer hover:shadow-md hover:border-slate-300 transition-all" : ""} ${className}`}>
+    <div onClick={onClick} className={`bg-white rounded-xl border border-slate-200 shadow-sm ${onClick ? "cursor-pointer hover:shadow-md hover:border-slate-300 hover:-translate-y-0.5 transition-all duration-200" : ""} ${className}`}>
       {children}
     </div>
   );
 }
 
-function MetricCard({ icon: Icon, label, value, sub, color = "text-slate-700", onClick }: {
+function MetricCard({ icon: Icon, label, value, sub, color = "text-slate-800", onClick }: {
   icon: any; label: string; value: number | string; sub?: string; color?: string; onClick?: () => void;
 }) {
   return (
     <Card className="p-5" onClick={onClick}>
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</p>
-          <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
-          {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+          <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{label}</p>
+          <p className={`text-2xl font-bold mt-1.5 ${color}`}>{value}</p>
+          {sub && <p className="text-xs text-slate-500 mt-0.5">{sub}</p>}
         </div>
-        <div className="p-2.5 rounded-lg bg-slate-50"><Icon className="w-5 h-5 text-slate-400" /></div>
+        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100"><Icon className="w-5 h-5 text-slate-400" /></div>
       </div>
     </Card>
   );
@@ -352,9 +353,9 @@ function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; des
 
 function TabBtn({ active, label, count, onClick }: { active: boolean; label: string; count?: number; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${active ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`}>
+    <button onClick={onClick} className={`px-4 py-2 text-sm font-semibold rounded-lg transition-all ${active ? "bg-slate-900 text-white shadow-sm" : "text-slate-600 hover:text-slate-800 hover:bg-slate-100"}`}>
       {label}
-      {count !== undefined && <span className={`ml-1.5 text-xs ${active ? "text-slate-300" : "text-slate-400"}`}>({count})</span>}
+      {count !== undefined && <span className={`ml-1.5 text-xs font-medium ${active ? "text-slate-300" : "text-slate-500"}`}>({count})</span>}
     </button>
   );
 }
@@ -390,45 +391,101 @@ function DataTable({ columns, data, onRowClick }: { columns: any[]; data: any[];
 // ============================================================
 function LoginPage() {
   const { setCurrentUser } = useContext(AppContext);
-  const [selected, setSelected] = useState<SeedUser | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = () => {
+    setError("");
+    setLoading(true);
+    setTimeout(() => {
+      const user = USERS.find((u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password);
+      if (user) {
+        setCurrentUser(user);
+      } else {
+        setError("E-mail ou senha incorretos. Tente novamente.");
+      }
+      setLoading(false);
+    }, 400);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") handleLogin();
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-[#07111f] flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-gradient-to-b from-emerald-500/8 to-transparent rounded-full blur-3xl pointer-events-none" />
+      <div className="w-full max-w-sm relative">
+        {/* Logo */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2.5 mb-2">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <Box className="w-5 h-5 text-white" />
+          <div className="inline-flex flex-col items-center gap-3">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-xl shadow-emerald-500/25">
+              <Box className="w-7 h-7 text-white" />
             </div>
-            <span className="text-2xl font-bold text-white tracking-tight">ArchTechTour</span>
+            <div>
+              <p className="text-xl font-bold text-white tracking-tight">ArchTechTour</p>
+              <p className="text-slate-400 text-sm mt-0.5">Portal de Operações</p>
+            </div>
           </div>
-          <p className="text-slate-400 text-sm mt-1">Portal de Operações</p>
         </div>
-        <Card className="p-6">
-          <p className="text-sm font-medium text-slate-700 mb-4">Selecione um usuário para entrar:</p>
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {USERS.map((u) => (
-              <button key={u.id} onClick={() => setSelected(u)} className={`w-full text-left px-4 py-3 rounded-lg border transition-all flex items-center justify-between group ${selected?.id === u.id ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${selected?.id === u.id ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {u.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">{u.name}</p>
-                    <p className="text-xs text-slate-400">{u.email}</p>
-                  </div>
-                </div>
-                <Badge className={u.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : u.role === "admin" ? "bg-purple-50 text-purple-600 border-purple-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
-                  {ROLE_LABELS[u.role]}
-                </Badge>
-              </button>
-            ))}
+
+        {/* Form */}
+        <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 shadow-2xl">
+          <h2 className="text-base font-semibold text-white mb-5">Entrar na sua conta</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">E-mail</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="seu@email.com"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-white/10 bg-white/8 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-white/10 transition-all"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Senha</label>
+              <div className="relative">
+                <input
+                  type={showPw ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-white/10 bg-white/8 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-white/10 transition-all"
+                />
+                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                  <Eye className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
-          <button onClick={() => selected && setCurrentUser(selected)} disabled={!selected} className="w-full mt-4 py-2.5 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 text-white text-sm font-semibold disabled:opacity-40 hover:from-emerald-600 hover:to-cyan-600 transition-all shadow-sm">
-            Entrar
+
+          {error && (
+            <div className="mt-4 px-3.5 py-2.5 rounded-xl bg-red-500/10 border border-red-400/20 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              <p className="text-xs text-red-300">{error}</p>
+            </div>
+          )}
+
+          <button
+            onClick={handleLogin}
+            disabled={!email.trim() || !password || loading}
+            className="w-full mt-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 text-slate-900 text-sm font-bold disabled:opacity-30 hover:brightness-110 transition-all shadow-lg shadow-emerald-500/20"
+          >
+            {loading ? "Verificando..." : "Entrar"}
           </button>
-          <p className="text-xs text-slate-400 text-center mt-3">MVP — Autenticação simplificada para demonstração</p>
-        </Card>
+
+          <p className="text-xs text-slate-500 text-center mt-4">
+            Problemas para acessar? Entre em contato com{" "}
+            <span className="text-slate-400">info@archtechtour.com</span>
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -462,36 +519,44 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
       ];
 
   return (
-    <aside className={`fixed left-0 top-0 h-full bg-slate-900 text-white z-40 transition-all duration-300 flex flex-col ${collapsed ? "w-[64px]" : "w-[240px]"}`}>
-      <div className="px-4 py-4 flex items-center gap-2 border-b border-slate-800/60">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
+    <aside className={`fixed left-0 top-0 h-full bg-[#0f172a] text-white z-40 transition-all duration-300 flex flex-col border-r border-white/5`} style={{ width: collapsed ? 72 : 256 }}>
+      <div className="px-3 py-4 flex items-center gap-2.5 border-b border-white/8">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
           <Box className="w-4 h-4 text-white" />
         </div>
-        {!collapsed && <span className="text-sm font-bold tracking-tight">ArchTechTour</span>}
-        <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 hover:bg-slate-800 rounded-lg transition-colors">
+        {!collapsed && (
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-bold tracking-tight text-white leading-none">ArchTechTour</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 uppercase tracking-widest font-medium">Portal</p>
+          </div>
+        )}
+        <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 hover:bg-white/10 rounded-lg transition-colors text-slate-400 hover:text-white">
           {collapsed ? <Menu className="w-4 h-4" /> : <X className="w-4 h-4" />}
         </button>
       </div>
       <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => (
-          <button key={item.id} onClick={() => setPage(item.id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${page === item.id ? "bg-slate-800 text-white font-medium" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}>
-            <item.icon className="w-[18px] h-[18px] flex-shrink-0" />
-            {!collapsed && <span className="flex-1 text-left">{item.label}</span>}
-            {!collapsed && item.badge !== undefined && item.badge > 0 && (
-              <span className="bg-red-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full font-bold">{item.badge}</span>
-            )}
-          </button>
-        ))}
+        {navItems.map((item) => {
+          const active = page === item.id;
+          return (
+            <button key={item.id} onClick={() => setPage(item.id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-all ${active ? "bg-white text-slate-900 font-semibold shadow-sm" : "text-slate-400 hover:text-white hover:bg-white/8"}`}>
+              <item.icon className={`w-[18px] h-[18px] flex-shrink-0 ${active ? "text-slate-900" : ""}`} />
+              {!collapsed && <span className="flex-1 text-left">{item.label}</span>}
+              {!collapsed && item.badge !== undefined && item.badge > 0 && (
+                <span className={`text-[11px] leading-none px-1.5 py-0.5 rounded-full font-bold ${active ? "bg-red-100 text-red-600" : "bg-red-500 text-white"}`}>{item.badge}</span>
+              )}
+            </button>
+          );
+        })}
       </nav>
-      <div className="p-3 border-t border-slate-800/60">
-        <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : ""}`}>
-          <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
+      <div className="p-3 border-t border-white/8">
+        <div className={`flex items-center gap-2.5 ${collapsed ? "justify-center" : ""}`}>
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0 ring-2 ring-white/10">
             {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{user.name}</p>
-              <p className="text-[10px] text-slate-500">{ROLE_LABELS[user.role]}</p>
+              <p className="text-sm font-semibold truncate text-white">{user.name}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{ROLE_LABELS[user.role]}</p>
             </div>
           )}
         </div>
@@ -741,7 +806,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
           { label: "Tipo", render: (r: SeedBlock) => <ServiceBadge type={r.svc} /> },
           { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
           { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
-          { label: "Responsável", render: (r: SeedBlock) => <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> },
+          ...(!isClient ? [{ label: "Responsável", render: (r: SeedBlock) => <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> }] : []),
         ]} />
       </Card>
 
@@ -858,6 +923,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const isClient = user.role === "client";
   const [confirmTransition, setConfirmTransition] = useState<BlockStatus | null>(null);
 
+  const MAX_REVISIONS = 3;
+  const revisions = block.clientRevisions ?? 0;
+  const revisionLimitReached = revisions >= MAX_REVISIONS;
+  const revisionWarning = revisions === MAX_REVISIONS - 1;
+
   const handleTransition = (newStatus: BlockStatus) => {
     const updated = blocks.map((b) => b.id === block.id ? { ...b, status: newStatus, ...(newStatus === "published" ? { published: new Date().toISOString().slice(0, 10) } : {}) } : b);
     setBlocks(updated);
@@ -868,6 +938,22 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     };
     setActivities([...activities, newAct]);
     setConfirmTransition(null);
+  };
+
+  // Rejeição do cliente = 1 revisão consumida
+  const handleClientReject = (approvalId: string) => {
+    if (revisionLimitReached) return; // bloqueado — revisão paga
+    const updatedBlocks = blocks.map((b) =>
+      b.id === block.id ? { ...b, clientRevisions: revisions + 1 } : b
+    );
+    setBlocks(updatedBlocks);
+    const act: SeedActivity = {
+      id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
+      type: "approval_rejected",
+      desc: `Revisão ${revisions + 1}/${MAX_REVISIONS} solicitada pelo cliente`,
+      at: new Date().toISOString(),
+    };
+    setActivities([...activities, act]);
   };
 
   const copyEmbed = () => {
@@ -900,13 +986,49 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Informações</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div><p className="text-xs text-slate-400">Contrato</p><p className="font-medium text-slate-700">{contract?.title || "—"}</p></div>
-                <div><p className="text-xs text-slate-400">Bloco Interno Nº</p><p className="font-medium text-slate-700">#{block.n}</p></div>
+                <div><p className="text-xs text-slate-400">Nº do Bloco</p><p className="font-medium text-slate-700">#{block.n}</p></div>
                 <div><p className="text-xs text-slate-400">Criado em</p><p className="font-medium text-slate-700">{fmtDate(block.created)}</p></div>
-                <div><p className="text-xs text-slate-400">Responsável</p><p className="font-medium text-slate-700">{block.owner ? getUserName(block.owner) : "Não atribuído"}</p></div>
-                <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>
+                {!isClient && <div><p className="text-xs text-slate-400">Responsável</p><p className="font-medium text-slate-700">{block.owner ? getUserName(block.owner) : "Não atribuído"}</p></div>}
+                {!isClient && <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>}
                 {block.published && <div><p className="text-xs text-slate-400">Publicado em</p><p className="font-medium text-slate-700">{fmtDate(block.published)}</p></div>}
+                <div>
+                  <p className="text-xs text-slate-400">Revisões utilizadas</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex gap-1">
+                      {[...Array(MAX_REVISIONS)].map((_, i) => (
+                        <div key={i} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${i < revisions ? (revisionLimitReached ? "bg-red-500 border-red-500 text-white" : "bg-amber-400 border-amber-400 text-white") : "border-slate-300 text-slate-300"}`}>{i + 1}</div>
+                      ))}
+                    </div>
+                    <span className={`text-xs font-semibold ${revisionLimitReached ? "text-red-600" : revisionWarning ? "text-amber-600" : "text-slate-500"}`}>
+                      {revisionLimitReached ? "Limite atingido" : `${revisions}/${MAX_REVISIONS}`}
+                    </span>
+                  </div>
+                </div>
               </div>
             </Card>
+            {/* Aviso de revisão */}
+            {isClient && revisionWarning && !revisionLimitReached && (
+              <Card className="p-4 border-l-4 border-l-amber-400 bg-amber-50">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">Atenção: última revisão gratuita</p>
+                    <p className="text-xs text-amber-700 mt-0.5">Você utilizou {revisions} de {MAX_REVISIONS} revisões incluídas. A próxima rejeição gerará um custo adicional conforme contrato.</p>
+                  </div>
+                </div>
+              </Card>
+            )}
+            {isClient && revisionLimitReached && (
+              <Card className="p-4 border-l-4 border-l-red-400 bg-red-50">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-800">Limite de revisões atingido</p>
+                    <p className="text-xs text-red-700 mt-0.5">As {MAX_REVISIONS} revisões gratuitas foram utilizadas. Novas solicitações de revisão estão sujeitas a cobrança adicional. Entre em contato com info@archtechtour.com.</p>
+                  </div>
+                </div>
+              </Card>
+            )}
             {!isClient && validNext.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Transições Disponíveis</h3>
@@ -936,7 +1058,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Atividade</h3>
               <div className="space-y-2">
                 {blockActivities.slice(0, 5).map((act) => (
-                  <div key={act.id} className="flex items-start gap-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" /><div><p className="text-slate-600">{act.desc}</p><p className="text-slate-400">{getUserName(act.userId)} · {fmtDate(act.at)}</p></div></div>
+                  <div key={act.id} className="flex items-start gap-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" /><div><p className="text-slate-600">{act.desc}</p><p className="text-slate-400">{isClient ? fmtDate(act.at) : `${getUserName(act.userId)} · ${fmtDate(act.at)}`}</p></div></div>
                 ))}
               </div>
             </Card>
@@ -986,11 +1108,26 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                     </Badge>
                   </div>
                   {ap.comment && <p className="text-sm text-slate-600 italic">&ldquo;{ap.comment}&rdquo;</p>}
-                  <p className="text-xs text-slate-400 mt-1">Solicitado por {getUserName(ap.by)} em {fmtDate(ap.at)}{ap.decided && ` · Decidido por ${getUserName(ap.decided)}`}</p>
+                  <p className="text-xs text-slate-400 mt-1">Solicitado em {fmtDate(ap.at)}{!isClient && ap.decided ? ` · Decidido por ${getUserName(ap.decided)}` : ""}</p>
                   {ap.status === "pending" && isClient && (
-                    <div className="flex gap-2 mt-3">
-                      <button className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700"><ThumbsUp className="w-3.5 h-3.5" /> Aprovar</button>
-                      <button className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50"><ThumbsDown className="w-3.5 h-3.5" /> Rejeitar</button>
+                    <div className="space-y-2 mt-3">
+                      <div className="flex gap-2">
+                        <button className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
+                          <ThumbsUp className="w-3.5 h-3.5" /> Aprovar
+                        </button>
+                        <button
+                          onClick={() => handleClientReject(ap.id)}
+                          disabled={revisionLimitReached}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <ThumbsDown className="w-3.5 h-3.5" /> Solicitar revisão {revisions < MAX_REVISIONS ? `(${MAX_REVISIONS - revisions} restantes)` : ""}
+                        </button>
+                      </div>
+                      {revisionLimitReached && (
+                        <p className="text-xs text-red-600 font-medium flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Revisões gratuitas esgotadas — contate info@archtechtour.com para solicitar revisão adicional.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1337,16 +1474,16 @@ export default function Portal() {
     <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities }}>
       <div className="min-h-screen bg-slate-50">
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
-        <div className={`transition-all duration-300 ${collapsed ? "ml-[64px]" : "ml-[240px]"}`}>
-          <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-slate-200/60 px-6 py-3 flex items-center justify-between">
-            <p className="text-sm text-slate-600">{isClient ? getClientName(currentUser.clientId!) : "Painel Interno"}</p>
-            <div className="flex items-center gap-3">
+        <div className="transition-all duration-300" style={{ marginLeft: collapsed ? 72 : 256 }}>
+          <header className="sticky top-0 z-30 bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shadow-sm">
+            <p className="text-sm font-medium text-slate-700">{isClient ? getClientName(currentUser.clientId!) : "Painel Interno"}</p>
+            <div className="flex items-center gap-2">
               <button className="p-2 hover:bg-slate-100 rounded-lg relative transition-colors">
                 <Bell className="w-[18px] h-[18px] text-slate-500" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white" />
               </button>
-              <div className="h-5 w-px bg-slate-200" />
-              <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-red-600 transition-colors">
+              <div className="h-5 w-px bg-slate-200 mx-1" />
+              <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
                 <LogOut className="w-4 h-4" /> Sair
               </button>
             </div>
