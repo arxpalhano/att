@@ -865,7 +865,13 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
       const uploadResp = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blockId, clientId, categoria: cat, arquivo: file.name, tamanho: file.size }),
+        body: JSON.stringify({
+          fileName: file.name,
+          fileType: file.type || "application/octet-stream",
+          category: cat,
+          blockId,
+          clientId,
+        }),
       });
       if (!uploadResp.ok) {
         const err = await uploadResp.json().catch(() => ({}));
@@ -888,7 +894,12 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
       const analyzeResp = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fileUrl: readUrl, blockId, categoria: cat, arquivo: file.name }),
+        body: JSON.stringify({
+          fileUrl: readUrl,
+          fileName: file.name,
+          category: cat,
+          mimeType: file.type || "application/octet-stream",
+        }),
       });
       setProgress(95);
       const analysis = analyzeResp.ok ? await analyzeResp.json() : null;
