@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, createContext, useContext, useCallback, ReactNode } from "react";
+import React, { useState, useMemo, createContext, useContext, useCallback, ReactNode, useRef } from "react";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
   Globe, Search, Bell, LogOut, Menu, X, Plus, Upload, Clock,
@@ -276,6 +276,8 @@ interface AppState {
   setBlocks: (b: SeedBlock[]) => void;
   activities: SeedActivity[];
   setActivities: (a: SeedActivity[]) => void;
+  assets: SeedAsset[];
+  setAssets: (a: SeedAsset[]) => void;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -743,7 +745,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
     a.click(); URL.revokeObjectURL(url);
   };
 
-  const handleCreateBlock = (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => {
+  const handleCreateBlock = (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }): string => {
     const clientBlocks = blocks.filter((b) => b.clientId === data.clientId);
     const n = clientBlocks.length + 1;
     const clientCode = getClientCode(data.clientId);
@@ -763,6 +765,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
     setShowCreateModal(false);
     setSelectedBlock(newBlock.id);
     setPage("block_detail");
+    return newBlock.id;
   };
 
   return (
@@ -816,12 +819,267 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
   );
 }
 
+// ============================================================
+// UPLOAD MODAL — S3 upload + Claude AI analysis
+// ============================================================
+interface AnalyzeResult {
+  score: number;
+  approved: boolean;
+  summary: string;
+  issues: string[];
+  suggestions: string[];
+}
+
+function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded }: {
+  blockId: string;
+  clientId: string;
+  allowedCategories?: AssetCategory[];
+  onClose: () => void;
+  onUploaded: (asset: SeedAsset) => void;
+}) {
+  const { currentUser } = useContext(AppContext);
+  const categories = allowedCategories ?? (Object.keys(CATEGORY_LABELS) as AssetCategory[]);
+  const [cat, setCat] = useState<AssetCategory>(categories[0]);
+  const [file, setFile] = useState<File | null>(null);
+  const [stage, setStage] = useState<"idle" | "uploading" | "analyzing" | "done" | "error">("idle");
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFile = (f: File) => { setFile(f); setStage("idle"); setResult(null); setErrorMsg(""); };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  };
+
+  const doUpload = async () => {
+    if (!file) return;
+    setStage("uploading");
+    setProgress(10);
+    setErrorMsg("");
+    try {
+      // 1. Get presigned URL from our API
+      const uploadResp = await fetch("/api/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockId, clientId, categoria: cat, arquivo: file.name, tamanho: file.size }),
+      });
+      if (!uploadResp.ok) {
+        const err = await uploadResp.json().catch(() => ({}));
+        throw new Error(err.error || "Erro ao obter URL de upload");
+      }
+      const { uploadUrl, readUrl, key } = await uploadResp.json();
+      setProgress(30);
+
+      // 2. Upload directly to S3
+      const s3Resp = await fetch(uploadUrl, {
+        method: "PUT",
+        body: file,
+        headers: { "Content-Type": file.type || "application/octet-stream" },
+      });
+      if (!s3Resp.ok) throw new Error("Falha no upload para S3");
+      setProgress(70);
+
+      // 3. AI Analysis
+      setStage("analyzing");
+      const analyzeResp = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileUrl: readUrl, blockId, categoria: cat, arquivo: file.name }),
+      });
+      setProgress(95);
+      const analysis = analyzeResp.ok ? await analyzeResp.json() : null;
+      setProgress(100);
+
+      // 4. Register asset
+      const newAsset: SeedAsset = {
+        id: `ast_${Date.now()}`,
+        blockId,
+        cat,
+        name: file.name,
+        size: file.size,
+        v: 1,
+        by: currentUser?.id ?? "u1",
+      };
+      onUploaded(newAsset);
+      setResult(analysis);
+      setStage("done");
+    } catch (e: unknown) {
+      setStage("error");
+      setErrorMsg(e instanceof Error ? e.message : "Erro desconhecido");
+    }
+  };
+
+  const reset = () => { setFile(null); setStage("idle"); setResult(null); setProgress(0); setErrorMsg(""); };
+
+  const scoreColor = result
+    ? result.score >= 80 ? "text-emerald-600" : result.score >= 50 ? "text-amber-600" : "text-red-600"
+    : "";
+  const scoreBg = result
+    ? result.score >= 80 ? "bg-emerald-50 border-emerald-200" : result.score >= 50 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
+    : "";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800">Upload de Material</h2>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Category selector */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Categoria do Material</label>
+            <select value={cat} onChange={(e) => { setCat(e.target.value as AssetCategory); reset(); }}
+              disabled={stage === "uploading" || stage === "analyzing"}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              {categories.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+            </select>
+          </div>
+
+          {/* Drop zone */}
+          {stage === "idle" && (
+            <div
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+              onClick={() => inputRef.current?.click()}
+              className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/40 transition-all"
+            >
+              <input ref={inputRef} type="file" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+              {file ? (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-center gap-2">
+                    <FileText className="w-5 h-5 text-emerald-500" />
+                    <span className="text-sm font-medium text-slate-700 truncate max-w-xs">{file.name}</span>
+                  </div>
+                  <p className="text-xs text-slate-400">{fmtSize(file.size)} · Clique para trocar</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Upload className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="text-sm font-medium text-slate-500">Arraste ou clique para selecionar</p>
+                  <p className="text-xs text-slate-400">Imagens, PDF, CAD, vídeos…</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Progress bar */}
+          {(stage === "uploading" || stage === "analyzing") && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-slate-100 rounded-full h-2">
+                  <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+                </div>
+                <span className="text-xs text-slate-500 w-8 text-right">{progress}%</span>
+              </div>
+              <p className="text-sm text-center text-slate-500">
+                {stage === "uploading" ? "⬆️ Enviando para S3…" : "🤖 Agente Claude analisando…"}
+              </p>
+            </div>
+          )}
+
+          {/* Error */}
+          {stage === "error" && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2">
+              <p className="text-sm font-medium text-red-700">Erro no upload</p>
+              <p className="text-xs text-red-600">{errorMsg}</p>
+              <button onClick={reset} className="text-xs text-red-600 underline hover:text-red-800">Tentar novamente</button>
+            </div>
+          )}
+
+          {/* Analysis result */}
+          {stage === "done" && result && (
+            <div className={`border rounded-xl p-4 space-y-3 ${scoreBg}`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {result.approved
+                    ? <Check className="w-5 h-5 text-emerald-600" />
+                    : <AlertTriangle className="w-5 h-5 text-red-500" />}
+                  <span className="text-sm font-semibold text-slate-800">
+                    {result.approved ? "Material aprovado" : "Material reprovado"}
+                  </span>
+                </div>
+                <span className={`text-2xl font-bold ${scoreColor}`}>{result.score}<span className="text-sm font-normal text-slate-400">/100</span></span>
+              </div>
+              <p className="text-sm text-slate-600">{result.summary}</p>
+              {result.issues?.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-red-600 uppercase tracking-wide">Problemas encontrados</p>
+                  {result.issues.map((iss, i) => (
+                    <div key={i} className="flex items-start gap-1.5 text-xs text-red-700">
+                      <X className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />{iss}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {result.suggestions?.length > 0 && (
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sugestões</p>
+                  {result.suggestions.map((s, i) => (
+                    <div key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
+                      <span className="text-emerald-500 mt-0.5 flex-shrink-0">→</span>{s}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Done — no analysis (API not configured) */}
+          {stage === "done" && !result && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center gap-3">
+              <Check className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-emerald-800">Arquivo enviado com sucesso</p>
+                <p className="text-xs text-emerald-600">{file?.name} · {fmtSize(file?.size ?? 0)}</p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-between gap-2 p-5 border-t border-slate-100">
+          {stage === "done" ? (
+            <>
+              <button onClick={reset} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+                Enviar outro
+              </button>
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                Concluir
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+              <button
+                onClick={doUpload}
+                disabled={!file || stage === "uploading" || stage === "analyzing"}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
+              >
+                <Upload className="w-4 h-4" />
+                {stage === "uploading" ? "Enviando…" : stage === "analyzing" ? "Analisando…" : "Enviar e Analisar"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Create Block Modal ---
 function CreateBlockModal({ user, onClose, onCreate }: {
   user: SeedUser;
   onClose: () => void;
-  onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => void;
+  onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => string;
 }) {
+  const { assets, setAssets, activities, setActivities } = useContext(AppContext);
   const isClient = user.role === "client";
   const [title, setTitle] = useState("");
   const [clientSku, setClientSku] = useState("");
@@ -829,11 +1087,37 @@ function CreateBlockModal({ user, onClose, onCreate }: {
   const [contractId, setContractId] = useState("");
   const [serviceType, setServiceType] = useState<ServiceType>("standard");
   const [priority, setPriority] = useState<Priority>("normal");
+  // Upload step
+  const [uploadBlockId, setUploadBlockId] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<Record<string, File>>({});
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const availableContracts = CONTRACTS.filter((c) => c.clientId === clientId && c.active);
   const selectedContract = CONTRACTS.find((c) => c.id === contractId);
   const hasCapacity = selectedContract ? selectedContract.usedBlocks < selectedContract.totalBlocks : false;
   const canSubmit = title.trim() && clientSku.trim() && clientId && contractId && hasCapacity;
+  const requiredCats = READINESS_RULES[serviceType] || [];
+
+  // If block was created, show the upload step
+  if (uploadBlockId) {
+    return (
+      <UploadModal
+        blockId={uploadBlockId}
+        clientId={clientId}
+        allowedCategories={Object.keys(CATEGORY_LABELS) as AssetCategory[]}
+        onClose={onClose}
+        onUploaded={(asset) => {
+          setAssets([...assets, asset]);
+          const act: SeedActivity = {
+            id: `al_${Date.now()}`, blockId: uploadBlockId, userId: user.id,
+            type: "asset_uploaded", desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
+            at: new Date().toISOString(),
+          };
+          setActivities([...activities, act]);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -854,7 +1138,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
           {!isClient && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Cliente *</label>
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setContractId(""); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setContractId(""); setPendingFiles({}); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
                 <option value="">Selecione...</option>
                 {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
               </select>
@@ -871,7 +1155,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Tipo de Serviço</label>
-              <select value={serviceType} onChange={(e) => setServiceType(e.target.value as ServiceType)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              <select value={serviceType} onChange={(e) => { setServiceType(e.target.value as ServiceType); setPendingFiles({}); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
                 {(Object.entries(SERVICE_LABELS) as [ServiceType, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
@@ -882,19 +1166,80 @@ function CreateBlockModal({ user, onClose, onCreate }: {
               </select>
             </div>
           </div>
-          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500">
-            <p className="font-medium text-slate-600 mb-1">Materiais obrigatórios ({SERVICE_LABELS[serviceType]}):</p>
-            <div className="flex flex-wrap gap-1.5">
-              {(READINESS_RULES[serviceType] || []).map((cat) => (
-                <span key={cat} className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-600">{CATEGORY_LABELS[cat]}</span>
-              ))}
+
+          {/* File upload per required category */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="bg-slate-50 px-3 py-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-600">Materiais obrigatórios — {SERVICE_LABELS[serviceType]}</p>
+              <span className="text-xs text-slate-400">{Object.keys(pendingFiles).length}/{requiredCats.length} anexados</span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {requiredCats.map((cat) => {
+                const f = pendingFiles[cat];
+                return (
+                  <div key={cat} className="flex items-center justify-between px-3 py-2.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {f
+                        ? <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                        : <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0" />}
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-slate-700">{CATEGORY_LABELS[cat]}</p>
+                        {f && <p className="text-xs text-slate-400 truncate max-w-[200px]">{f.name} · {fmtSize(f.size)}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <input
+                        type="file"
+                        className="hidden"
+                        ref={(el) => { fileInputRefs.current[cat] = el; }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) setPendingFiles((prev) => ({ ...prev, [cat]: file }));
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRefs.current[cat]?.click()}
+                        className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors"
+                      >
+                        {f ? "Trocar" : "Anexar"}
+                      </button>
+                      {f && (
+                        <button
+                          type="button"
+                          onClick={() => setPendingFiles((prev) => { const n = { ...prev }; delete n[cat]; return n; })}
+                          className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
+          {Object.keys(pendingFiles).length > 0 && (
+            <p className="text-xs text-emerald-600 flex items-center gap-1">
+              <Check className="w-3.5 h-3.5" />
+              {Object.keys(pendingFiles).length} arquivo(s) prontos — serão enviados e analisados após criar o bloco
+            </p>
+          )}
         </div>
         <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
-          <button onClick={() => canSubmit && onCreate({ title: title.trim(), clientSku: clientSku.trim(), clientId, contractId, serviceType, priority })} disabled={!canSubmit} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
-            Criar Bloco
+          <button
+            onClick={() => {
+              if (!canSubmit) return;
+              const newId = onCreate({ title: title.trim(), clientSku: clientSku.trim(), clientId, contractId, serviceType, priority });
+              if (Object.keys(pendingFiles).length > 0) {
+                setUploadBlockId(newId);
+              }
+            }}
+            disabled={!canSubmit}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+          >
+            {Object.keys(pendingFiles).length > 0 ? `Criar e Enviar ${Object.keys(pendingFiles).length} arquivo(s)` : "Criar Bloco"}
           </button>
         </div>
       </div>
@@ -906,15 +1251,16 @@ function CreateBlockModal({ user, onClose, onCreate }: {
 // BLOCK DETAIL
 // ============================================================
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
-  const { blocks, setBlocks, activities, setActivities } = useContext(AppContext);
+  const { blocks, setBlocks, activities, setActivities, assets, setAssets } = useContext(AppContext);
   const block = blocks.find((b) => b.id === blockId);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("overview");
+  const [showUpload, setShowUpload] = useState(false);
 
   if (!block) return <EmptyState icon={Package} title="Bloco não encontrado" />;
 
   const contract = CONTRACTS.find((c) => c.id === block.contractId);
-  const blockAssets = ASSETS.filter((a) => a.blockId === block.id);
+  const blockAssets = assets.filter((a) => a.blockId === block.id);
   const blockApprovals = APPROVALS.filter((a) => a.blockId === block.id);
   const blockActivities = activities.filter((a) => a.blockId === block.id).sort((a, b) => b.at.localeCompare(a.at));
   const readiness = checkReadiness(block.id, block.svc);
@@ -1070,9 +1416,21 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-slate-700">Arquivos ({blockAssets.length})</h3>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-medium rounded-lg hover:bg-slate-800 transition-colors"><Upload className="w-3.5 h-3.5" /> Upload</button>
+            <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-medium rounded-lg hover:bg-slate-800 transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5" /> Upload
+            </button>
           </div>
-          {blockAssets.length === 0 ? <EmptyState icon={FileUp} title="Nenhum arquivo enviado" desc="Faça upload dos materiais necessários." /> : (
+          {blockAssets.length === 0 ? (
+            <div
+              onClick={() => setShowUpload(true)}
+              className="cursor-pointer hover:bg-slate-50 rounded-xl transition-colors"
+            >
+              <EmptyState icon={FileUp} title="Nenhum arquivo enviado" desc="Clique em Upload ou aqui para enviar materiais." />
+            </div>
+          ) : (
             <div className="space-y-3">
               {(Object.keys(CATEGORY_LABELS) as AssetCategory[]).map((cat) => {
                 const catAssets = blockAssets.filter((a) => a.cat === cat);
@@ -1092,6 +1450,24 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
             </div>
           )}
         </Card>
+      )}
+
+      {showUpload && (
+        <UploadModal
+          blockId={block.id}
+          clientId={block.clientId}
+          allowedCategories={Object.keys(CATEGORY_LABELS) as AssetCategory[]}
+          onClose={() => setShowUpload(false)}
+          onUploaded={(asset) => {
+            setAssets([...assets, asset]);
+            const act: SeedActivity = {
+              id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
+              type: "asset_uploaded", desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
+              at: new Date().toISOString(),
+            };
+            setActivities([...activities, act]);
+          }}
+        />
       )}
 
       {tab === "approvals" && (
@@ -1352,25 +1728,128 @@ function ActivityPage() {
   );
 }
 
+function UserFormModal({
+  title, onClose, onSave, initial,
+}: {
+  title: string;
+  onClose: () => void;
+  onSave: (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => void;
+  initial?: SeedUser;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
+  const [role, setRole] = useState<UserRole>(initial?.role ?? "internal_ops");
+  const [clientId, setClientId] = useState(initial?.clientId ?? "");
+  const [password, setPassword] = useState(initial?.password ?? "");
+  const [showPw, setShowPw] = useState(false);
+
+  const isEdit = !!initial;
+  const canSave = name.trim() && email.trim() && (!isEdit || password.trim());
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Nome *</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Email *</label>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@archtechtour.com"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              {isEdit ? "Nova Senha" : "Senha *"}
+              {isEdit && <span className="text-slate-400 font-normal ml-1">(obrigatório para salvar)</span>}
+            </label>
+            <div className="relative">
+              <input
+                type={showPw ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isEdit ? "Digite a nova senha..." : "Senha de acesso"}
+                className="w-full px-3 py-2 pr-10 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              />
+              <button type="button" onClick={() => setShowPw(!showPw)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                {showPw
+                  ? <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" /></svg>
+                  : <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                }
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Perfil</label>
+            <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          {role === "client" && (
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                <option value="">Selecione...</option>
+                {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+          <button onClick={() => onSave({ name: name.trim(), email: email.trim(), role, clientId, password })}
+            disabled={!canSave}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+            {isEdit ? "Salvar Alterações" : "Criar Usuário"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UsersPage() {
   const { currentUser } = useContext(AppContext);
   const [users, setUsers] = useState<SeedUser[]>([...USERS]);
   const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newRole, setNewRole] = useState<UserRole>("internal_ops");
-  const [newClientId, setNewClientId] = useState("");
+  const [editingUser, setEditingUser] = useState<SeedUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const handleAdd = () => {
-    if (!newName.trim() || !newEmail.trim()) return;
+  const handleAdd = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
     const u: SeedUser = {
-      id: `u_${Date.now()}`, name: newName.trim(), email: newEmail.trim(),
-      role: newRole, active: true, ...(newRole === "client" && newClientId ? { clientId: newClientId } : {}),
+      id: `u_${Date.now()}`, name: data.name, email: data.email, password: data.password,
+      role: data.role, active: true, ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
     };
-    setUsers([...users, u]); USERS.push(u);
-    setNewName(""); setNewEmail(""); setNewRole("internal_ops"); setNewClientId(""); setShowAdd(false);
+    setUsers([...users, u]);
+    USERS.push(u);
+    setShowAdd(false);
   };
+
+  const handleEdit = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
+    if (!editingUser) return;
+    const updated = users.map((u) =>
+      u.id === editingUser.id
+        ? { ...u, name: data.name, email: data.email, role: data.role, password: data.password, clientId: data.role === "client" && data.clientId ? data.clientId : undefined }
+        : u
+    );
+    setUsers(updated);
+    const idx = USERS.findIndex((u) => u.id === editingUser.id);
+    if (idx >= 0) {
+      USERS[idx] = { ...USERS[idx], name: data.name, email: data.email, role: data.role, password: data.password,
+        clientId: data.role === "client" && data.clientId ? data.clientId : undefined };
+    }
+    setEditingUser(null);
+  };
+
   const handleDelete = (id: string) => {
     setUsers(users.filter((u) => u.id !== id));
     const idx = USERS.findIndex((u) => u.id === id);
@@ -1391,42 +1870,24 @@ function UsersPage() {
           { label: "Perfil", render: (r: SeedUser) => <Badge className={r.role === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : r.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"}>{ROLE_LABELS[r.role]}</Badge> },
           { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "\u2014" },
           { label: "Ações", render: (r: SeedUser) => confirmDelete === r.id ? (
-            <div className="flex gap-1"><button onClick={() => handleDelete(r.id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirmar</button><button onClick={() => setConfirmDelete(null)} className="px-2 py-1 text-xs bg-slate-200 text-slate-600 rounded hover:bg-slate-300">Cancelar</button></div>
+            <div className="flex gap-1">
+              <button onClick={() => handleDelete(r.id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirmar</button>
+              <button onClick={() => setConfirmDelete(null)} className="px-2 py-1 text-xs bg-slate-200 text-slate-600 rounded hover:bg-slate-300">Cancelar</button>
+            </div>
           ) : (
-            <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>
+            <div className="flex gap-2">
+              <button onClick={() => setEditingUser(r)} className="text-xs text-slate-500 hover:text-slate-800 hover:underline">Editar</button>
+              <span className="text-slate-200">|</span>
+              <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>
+            </div>
           )},
         ]} />
       </Card>
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAdd(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-800">Novo Usuário</h2>
-              <button onClick={() => setShowAdd(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div><label className="block text-xs font-medium text-slate-500 mb-1">Nome *</label><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nome completo" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" /></div>
-              <div><label className="block text-xs font-medium text-slate-500 mb-1">Email *</label><input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email@archtechtour.com" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" /></div>
-              <div><label className="block text-xs font-medium text-slate-500 mb-1">Perfil</label>
-                <select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                  {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
-              </div>
-              {newRole === "client" && (
-                <div><label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
-                  <select value={newClientId} onChange={(e) => setNewClientId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                    <option value="">Selecione...</option>
-                    {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-              )}
-            </div>
-            <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
-              <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-              <button onClick={handleAdd} disabled={!newName.trim() || !newEmail.trim()} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">Criar Usuário</button>
-            </div>
-          </div>
-        </div>
+        <UserFormModal title="Novo Usuário" onClose={() => setShowAdd(false)} onSave={handleAdd} />
+      )}
+      {editingUser && (
+        <UserFormModal title="Editar Usuário" onClose={() => setEditingUser(null)} onSave={handleEdit} initial={editingUser} />
       )}
     </div>
   );
@@ -1443,10 +1904,11 @@ export default function Portal() {
   const [selectedContract, setSelectedContract] = useState("");
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
+  const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -1471,7 +1933,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets }}>
       <div className="min-h-screen bg-slate-50">
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
         <div className="transition-all duration-300" style={{ marginLeft: collapsed ? 72 : 256 }}>
