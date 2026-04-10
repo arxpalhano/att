@@ -43,6 +43,8 @@ interface SeedBlock {
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
   name: string; size: number; v: number; by: string;
+  analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; };
+  uploadedAt?: string;
 }
 interface SeedApproval {
   id: string; blockId: string; type: string;
@@ -905,7 +907,7 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
       const analysis = analyzeResp.ok ? await analyzeResp.json() : null;
       setProgress(100);
 
-      // 4. Register asset
+      // 4. Register asset with analysis
       const newAsset: SeedAsset = {
         id: `ast_${Date.now()}`,
         blockId,
@@ -914,6 +916,8 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
         size: file.size,
         v: 1,
         by: currentUser?.id ?? "u1",
+        uploadedAt: new Date().toISOString(),
+        analysis: analysis ?? undefined,
       };
       onUploaded(newAsset);
       setResult(analysis);
@@ -1259,6 +1263,74 @@ function CreateBlockModal({ user, onClose, onCreate }: {
 }
 
 // ============================================================
+// ============================================================
+// ASSET ROW — shows file + expandable AI analysis
+// ============================================================
+function AssetRow({ asset }: { asset: SeedAsset }) {
+  const [expanded, setExpanded] = useState(false);
+  const a = asset.analysis;
+  const scoreColor = a
+    ? a.score >= 80 ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+    : a.score >= 50 ? "text-amber-600 bg-amber-50 border-amber-200"
+    : "text-red-600 bg-red-50 border-red-200"
+    : "";
+
+  return (
+    <div className="border-b border-slate-100 last:border-0">
+      <div className="flex items-center justify-between px-3 py-2.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+          <span className="text-sm text-slate-700 truncate">{asset.name}</span>
+          <Badge className="bg-slate-100 text-slate-500 border-slate-200 flex-shrink-0">v{asset.v}</Badge>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs text-slate-400">{fmtSize(asset.size)}</span>
+          {a ? (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className={`flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full border ${scoreColor}`}
+            >
+              {a.approved ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+              {a.score}/100
+            </button>
+          ) : (
+            <span className="text-xs text-slate-300 italic">sem análise</span>
+          )}
+        </div>
+      </div>
+      {expanded && a && (
+        <div className={`mx-3 mb-3 rounded-xl border p-3 space-y-2 text-xs ${
+          a.score >= 80 ? "bg-emerald-50 border-emerald-200" :
+          a.score >= 50 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
+        }`}>
+          <p className="font-medium text-slate-700">{a.summary}</p>
+          {a.issues?.length > 0 && (
+            <div className="space-y-0.5">
+              <p className="font-semibold text-red-600 uppercase tracking-wide text-[10px]">Problemas</p>
+              {a.issues.map((iss, i) => (
+                <div key={i} className="flex items-start gap-1 text-red-700">
+                  <X className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />{iss}
+                </div>
+              ))}
+            </div>
+          )}
+          {a.suggestions?.length > 0 && (
+            <div className="space-y-0.5">
+              <p className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Sugestões</p>
+              {a.suggestions.map((s, i) => (
+                <div key={i} className="flex items-start gap-1 text-slate-600">
+                  <span className="text-emerald-500 flex-shrink-0">→</span>{s}
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setExpanded(false)} className="text-slate-400 hover:text-slate-600 underline text-[10px]">Fechar</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // BLOCK DETAIL
 // ============================================================
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
@@ -1435,25 +1507,21 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
             </button>
           </div>
           {blockAssets.length === 0 ? (
-            <div
-              onClick={() => setShowUpload(true)}
-              className="cursor-pointer hover:bg-slate-50 rounded-xl transition-colors"
-            >
+            <div onClick={() => setShowUpload(true)} className="cursor-pointer hover:bg-slate-50 rounded-xl transition-colors">
               <EmptyState icon={FileUp} title="Nenhum arquivo enviado" desc="Clique em Upload ou aqui para enviar materiais." />
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {(Object.keys(CATEGORY_LABELS) as AssetCategory[]).map((cat) => {
                 const catAssets = blockAssets.filter((a) => a.cat === cat);
                 if (!catAssets.length) return null;
                 return (
-                  <div key={cat} className="border border-slate-100 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{CATEGORY_LABELS[cat]}</p>
+                  <div key={cat} className="border border-slate-100 rounded-xl overflow-hidden">
+                    <div className="bg-slate-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{CATEGORY_LABELS[cat]}</p>
+                    </div>
                     {catAssets.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between py-1.5">
-                        <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /><span className="text-sm text-slate-700">{a.name}</span><Badge className="bg-slate-100 text-slate-500 border-slate-200">v{a.v}</Badge></div>
-                        <span className="text-xs text-slate-400">{fmtSize(a.size)}</span>
-                      </div>
+                      <AssetRow key={a.id} asset={a} />
                     ))}
                   </div>
                 );
