@@ -68,29 +68,33 @@ const STATUS_LABELS: Record<BlockStatus, string> = {
 };
 
 const STATUS_COLORS: Record<BlockStatus, string> = {
-  draft: "bg-slate-100 text-slate-600 border-slate-200",
-  awaiting_client_files: "bg-amber-50 text-amber-700 border-amber-200",
-  client_files_under_review: "bg-sky-50 text-sky-700 border-sky-200",
-  ready_to_start: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  in_modeling: "bg-violet-50 text-violet-700 border-violet-200",
-  awaiting_client_material_validation: "bg-orange-50 text-orange-700 border-orange-200",
-  approved_for_programming: "bg-cyan-50 text-cyan-700 border-cyan-200",
-  in_programming: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  internal_review: "bg-pink-50 text-pink-700 border-pink-200",
-  awaiting_client_final_validation: "bg-amber-50 text-amber-700 border-amber-200",
-  approved: "bg-green-50 text-green-700 border-green-200",
-  published: "bg-green-100 text-green-800 border-green-300",
-  blocked: "bg-red-50 text-red-700 border-red-200",
-  on_hold: "bg-slate-50 text-slate-500 border-slate-200",
-  archived: "bg-slate-50 text-slate-400 border-slate-100",
+  draft: "border-slate-200/80 bg-slate-100/90 text-slate-600",
+  awaiting_client_files: "border-amber-200/80 bg-amber-50 text-amber-700",
+  client_files_under_review: "border-sky-200/80 bg-sky-50 text-sky-700",
+  ready_to_start: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+  in_modeling: "border-violet-200/80 bg-violet-50 text-violet-700",
+  awaiting_client_material_validation: "border-orange-200/80 bg-orange-50 text-orange-700",
+  approved_for_programming: "border-cyan-200/80 bg-cyan-50 text-cyan-700",
+  in_programming: "border-indigo-200/80 bg-indigo-50 text-indigo-700",
+  internal_review: "border-fuchsia-200/80 bg-fuchsia-50 text-fuchsia-700",
+  awaiting_client_final_validation: "border-amber-200/80 bg-amber-50 text-amber-700",
+  approved: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+  published: "border-emerald-300/80 bg-emerald-500/10 text-emerald-700",
+  blocked: "border-rose-200/80 bg-rose-50 text-rose-700",
+  on_hold: "border-slate-200/80 bg-slate-100/70 text-slate-500",
+  archived: "border-slate-200/60 bg-slate-50 text-slate-400",
 };
 
 const PRIORITY_COLORS: Record<Priority, string> = {
-  low: "text-slate-400", normal: "text-blue-500", high: "text-orange-500", urgent: "text-red-500",
+  low: "text-slate-400", normal: "text-cyan-600", high: "text-amber-600", urgent: "text-rose-600",
 };
 const PRIORITY_LABELS: Record<Priority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
 const SERVICE_LABELS: Record<ServiceType, string> = { standard: "Standard", plus: "Plus", ultra: "Ultra" };
-const SERVICE_COLORS: Record<ServiceType, string> = { standard: "bg-slate-100 text-slate-600", plus: "bg-blue-100 text-blue-700", ultra: "bg-purple-100 text-purple-700" };
+const SERVICE_COLORS: Record<ServiceType, string> = {
+  standard: "border-slate-200/80 bg-slate-100/80 text-slate-600",
+  plus: "border-cyan-200/80 bg-cyan-50 text-cyan-700",
+  ultra: "border-violet-200/80 bg-violet-50 text-violet-700",
+};
 const ROLE_LABELS: Record<UserRole, string> = { admin: "Admin", internal_ops: "Operações", internal_modeling: "Modelagem", internal_programming: "Programação", client: "Cliente" };
 const CATEGORY_LABELS: Record<AssetCategory, string> = {
   cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos",
@@ -283,20 +287,20 @@ const AppContext = createContext<AppState>({} as AppState);
 // ============================================================
 function Badge({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${className}`}>
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] ${className}`}>
       {children}
     </span>
   );
 }
 
 function StatusBadge({ status }: { status: BlockStatus }) {
-  return <Badge className={STATUS_COLORS[status] || "bg-slate-100 text-slate-600"}>{STATUS_LABELS[status] || status}</Badge>;
+  return <Badge className={STATUS_COLORS[status] || "border-slate-200 bg-slate-100 text-slate-600"}>{STATUS_LABELS[status] || status}</Badge>;
 }
 
 function PriorityDot({ priority }: { priority: Priority }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium ${PRIORITY_COLORS[priority]}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${PRIORITY_COLORS[priority]}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_12px_currentColor]" />
       {PRIORITY_LABELS[priority]}
     </span>
   );
@@ -308,79 +312,109 @@ function ServiceBadge({ type }: { type: ServiceType }) {
 
 function Card({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={`bg-white rounded-xl border border-slate-200/80 shadow-sm ${onClick ? "cursor-pointer hover:shadow-md hover:border-slate-300 transition-all" : ""} ${className}`}>
+    <div
+      onClick={onClick}
+      className={`rounded-[28px] border border-slate-200/70 bg-white/88 shadow-[0_18px_54px_-34px_rgba(15,23,42,0.45)] backdrop-blur-xl ${onClick ? "cursor-pointer transition duration-300 hover:-translate-y-0.5 hover:border-slate-300/80 hover:shadow-[0_26px_70px_-34px_rgba(15,23,42,0.55)]" : ""} ${className}`}
+    >
       {children}
     </div>
   );
 }
 
-function MetricCard({ icon: Icon, label, value, sub, color = "text-slate-700", onClick }: {
+function MetricCard({ icon: Icon, label, value, sub, color = "text-slate-900", onClick }: {
   icon: any; label: string; value: number | string; sub?: string; color?: string; onClick?: () => void;
 }) {
   return (
-    <Card className="p-5" onClick={onClick}>
-      <div className="flex items-start justify-between">
+    <Card className="relative overflow-hidden p-5 md:p-6" onClick={onClick}>
+      <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</p>
-          <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
-          {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{label}</p>
+          <p className={`mt-4 text-[1.85rem] font-semibold tracking-tight ${color}`}>{value}</p>
+          {sub && <p className="mt-2 text-sm leading-6 text-slate-500">{sub}</p>}
         </div>
-        <div className="p-2.5 rounded-lg bg-slate-50"><Icon className="w-5 h-5 text-slate-400" /></div>
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/70 bg-slate-950 text-white shadow-[0_20px_34px_-26px_rgba(15,23,42,0.9)]">
+          <Icon className="h-5 w-5" />
+        </div>
       </div>
     </Card>
   );
 }
 
 function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
-  const color = value === 100 ? "bg-emerald-500" : value >= 60 ? "bg-blue-500" : "bg-amber-500";
+  const color = value === 100 ? "from-emerald-400 to-emerald-500" : value >= 60 ? "from-cyan-400 to-blue-500" : "from-amber-300 to-amber-500";
   return (
-    <div className={`w-full bg-slate-100 rounded-full h-2 ${className}`}>
-      <div className={`h-2 rounded-full transition-all duration-500 ${color}`} style={{ width: `${value}%` }} />
+    <div className={`h-2.5 w-full overflow-hidden rounded-full bg-slate-200/80 ${className}`}>
+      <div className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-500`} style={{ width: `${value}%` }} />
     </div>
   );
 }
 
 function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="p-4 rounded-2xl bg-slate-50 mb-4"><Icon className="w-8 h-8 text-slate-300" /></div>
-      <p className="text-sm font-medium text-slate-500">{title}</p>
-      {desc && <p className="text-xs text-slate-400 mt-1 max-w-xs">{desc}</p>}
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-[24px] border border-slate-200/80 bg-slate-50/90 shadow-inner shadow-white">
+        <Icon className="h-7 w-7 text-slate-300" />
+      </div>
+      <p className="text-sm font-semibold text-slate-700">{title}</p>
+      {desc && <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">{desc}</p>}
     </div>
   );
 }
 
 function TabBtn({ active, label, count, onClick }: { active: boolean; label: string; count?: number; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${active ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`}>
-      {label}
-      {count !== undefined && <span className={`ml-1.5 text-xs ${active ? "text-slate-300" : "text-slate-400"}`}>({count})</span>}
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${active ? "border-slate-950 bg-slate-950 text-white shadow-[0_18px_34px_-22px_rgba(15,23,42,0.75)]" : "border-slate-200/80 bg-white/70 text-slate-500 hover:border-slate-300/90 hover:text-slate-700"}`}
+    >
+      <span>{label}</span>
+      {count !== undefined && (
+        <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-500"}`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
 function DataTable({ columns, data, onRowClick }: { columns: any[]; data: any[]; onRowClick?: (row: any) => void }) {
-  if (!data.length) return <EmptyState icon={Clipboard} title="Nenhum registro encontrado" />;
+  if (!data.length) return <EmptyState icon={Clipboard} title="Nenhum registro encontrado" desc="Tente ajustar os filtros ou criar um novo item." />;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-slate-100">
-            {columns.map((col: any, i: number) => (
-              <th key={i} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{col.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row: any, ri: number) => (
-            <tr key={ri} onClick={() => onRowClick?.(row)} className={`border-b border-slate-50 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} transition-colors`}>
-              {columns.map((col: any, ci: number) => (
-                <td key={ci} className="px-4 py-3 text-sm">{col.render ? col.render(row) : row[col.key]}</td>
+    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/75">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead className="bg-slate-50/85 backdrop-blur">
+            <tr>
+              {columns.map((col: any, i: number) => (
+                <th key={i} className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{col.label}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((row: any, ri: number) => (
+              <tr key={ri} onClick={() => onRowClick?.(row)} className={`group border-t border-slate-100/90 ${onRowClick ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors`}>
+                {columns.map((col: any, ci: number) => (
+                  <td key={ci} className="px-5 py-4 align-top text-sm text-slate-600">{col.render ? col.render(row) : row[col.key]}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        {eyebrow && <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">{eyebrow}</p>}
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-[2.25rem]">{title}</h1>
+        {description && <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">{description}</p>}
+      </div>
+      {action}
     </div>
   );
 }
@@ -393,42 +427,88 @@ function LoginPage() {
   const [selected, setSelected] = useState<SeedUser | null>(null);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2.5 mb-2">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <Box className="w-5 h-5 text-white" />
+    <div className="relative min-h-screen overflow-hidden bg-[#06101d]">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),transparent_28%),radial-gradient(circle_at_85%_12%,_rgba(16,185,129,0.12),transparent_26%),linear-gradient(180deg,rgba(15,23,42,0.18),rgba(2,6,23,0.94))]" />
+      <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.68)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.68)_1px,transparent_1px)] [background-size:72px_72px]" />
+      <div className="relative mx-auto flex min-h-screen max-w-7xl flex-col justify-center gap-10 px-5 py-12 lg:flex-row lg:items-center lg:gap-16">
+        <div className="max-w-xl flex-1 text-white">
+          <div className="inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 backdrop-blur">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 via-cyan-400 to-sky-500 shadow-[0_10px_30px_-10px_rgba(34,211,238,0.55)]">
+              <Box className="h-5 w-5 text-white" />
             </div>
-            <span className="text-2xl font-bold text-white tracking-tight">ArchTechTour</span>
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-300">ArchTechTour</p>
+              <p className="text-sm font-medium text-white">Portal de Operações</p>
+            </div>
           </div>
-          <p className="text-slate-400 text-sm mt-1">Portal de Operações</p>
-        </div>
-        <Card className="p-6">
-          <p className="text-sm font-medium text-slate-700 mb-4">Selecione um usuário para entrar:</p>
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {USERS.map((u) => (
-              <button key={u.id} onClick={() => setSelected(u)} className={`w-full text-left px-4 py-3 rounded-lg border transition-all flex items-center justify-between group ${selected?.id === u.id ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${selected?.id === u.id ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {u.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">{u.name}</p>
-                    <p className="text-xs text-slate-400">{u.email}</p>
-                  </div>
-                </div>
-                <Badge className={u.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : u.role === "admin" ? "bg-purple-50 text-purple-600 border-purple-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
-                  {ROLE_LABELS[u.role]}
-                </Badge>
-              </button>
+          <h1 className="mt-8 text-4xl font-semibold leading-tight tracking-tight text-white md:text-5xl">
+            Uma entrada mais premium, mais autoral e menos parecida com template genérico.
+          </h1>
+          <p className="mt-5 max-w-xl text-base leading-7 text-slate-300">
+            Esta nova camada visual aproxima o portal do posicionamento da ArchTechTour: tecnologia aplicada ao mercado de arquitetura, com mais sofisticação, clareza e identidade própria.
+          </p>
+          <div className="mt-8 grid gap-3 sm:grid-cols-3">
+            {[
+              { title: "Customização", desc: "Fluxos alinhados a acabamentos, validações e experiência digital." },
+              { title: "Multiplataforma", desc: "Uma interface que conversa com catálogo, 3D e publicação." },
+              { title: "Curadoria", desc: "Mais respiro visual, melhor hierarquia e sensação premium." },
+            ].map((item) => (
+              <div key={item.title} className="rounded-[24px] border border-white/10 bg-white/5 p-4 backdrop-blur">
+                <p className="text-sm font-semibold text-white">{item.title}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">{item.desc}</p>
+              </div>
             ))}
           </div>
-          <button onClick={() => selected && setCurrentUser(selected)} disabled={!selected} className="w-full mt-4 py-2.5 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 text-white text-sm font-semibold disabled:opacity-40 hover:from-emerald-600 hover:to-cyan-600 transition-all shadow-sm">
-            Entrar
-          </button>
-          <p className="text-xs text-slate-400 text-center mt-3">MVP — Autenticação simplificada para demonstração</p>
-        </Card>
+        </div>
+        <div className="w-full max-w-xl">
+          <Card className="border-white/10 bg-white/10 shadow-[0_38px_120px_-48px_rgba(15,23,42,0.95)] backdrop-blur-2xl">
+            <div className="rounded-[30px] border border-white/10 bg-slate-950/55 p-6 md:p-7">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/80">Acesso rápido</p>
+                  <h2 className="mt-3 text-2xl font-semibold tracking-tight text-white">Escolha um perfil para visualizar o portal</h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-300">Modo de demonstração com perfis internos e de cliente.</p>
+                </div>
+                <Badge className="border-white/10 bg-white/5 text-slate-200">{USERS.length} perfis</Badge>
+              </div>
+              <div className="mt-6 space-y-2.5 max-h-[26rem] overflow-y-auto pr-1">
+                {USERS.map((u) => {
+                  const isSelected = selected?.id === u.id;
+                  return (
+                    <button
+                      key={u.id}
+                      onClick={() => setSelected(u)}
+                      className={`group w-full rounded-[22px] border px-4 py-4 text-left transition-all ${isSelected ? "border-cyan-400/40 bg-cyan-400/10 shadow-[0_18px_30px_-24px_rgba(34,211,238,0.65)]" : "border-white/8 bg-white/[0.04] hover:border-white/14 hover:bg-white/[0.08]"}`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className={`flex h-11 w-11 items-center justify-center rounded-2xl text-xs font-bold ${isSelected ? "bg-gradient-to-br from-cyan-400 to-emerald-400 text-slate-950" : "bg-white/10 text-slate-200"}`}>
+                            {u.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-white">{u.name}</p>
+                            <p className="truncate text-xs text-slate-400">{u.email}</p>
+                          </div>
+                        </div>
+                        <Badge className={u.role === "client" ? "border-cyan-400/20 bg-cyan-400/10 text-cyan-100" : u.role === "admin" ? "border-violet-400/20 bg-violet-400/10 text-violet-100" : "border-white/10 bg-white/5 text-slate-300"}>
+                          {ROLE_LABELS[u.role]}
+                        </Badge>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                onClick={() => selected && setCurrentUser(selected)}
+                disabled={!selected}
+                className="mt-6 w-full rounded-2xl bg-gradient-to-r from-emerald-400 via-cyan-400 to-sky-500 px-4 py-3 text-sm font-semibold text-slate-950 transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Entrar no portal
+              </button>
+              <p className="mt-4 text-center text-xs text-slate-400">MVP focado em interface, hierarquia visual e experiência.</p>
+            </div>
+          </Card>
+        </div>
       </div>
     </div>
   );
@@ -440,8 +520,14 @@ function LoginPage() {
 function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   page: string; setPage: (p: string) => void; user: SeedUser; collapsed: boolean; setCollapsed: (c: boolean) => void;
 }) {
+  const { blocks } = useContext(AppContext);
   const isClient = user.role === "client";
-  const pendingApprovals = APPROVALS.filter((a) => a.status === "pending").length;
+  const pendingApprovals = APPROVALS.filter((a) => {
+    if (a.status !== "pending") return false;
+    if (!isClient) return true;
+    const relatedBlock = blocks.find((b) => b.id === a.blockId);
+    return relatedBlock?.clientId === user.clientId;
+  }).length;
 
   const navItems = isClient
     ? [
@@ -461,39 +547,67 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "users", icon: Settings, label: "Usuários" },
       ];
 
+  const workspaceLabel = isClient ? getClientName(user.clientId!) : "Operação Interna";
+
   return (
-    <aside className={`fixed left-0 top-0 h-full bg-slate-900 text-white z-40 transition-all duration-300 flex flex-col ${collapsed ? "w-[64px]" : "w-[240px]"}`}>
-      <div className="px-4 py-4 flex items-center gap-2 border-b border-slate-800/60">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
-          <Box className="w-4 h-4 text-white" />
-        </div>
-        {!collapsed && <span className="text-sm font-bold tracking-tight">ArchTechTour</span>}
-        <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 hover:bg-slate-800 rounded-lg transition-colors">
-          {collapsed ? <Menu className="w-4 h-4" /> : <X className="w-4 h-4" />}
-        </button>
-      </div>
-      <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => (
-          <button key={item.id} onClick={() => setPage(item.id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${page === item.id ? "bg-slate-800 text-white font-medium" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}>
-            <item.icon className="w-[18px] h-[18px] flex-shrink-0" />
-            {!collapsed && <span className="flex-1 text-left">{item.label}</span>}
-            {!collapsed && item.badge !== undefined && item.badge > 0 && (
-              <span className="bg-red-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full font-bold">{item.badge}</span>
-            )}
-          </button>
-        ))}
-      </nav>
-      <div className="p-3 border-t border-slate-800/60">
-        <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : ""}`}>
-          <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
-            {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-          </div>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{user.name}</p>
-              <p className="text-[10px] text-slate-500">{ROLE_LABELS[user.role]}</p>
+    <aside className={`fixed left-0 top-0 z-40 flex h-full flex-col border-r border-white/6 bg-[#07111f]/96 text-white backdrop-blur-xl transition-all duration-300 ${collapsed ? "w-[88px]" : "w-[280px]"}`}>
+      <div className="p-4 pb-3">
+        <div className="rounded-[28px] border border-white/10 bg-white/5 p-3 shadow-[0_24px_48px_-36px_rgba(15,23,42,0.9)]">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 via-cyan-400 to-sky-500 shadow-[0_12px_30px_-12px_rgba(34,211,238,0.55)]">
+              <Box className="h-5 w-5 text-white" />
             </div>
-          )}
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">ArchTechTour</p>
+                <p className="mt-1 text-sm font-semibold text-white">Portal premium</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{workspaceLabel}</p>
+              </div>
+            )}
+            <button onClick={() => setCollapsed(!collapsed)} className="ml-auto flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white">
+              {collapsed ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {!collapsed && <p className="px-6 pb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Navegação</p>}
+
+      <nav className="flex-1 space-y-1 px-3 py-2">
+        {navItems.map((item) => {
+          const active = page === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setPage(item.id)}
+              className={`group relative flex w-full items-center gap-3 rounded-[20px] px-3.5 py-3 text-sm transition ${active ? "bg-white text-slate-950 shadow-[0_18px_40px_-28px_rgba(255,255,255,0.75)]" : "text-slate-400 hover:bg-white/7 hover:text-white"}`}
+            >
+              {active && !collapsed && <span className="absolute left-0 top-3 bottom-3 w-1 rounded-r-full bg-gradient-to-b from-cyan-400 to-emerald-400" />}
+              <item.icon className={`h-[18px] w-[18px] flex-shrink-0 ${active ? "text-slate-950" : "text-slate-500 group-hover:text-white"}`} />
+              {!collapsed && <span className="flex-1 text-left font-semibold">{item.label}</span>}
+              {!collapsed && item.badge !== undefined && item.badge > 0 && (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${active ? "bg-rose-100 text-rose-600" : "bg-rose-500/15 text-rose-300"}`}>
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="p-4 pt-3">
+        <div className={`rounded-[24px] border border-white/10 bg-white/5 p-3 ${collapsed ? "flex justify-center" : ""}`}>
+          <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-xs font-bold text-white">
+              {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+            </div>
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+                <p className="mt-0.5 text-xs text-slate-400">{ROLE_LABELS[user.role]}</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </aside>
@@ -509,66 +623,188 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
   blocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
   const pending = APPROVALS.filter((a) => a.status === "pending").length;
   const recent = [...ACTIVITIES].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
+  const activeClients = CLIENTS.map((client) => ({
+    ...client,
+    count: blocks.filter((b) => b.clientId === client.id).length,
+  })).filter((client) => client.count > 0).sort((a, b) => b.count - a.count);
 
   const pipeline = [
     { s: "awaiting_client_files" as BlockStatus, icon: Clock, color: "text-amber-500" },
     { s: "ready_to_start" as BlockStatus, icon: Play, color: "text-emerald-500" },
     { s: "in_modeling" as BlockStatus, icon: Layers, color: "text-violet-500" },
     { s: "in_programming" as BlockStatus, icon: Zap, color: "text-indigo-500" },
-    { s: "internal_review" as BlockStatus, icon: Eye, color: "text-pink-500" },
+    { s: "internal_review" as BlockStatus, icon: Eye, color: "text-fuchsia-500" },
     { s: "awaiting_client_final_validation" as BlockStatus, icon: UserCheck, color: "text-amber-500" },
-    { s: "approved" as BlockStatus, icon: ThumbsUp, color: "text-green-500" },
-    { s: "published" as BlockStatus, icon: Globe, color: "text-green-600" },
+    { s: "approved" as BlockStatus, icon: ThumbsUp, color: "text-emerald-600" },
+    { s: "published" as BlockStatus, icon: Globe, color: "text-emerald-600" },
   ];
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-xl font-bold text-slate-800">Dashboard Interno</h1><p className="text-sm text-slate-500 mt-0.5">Visão geral do pipeline de produção</p></div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard icon={Package} label="Total Blocos" value={blocks.length} />
-        <MetricCard icon={AlertTriangle} label="Bloqueados" value={byStatus["blocked"] || 0} color="text-red-600" />
-        <MetricCard icon={CheckCircle} label="Aprovações Pendentes" value={pending} color="text-amber-600" />
-        <MetricCard icon={Globe} label="Publicados" value={byStatus["published"] || 0} color="text-green-600" />
+      <SectionHeader
+        eyebrow="Painel interno"
+        title="Pipeline digital com mais clareza"
+        description="Uma leitura mais sofisticada do fluxo operacional, aproximando o portal da linguagem de produto e tecnologia da ArchTechTour."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{blocks.length} blocos monitorados</Badge>}
+      />
+
+      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.9fr]">
+        <Card className="relative overflow-hidden border-slate-950/70 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.28),_rgba(6,17,29,1)_44%,_rgba(6,17,29,1)_100%)] p-6 text-white md:p-8">
+          <div className="absolute inset-0 opacity-[0.1] [background-image:linear-gradient(rgba(255,255,255,0.62)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.62)_1px,transparent_1px)] [background-size:52px_52px]" />
+          <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
+          <div className="relative">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="border-white/10 bg-white/8 text-slate-100">Operações ArchTechTour</Badge>
+              <Badge className="border-cyan-400/15 bg-cyan-400/10 text-cyan-100">Produção + validação + publicação</Badge>
+            </div>
+            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.25rem]">Toda a operação em uma interface mais editorial e menos genérica.</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+              O foco aqui é dar leitura rápida para bloqueios, aprovações, produção e publicações, sem cair na estética padrão de dashboard pronto.
+            </p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                { label: "Total de blocos", value: blocks.length, sub: "Base monitorada" },
+                { label: "Bloqueados", value: byStatus["blocked"] || 0, sub: "Pedem atenção" },
+                { label: "Aprovações", value: pending, sub: "Pendentes" },
+                { label: "Publicados", value: byStatus["published"] || 0, sub: "Ao vivo" },
+              ].map((item) => (
+                <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/6 p-4 backdrop-blur">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{item.value}</p>
+                  <p className="mt-2 text-sm text-slate-300">{item.sub}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+          <Card className="p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Atalhos</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Ações mais importantes</h3>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/70 bg-slate-950 text-white">
+                <ChevronRight className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {[
+                { label: "Fila de trabalho", desc: "Distribua e acompanhe responsáveis", onClick: () => setPage("queue") },
+                { label: "Aprovações pendentes", desc: "Validações aguardando ação", onClick: () => setPage("approvals") },
+                { label: "Todos os blocos", desc: "Faça leituras mais amplas da operação", onClick: () => setPage("blocks") },
+              ].map((item) => (
+                <button key={item.label} onClick={item.onClick} className="flex w-full items-center justify-between rounded-[22px] border border-slate-200/80 bg-slate-50/70 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{item.label}</p>
+                    <p className="mt-1 text-sm text-slate-500">{item.desc}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <MetricCard
+            icon={AlertTriangle}
+            label="Bloqueios"
+            value={byStatus["blocked"] || 0}
+            sub="Itens que precisam de destravamento operacional ou retorno do cliente."
+            color="text-rose-600"
+            onClick={() => setPage("queue")}
+          />
+        </div>
       </div>
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">Pipeline de Produção</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+
+      <Card className="p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pipeline</p>
+            <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Produção em andamento</h3>
+          </div>
+          <p className="max-w-xl text-sm leading-6 text-slate-500">Os estágios principais aparecem como uma esteira visual para priorização rápida do time.</p>
+        </div>
+        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {pipeline.map(({ s, icon: Icon, color }) => (
-            <button key={s} onClick={() => setPage("blocks")} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors text-left">
-              <Icon className={`w-5 h-5 ${color} flex-shrink-0`} />
-              <div><p className="text-lg font-bold text-slate-800">{byStatus[s] || 0}</p><p className="text-xs text-slate-500 leading-tight">{STATUS_LABELS[s]}</p></div>
+            <button key={s} onClick={() => setPage("blocks")} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{STATUS_LABELS[s]}</p>
+                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{byStatus[s] || 0}</p>
+                </div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50">
+                  <Icon className={`h-5 w-5 ${color}`} />
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-between text-sm text-slate-500">
+                <span>Ver detalhes</span>
+                <ChevronRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+              </div>
             </button>
           ))}
         </div>
       </Card>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">Blocos por Cliente</h3>
-          {CLIENTS.map((cl) => {
-            const count = blocks.filter((b) => b.clientId === cl.id).length;
-            return (
-              <div key={cl.id} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500">{cl.code.slice(0, 2)}</div>
-                  <span className="text-sm font-medium text-slate-700">{cl.name}</span>
-                </div>
-                <span className="text-sm font-bold text-slate-800">{count}</span>
-              </div>
-            );
-          })}
-        </Card>
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">Atividade Recente</h3>
-            <button onClick={() => setPage("activity")} className="text-xs text-blue-600 hover:underline">Ver tudo</button>
+
+      <div className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Clientes ativos</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Carga por marca</h3>
+            </div>
+            <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{activeClients.length} contas</Badge>
           </div>
-          <div className="space-y-2.5 max-h-64 overflow-y-auto">
-            {recent.map((act) => (
-              <div key={act.id} className="flex items-start gap-2.5 text-xs">
-                <Activity className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0"><p className="text-slate-600 truncate">{act.desc}</p><p className="text-slate-400">{getUserName(act.userId)} · {fmtDate(act.at)}</p></div>
-              </div>
-            ))}
+          <div className="mt-6 space-y-4">
+            {activeClients.map((client) => {
+              const pct = Math.round((client.count / blocks.length) * 100);
+              return (
+                <div key={client.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-xs font-semibold text-slate-600 shadow-sm">
+                        {client.code.slice(0, 2)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{client.name}</p>
+                        <p className="text-xs text-slate-400">{client.count} blocos no pipeline</p>
+                      </div>
+                    </div>
+                    <p className="text-sm font-semibold text-slate-700">{pct}%</p>
+                  </div>
+                  <ProgressBar value={pct} className="mt-4" />
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Atividade recente</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Movimentações da operação</h3>
+            </div>
+            <button onClick={() => setPage("activity")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver tudo</button>
+          </div>
+          <div className="mt-6 space-y-3">
+            {recent.map((act) => {
+              const block = blocks.find((b) => b.id === act.blockId);
+              return (
+                <div key={act.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/75 p-4">
+                  <div className="flex gap-3">
+                    <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm">
+                      <Activity className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-800">{act.desc}</p>
+                      <p className="mt-1 text-sm text-slate-500">{getUserName(act.userId)}</p>
+                      <p className="mt-2 text-xs text-slate-400">{block?.sku ? `${block.sku} · ` : ""}{fmtDate(act.at)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -587,59 +823,239 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
   const used = ctrs.reduce((s, c) => s + c.usedBlocks, 0);
   const myBlocks = blocks.filter((b) => b.clientId === cid);
   const awaiting = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).length;
+  const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "approved_for_programming", "in_programming", "internal_review"].includes(b.status)).length;
+  const publishedCount = myBlocks.filter((b) => b.status === "published").length;
+  const contractUsage = contracted ? Math.round((used / contracted) * 100) : 0;
+  const latestContract = [...ctrs].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
   const byStatus: Record<string, number> = {};
   myBlocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
+  const nextActions = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).slice(0, 3);
+  const liveBlocks = myBlocks.filter((b) => b.status === "published").slice(0, 3);
+  const statusSummary = Object.entries(byStatus).sort((a, b) => b[1] - a[1]).slice(0, 6);
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-xl font-bold text-slate-800">Olá, {user.name.split(" ")[0]}!</h1><p className="text-sm text-slate-500">{getClientName(cid)}</p></div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard icon={FileText} label="Contratados" value={contracted} />
-        <MetricCard icon={Package} label="Utilizados" value={used} />
-        <MetricCard icon={Box} label="Disponíveis" value={contracted - used} color="text-emerald-600" />
-        <MetricCard icon={AlertTriangle} label="Aguardando Ação" value={awaiting} color="text-amber-600" />
-      </div>
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Meus Blocos por Status</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {Object.entries(byStatus).sort((a, b) => b[1] - a[1]).map(([st, cnt]) => (
-            <div key={st} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50">
-              <StatusBadge status={st as BlockStatus} /><span className="text-sm font-bold text-slate-700">{cnt}</span>
+      <SectionHeader
+        eyebrow="Portal do cliente"
+        title={`Olá, ${user.name.split(" ")[0]}. Seu acervo digital está centralizado aqui.`}
+        description="O dashboard foi redesenhado para ficar mais próximo da linguagem da ArchTechTour: mais premium, mais editorial e menos parecido com interface genérica pronta."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{getClientName(cid)}</Badge>}
+      />
+
+      <div className="grid gap-4 xl:grid-cols-[1.28fr_0.92fr]">
+        <Card className="relative overflow-hidden border-slate-950/70 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.18),_rgba(6,17,29,1)_48%,_rgba(6,17,29,1)_100%)] p-6 text-white md:p-8">
+          <div className="absolute inset-0 opacity-[0.1] [background-image:linear-gradient(rgba(255,255,255,0.62)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.62)_1px,transparent_1px)] [background-size:52px_52px]" />
+          <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
+          <div className="relative">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="border-white/10 bg-white/8 text-slate-100">Workspace premium</Badge>
+              <Badge className="border-cyan-400/15 bg-cyan-400/10 text-cyan-100">Contrato, produção e publicações</Badge>
             </div>
-          ))}
-        </div>
-      </Card>
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-700">Blocos Recentes</h3>
-          <button onClick={() => setPage("blocks")} className="text-xs text-blue-600 hover:underline">Ver todos</button>
-        </div>
-        {myBlocks.slice(0, 5).map((b) => (
-          <div key={b.id} onClick={() => { setSelectedBlock(b.id); setPage("block_detail"); }} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded transition-colors">
-            <div><p className="text-sm font-medium text-slate-700">{b.title}</p><p className="text-xs text-slate-400">{b.csku}</p></div>
-            <StatusBadge status={b.status} />
+            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.3rem]">Uma leitura mais elegante do contrato e dos blocos da sua marca.</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+              Em vez de uma grade repetitiva de cards, o foco passa a ser contexto, estado da coleção e próximas ações com mais clareza.
+            </p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              {[
+                { label: "Contratados", value: contracted, sub: "capacidade disponível" },
+                { label: "Publicados", value: publishedCount, sub: "já ao vivo" },
+                { label: "Aguardando ação", value: awaiting, sub: "arquivos ou validação" },
+              ].map((item) => (
+                <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/6 p-4 backdrop-blur">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{item.value}</p>
+                  <p className="mt-2 text-sm text-slate-300">{item.sub}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button onClick={() => setPage("blocks")} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
+                <FileUp className="h-4 w-4" />
+                Enviar materiais
+              </button>
+              <button onClick={() => setPage("contracts")} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10">
+                <FileText className="h-4 w-4" />
+                Ver contrato
+              </button>
+            </div>
           </div>
-        ))}
-      </Card>
-      <Card className="p-5 border-l-4 border-l-emerald-400">
-        <div className="flex items-start gap-3">
-          <div className="p-2.5 rounded-lg bg-emerald-50"><Upload className="w-5 h-5 text-emerald-600" /></div>
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-slate-700">Enviar Materiais</h3>
-            <p className="text-xs text-slate-500 mt-0.5 mb-3">Envie CAD, acabamentos, fotos e outros materiais para seus blocos em andamento.</p>
-            <button onClick={() => setPage("blocks")} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors">
-              <FileUp className="w-3.5 h-3.5" /> Ir para Meus Blocos
-            </button>
+        </Card>
+
+        <div className="grid gap-4">
+          <Card className="p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Contrato ativo</p>
+                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{latestContract?.title || "Contrato ArchTechTour"}</h3>
+                <p className="mt-2 text-sm text-slate-500">Início em {latestContract ? fmtDate(latestContract.startDate) : "—"}</p>
+              </div>
+              <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{contractUsage}% em uso</Badge>
+            </div>
+            <div className="mt-5 rounded-[22px] border border-slate-200/80 bg-slate-50/80 p-4">
+              <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
+                <span>Uso do contrato</span>
+                <span>{used} de {contracted}</span>
+              </div>
+              <ProgressBar value={contractUsage} className="mt-4" />
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Disponíveis</p>
+                  <p className="mt-2 text-2xl font-semibold text-emerald-600">{contracted - used}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Em produção</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900">{inProduction}</p>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Próximas ações</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">O que pede sua atenção agora</h3>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-950 text-white">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {nextActions.length ? nextActions.map((block) => (
+                <button key={block.id} onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[22px] border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+                    <p className="mt-1 text-sm text-slate-500">{block.csku}</p>
+                    <div className="mt-3"><StatusBadge status={block.status} /></div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                </button>
+              )) : (
+                <EmptyState icon={CheckCircle} title="Tudo em ordem" desc="No momento não há itens pendentes de ação do cliente." />
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Momento da coleção</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Distribuição dos seus blocos</h3>
+            </div>
+            <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{myBlocks.length} itens</Badge>
           </div>
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {statusSummary.map(([st, cnt]) => (
+              <div key={st} className="rounded-[22px] border border-slate-200/80 bg-slate-50/70 p-4">
+                <StatusBadge status={st as BlockStatus} />
+                <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{cnt}</p>
+                <p className="mt-2 text-sm text-slate-500">Blocos nesta etapa</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Publicações</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Peças já publicadas</h3>
+            </div>
+            <Badge className="border-emerald-200/80 bg-emerald-50 text-emerald-700">{publishedCount} ao vivo</Badge>
+          </div>
+          <div className="mt-6 space-y-3">
+            {liveBlocks.length ? liveBlocks.map((block) => {
+              const publication = PUBLICATIONS.find((pub) => pub.blockId === block.id);
+              return (
+                <div key={block.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/75 p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+                      <p className="mt-1 text-sm text-slate-500">{block.csku}</p>
+                    </div>
+                    <StatusBadge status={block.status} />
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                    <span>Publicação {publication ? `v${publication.v}` : "ativa"}</span>
+                    {publication && (
+                      <a href={publication.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-cyan-700 transition hover:text-cyan-800">
+                        Abrir experiência
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            }) : (
+              <EmptyState icon={Globe} title="Nenhuma publicação ao vivo" desc="Assim que um bloco for publicado, ele aparecerá aqui com acesso rápido." />
+            )}
+          </div>
+        </Card>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Blocos recentes</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Acompanhe os últimos movimentos</h3>
+            </div>
+            <button onClick={() => setPage("blocks")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver todos</button>
+          </div>
+          <div className="mt-6 space-y-3">
+            {myBlocks.slice(0, 5).map((b) => (
+              <button key={b.id} onClick={() => { setSelectedBlock(b.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[24px] border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{b.title}</p>
+                  <p className="mt-1 text-sm text-slate-500">{b.csku}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <StatusBadge status={b.status} />
+                    <ServiceBadge type={b.svc} />
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-400" />
+              </button>
+            ))}
+          </div>
+        </Card>
+
+        <div className="grid gap-4">
+          <Card className="border-emerald-200/80 bg-[linear-gradient(180deg,rgba(236,253,245,0.96),rgba(255,255,255,0.96))] p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
+                <Upload className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Ação rápida</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Envie materiais com mais rapidez</h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">Centralize CAD, acabamentos, fotos e referências em um fluxo mais claro para o time interno.</p>
+                <button onClick={() => setPage("blocks")} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">
+                  <FileUp className="h-4 w-4" />
+                  Ir para meus blocos
+                </button>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Suporte</p>
+            <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Precisa de ajuda?</h3>
+            <div className="mt-5 space-y-3 text-sm text-slate-600">
+              <div className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3">
+                <MessageSquare className="h-4 w-4 text-slate-400" />
+                <span>info@archtechtour.com</span>
+              </div>
+              <div className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3">
+                <Globe className="h-4 w-4 text-slate-400" />
+                <span>www.archtechtour.com</span>
+              </div>
+            </div>
+          </Card>
         </div>
-      </Card>
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Precisa de ajuda?</h3>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-slate-500"><MessageSquare className="w-3.5 h-3.5 text-slate-400" /> Contato: info@archtechtour.com</div>
-          <div className="flex items-center gap-2 text-xs text-slate-500"><Globe className="w-3.5 h-3.5 text-slate-400" /> www.archtechtour.com</div>
-        </div>
-      </Card>
+      </div>
     </div>
   );
 }
@@ -1306,6 +1722,10 @@ export default function Portal() {
   const [selectedContract, setSelectedContract] = useState("");
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
+  const todayLabel = useMemo(
+    () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
+    [],
+  );
 
   if (!currentUser) {
     return (
@@ -1316,6 +1736,8 @@ export default function Portal() {
   }
 
   const isClient = currentUser.role === "client";
+  const shellLabel = isClient ? "Portal do cliente" : "Operações internas";
+  const workspaceTitle = isClient ? getClientName(currentUser.clientId!) : "Pipeline ArchTechTour";
 
   const renderPage = () => {
     switch (page) {
@@ -1335,23 +1757,42 @@ export default function Portal() {
 
   return (
     <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities }}>
-      <div className="min-h-screen bg-slate-50">
+      <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
+        <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
-        <div className={`transition-all duration-300 ${collapsed ? "ml-[64px]" : "ml-[240px]"}`}>
-          <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-slate-200/60 px-6 py-3 flex items-center justify-between">
-            <p className="text-sm text-slate-600">{isClient ? getClientName(currentUser.clientId!) : "Painel Interno"}</p>
-            <div className="flex items-center gap-3">
-              <button className="p-2 hover:bg-slate-100 rounded-lg relative transition-colors">
-                <Bell className="w-[18px] h-[18px] text-slate-500" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-              </button>
-              <div className="h-5 w-px bg-slate-200" />
-              <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-red-600 transition-colors">
-                <LogOut className="w-4 h-4" /> Sair
-              </button>
+        <div className={`relative transition-all duration-300 ${collapsed ? "ml-[88px]" : "ml-[280px]"}`}>
+          <header className="sticky top-0 z-30 border-b border-white/70 bg-white/70 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-6 py-4 lg:px-8">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">{shellLabel}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-semibold text-slate-900">{workspaceTitle}</span>
+                  <span className="h-1 w-1 rounded-full bg-slate-300" />
+                  <span className="text-slate-500">{todayLabel}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="hidden items-center gap-3 rounded-full border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:flex">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-[11px] font-semibold text-white">
+                    {currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800">{currentUser.name}</p>
+                    <p className="text-[11px] text-slate-500">{ROLE_LABELS[currentUser.role]}</p>
+                  </div>
+                </div>
+                <button className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm transition hover:text-slate-700">
+                  <Bell className="h-[18px] w-[18px]" />
+                  <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500" />
+                </button>
+                <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/85 px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:text-rose-600">
+                  <LogOut className="h-4 w-4" />
+                  Sair
+                </button>
+              </div>
             </div>
           </header>
-          <main className="p-6 max-w-7xl">{renderPage()}</main>
+          <main className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-8">{renderPage()}</main>
         </div>
       </div>
     </AppContext.Provider>
