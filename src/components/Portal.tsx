@@ -1,5 +1,5 @@
 "use client";
-import React, { useState, useMemo, createContext, useContext, useCallback, ReactNode, useRef } from "react";
+import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
   Globe, Search, Bell, LogOut, Menu, X, Plus, Upload, Clock,
@@ -23,6 +23,25 @@ type BlockStatus =
   | "awaiting_client_final_validation" | "approved" | "published"
   | "blocked" | "on_hold" | "archived";
 type AssetCategory = "cad" | "finishing" | "photos" | "videos" | "technical_drawing" | "3d_block" | "extra_reference";
+type TicketStatus = "new" | "in_production" | "internal_review" | "delivered";
+type ProductCategory = "moveis" | "luminarias" | "revestimentos" | "metais" | "outros";
+
+interface Brand {
+  clientId: string; companyName: string; logoUrl?: string;
+  website: string; sector: string; priority: Priority; step: number;
+}
+interface ProductVariation {
+  id: string; name: string; finishes: string; colors: string; materials: string;
+}
+interface CatalogProduct {
+  id: string; clientId: string; name: string; sku: string;
+  category: ProductCategory; priority: number; variations: ProductVariation[];
+}
+interface ProductionTicket {
+  id: string; clientId: string; blockId: string; title: string;
+  plan: ServiceType; slaDate: string; priority: Priority;
+  assignedTo?: string; status: TicketStatus;
+}
 
 interface SeedUser {
   id: string; email: string; password: string; name: string; role: UserRole;
@@ -43,7 +62,7 @@ interface SeedBlock {
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
   name: string; size: number; v: number; by: string;
-  analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; };
+  analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; notes?: string[]; };
   uploadedAt?: string;
 }
 interface SeedApproval {
@@ -100,9 +119,17 @@ const SERVICE_COLORS: Record<ServiceType, string> = {
 };
 const ROLE_LABELS: Record<UserRole, string> = { admin: "Admin", internal_ops: "Operações", internal_modeling: "Modelagem", internal_programming: "Programação", client: "Cliente" };
 const CATEGORY_LABELS: Record<AssetCategory, string> = {
-  cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos",
+  cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos do produto",
   videos: "Vídeos", technical_drawing: "Desenho Técnico", "3d_block": "Bloco 3D",
   extra_reference: "Ref. Extra",
+};
+const CATEGORY_HINTS: Partial<Record<AssetCategory, string>> = {
+  photos: "Fotos reais do produto: frente, lateral, topo, perspectiva e close-ups de detalhes",
+  finishing: "Catálogo de acabamentos/cores: amostras de madeira, tecido, metal, etc.",
+  cad: "Arquivo CAD do produto: .skp, .obj, .fbx, .step, .dwg, etc.",
+  technical_drawing: "Projeto executivo com cotas e dimensões reais",
+  videos: "Vídeo mostrando mecanismos, aberturas ou detalhes difíceis de fotografar",
+  "3d_block": "Modelo 3D completo enviado pelo cliente (referência ou base)",
 };
 const READINESS_RULES: Record<ServiceType, AssetCategory[]> = {
   standard: ["cad", "finishing", "photos"],
@@ -145,7 +172,7 @@ let USERS: SeedUser[] = [
   { id: "u12", email: "contato@rsdesign.com.br", password: "rsdesign@2025", name: "RS Design", role: "client", clientId: "c5", active: true },
 ];
 
-const CLIENTS: SeedClient[] = [
+let CLIENTS: SeedClient[] = [
   { id: "c1", name: "Escal Móveis", code: "ESCAL", contactEmail: "contato@escal.com.br", active: true },
   { id: "c2", name: "Estúdio Bola", code: "EB", contactEmail: "contato@estudiobola.com.br", active: true },
   { id: "c3", name: "Wentz", code: "WENTZ", contactEmail: "contato@wentz.com.br", active: true },
@@ -160,7 +187,7 @@ const CLIENTS: SeedClient[] = [
   { id: "c12", name: "Christie", code: "CHRISTIE", contactEmail: "contato@christie.com.br", active: true },
 ];
 
-const CONTRACTS: SeedContract[] = [
+let CONTRACTS: SeedContract[] = [
   { id: "ct1", clientId: "c1", title: "Contrato 2025 – Linha Completa", totalBlocks: 100, usedBlocks: 12, startDate: "2025-01-15", active: true },
   { id: "ct2", clientId: "c2", title: "Contrato Inicial – MVP", totalBlocks: 30, usedBlocks: 5, startDate: "2025-04-01", active: true },
   { id: "ct3", clientId: "c3", title: "Piloto Haus Concept", totalBlocks: 10, usedBlocks: 2, startDate: "2025-06-01", active: true },
@@ -253,6 +280,32 @@ const PUBLICATIONS: SeedPub[] = [
   { id: "pub8", blockId: "pb21", url: "https://explorar.archtechtour.com/wj/ver-5/umbra/index.html", embed: '<iframe src="https://explorar.archtechtour.com/wj/ver-5/umbra/index.html" width="100%" height="600"></iframe>', env: "production", v: 5 },
 ];
 
+let BRANDS: Brand[] = [
+  { clientId: "c1", companyName: "Escal Móveis", logoUrl: "", website: "www.escal.com.br", sector: "Móveis", priority: "high", step: 5 },
+  { clientId: "c2", companyName: "Estúdio Bola", logoUrl: "", website: "www.estudiobola.com.br", sector: "Design de Interiores", priority: "normal", step: 5 },
+  { clientId: "c3", companyName: "Wentz", logoUrl: "", website: "www.wentz.com.br", sector: "Móveis", priority: "high", step: 4 },
+  { clientId: "c4", companyName: "Minimal Design", logoUrl: "", website: "www.minimaldesign.com.br", sector: "Mobiliário", priority: "normal", step: 2 },
+  { clientId: "c5", companyName: "RS Design", logoUrl: "", website: "www.rsdesign.com.br", sector: "Design", priority: "low", step: 1 },
+];
+
+let CATALOG: CatalogProduct[] = [
+  { id: "cp1", clientId: "c1", name: "Banco Nub", sku: "BANCO-NUB", category: "moveis", priority: 1, variations: [{ id: "v1", name: "Natural", finishes: "Tecido, Couro natural", colors: "Bege, Cinza, Preto", materials: "MDF, Espuma D28, Madeira Freixo" }] },
+  { id: "cp2", clientId: "c1", name: "Banqueta Loai", sku: "BANQUETA-LOAI", category: "moveis", priority: 2, variations: [{ id: "v2", name: "Padrão", finishes: "Laminado, Couro PU", colors: "Caramelo, Off-white", materials: "Aço carbono, Couro PU" }] },
+  { id: "cp3", clientId: "c1", name: "Puff Umma", sku: "PUFF-UMMA", category: "moveis", priority: 3, variations: [{ id: "v3", name: "Redondo", finishes: "Veludo, Bouclê", colors: "Verde musgo, Terracota, Nude", materials: "MDF naval, Espuma D33" }] },
+  { id: "cp4", clientId: "c2", name: "Poltrona Acácia", sku: "POLTRONA-ACACIA", category: "moveis", priority: 1, variations: [{ id: "v4", name: "Acácia Classic", finishes: "Couro natural, Bouclê", colors: "Caramelo, Off-white, Grafite", materials: "Estrutura em aço, Espuma D45" }] },
+  { id: "cp5", clientId: "c2", name: "Banco Pião", sku: "BANCO-PIAO", category: "moveis", priority: 2, variations: [{ id: "v5", name: "Giratório", finishes: "Madeira maciça envernizada", colors: "Freijó, Carvalho, Preto", materials: "Madeira maciça, Aço inox" }] },
+];
+
+let TICKETS: ProductionTicket[] = [
+  { id: "tk1", clientId: "c1", blockId: "pb2", title: "Banqueta Loai – Programação 3D", plan: "plus", slaDate: "2026-05-10", priority: "high", assignedTo: "u5", status: "in_production" },
+  { id: "tk2", clientId: "c1", blockId: "pb3", title: "Puff Umma – Modelagem", plan: "standard", slaDate: "2026-05-15", priority: "normal", assignedTo: "u4", status: "in_production" },
+  { id: "tk3", clientId: "c2", blockId: "pb7", title: "Poltrona Acácia – Revisão Interna", plan: "ultra", slaDate: "2026-04-28", priority: "high", assignedTo: "u3", status: "internal_review" },
+  { id: "tk4", clientId: "c2", blockId: "pb11", title: "Cadeira Cota – Programação 3D", plan: "plus", slaDate: "2026-05-20", priority: "high", assignedTo: "u5", status: "in_production" },
+  { id: "tk5", clientId: "c3", blockId: "pb16", title: "Poltrona Dama – Programação", plan: "ultra", slaDate: "2026-05-05", priority: "high", assignedTo: "u5", status: "in_production" },
+  { id: "tk6", clientId: "c2", blockId: "pb13", title: "Sofá Block – Novo Ticket", plan: "ultra", slaDate: "2026-06-01", priority: "urgent", status: "new" },
+  { id: "tk7", clientId: "c4", blockId: "pb18", title: "Cabine Play Pequena – Modelagem", plan: "standard", slaDate: "2026-05-25", priority: "normal", assignedTo: "u4", status: "in_production" },
+];
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -279,11 +332,11 @@ interface AppState {
   currentUser: SeedUser | null;
   setCurrentUser: (u: SeedUser | null) => void;
   blocks: SeedBlock[];
-  setBlocks: (b: SeedBlock[]) => void;
+  setBlocks: React.Dispatch<React.SetStateAction<SeedBlock[]>>;
   activities: SeedActivity[];
-  setActivities: (a: SeedActivity[]) => void;
+  setActivities: React.Dispatch<React.SetStateAction<SeedActivity[]>>;
   assets: SeedAsset[];
-  setAssets: (a: SeedAsset[]) => void;
+  setAssets: React.Dispatch<React.SetStateAction<SeedAsset[]>>;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -439,7 +492,24 @@ function LoginPage() {
     setError("");
     setLoading(true);
     setTimeout(() => {
-      const user = USERS.find((u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password);
+      // Check seed users first
+      let user: SeedUser | undefined = USERS.find(
+        (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
+      );
+      // If not found, check users registered via /contrato flow (stored in localStorage)
+      if (!user) {
+        try {
+          const stored = localStorage.getItem("att_portal_users");
+          if (stored) {
+            const registeredUsers: SeedUser[] = JSON.parse(stored);
+            user = registeredUsers.find(
+              (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
+            );
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
       if (user) {
         setCurrentUser(user);
       } else {
@@ -481,7 +551,8 @@ function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="seu@email.com"
-                className="w-full px-3.5 py-2.5 rounded-xl border border-white/10 bg-white/8 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-white/10 transition-all"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-white/10 bg-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-slate-700 transition-all"
+                style={{ WebkitTextFillColor: "white" }}
               />
             </div>
             <div>
@@ -493,7 +564,8 @@ function LoginPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   onKeyDown={handleKeyDown}
                   placeholder="••••••••"
-                  className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-white/10 bg-white/8 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-white/10 transition-all"
+                  className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-white/10 bg-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-slate-700 transition-all"
+                  style={{ WebkitTextFillColor: "white" }}
                 />
                 <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
                   <Eye className="w-4 h-4" />
@@ -545,15 +617,21 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   const navItems = isClient
     ? [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+        { id: "onboarding", icon: Clipboard, label: "Onboarding" },
         { id: "blocks", icon: Package, label: "Meus Blocos" },
-        { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
+        { id: "publications", icon: Globe, label: "Publicações" },
+        { id: "analytics", icon: BarChart3, label: "Analytics" },
+        { id: "contracts", icon: FileText, label: "Contratos" },
       ]
     : [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+        { id: "tickets", icon: Hash, label: "Tickets" },
         { id: "queue", icon: Layers, label: "Fila de Trabalho" },
         { id: "blocks", icon: Package, label: "Todos os Blocos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
+        { id: "publications", icon: Globe, label: "Publicações" },
+        { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "clients", icon: Users, label: "Clientes" },
         { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "activity", icon: Activity, label: "Atividade" },
@@ -563,7 +641,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   const workspaceLabel = isClient ? getClientName(user.clientId!) : "Operação Interna";
 
   return (
-    <aside className={`fixed left-0 top-0 z-40 flex h-full flex-col border-r border-white/6 bg-[#07111f]/96 text-white backdrop-blur-xl transition-all duration-300 ${collapsed ? "w-[88px]" : "w-[280px]"}`}>
+    <aside className={`fixed left-0 top-0 z-40 flex h-full flex-col border-r border-slate-800/60 backdrop-blur-xl transition-all duration-300 ${collapsed ? "w-[88px]" : "w-[280px]"}`} style={{ backgroundColor: "rgba(7,17,31,0.97)", color: "white" }}>
       <div className="p-4 pb-3">
         <div className="rounded-[28px] border border-white/10 bg-white/5 p-3 shadow-[0_24px_48px_-36px_rgba(15,23,42,0.9)]">
           <div className="flex items-start gap-3">
@@ -593,10 +671,10 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
             <button
               key={item.id}
               onClick={() => setPage(item.id)}
-              className={`group relative flex w-full items-center gap-3 rounded-[20px] px-3.5 py-3 text-sm transition ${active ? "bg-white text-slate-950 shadow-[0_18px_40px_-28px_rgba(255,255,255,0.75)]" : "text-slate-400 hover:bg-white/7 hover:text-white"}`}
+              className={`group relative flex w-full items-center gap-3 rounded-[20px] px-3.5 py-3 text-sm transition ${active ? "bg-white text-slate-950 shadow-[0_18px_40px_-28px_rgba(255,255,255,0.75)]" : "text-slate-400 hover:bg-white/[0.08] hover:text-slate-100"}`}
             >
               {active && !collapsed && <span className="absolute left-0 top-3 bottom-3 w-1 rounded-r-full bg-gradient-to-b from-cyan-400 to-emerald-400" />}
-              <item.icon className={`h-[18px] w-[18px] flex-shrink-0 ${active ? "text-slate-950" : "text-slate-500 group-hover:text-white"}`} />
+              <item.icon className={`h-[18px] w-[18px] flex-shrink-0 ${active ? "text-slate-950" : "text-slate-500 group-hover:text-slate-100"}`} />
               {!collapsed && <span className="flex-1 text-left font-semibold">{item.label}</span>}
               {!collapsed && item.badge !== undefined && item.badge > 0 && (
                 <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${active ? "bg-rose-100 text-rose-600" : "bg-rose-500/15 text-rose-300"}`}>
@@ -840,39 +918,92 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
   const publishedCount = myBlocks.filter((b) => b.status === "published").length;
   const contractUsage = contracted ? Math.round((used / contracted) * 100) : 0;
   const latestContract = [...ctrs].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
-  const byStatus: Record<string, number> = {};
-  myBlocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
   const nextActions = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).slice(0, 3);
   const liveBlocks = myBlocks.filter((b) => b.status === "published").slice(0, 3);
-  const statusSummary = Object.entries(byStatus).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const isNewClient = myBlocks.length === 0;
+
+  // Onboarding steps — step 0 is always done (contract signed)
+  const onboardingSteps = [
+    { label: "Contrato assinado", done: true, desc: "Seu contrato está ativo e registrado." },
+    { label: "Reunião de onboarding agendada", done: !isNewClient || false, desc: "A equipe ATT entrará em contato em até 5 dias úteis para agendar." },
+    { label: "Envio dos arquivos", done: myBlocks.some((b) => !["awaiting_client_files"].includes(b.status)), desc: "Envie blocos 3D, fotos, logo e desenhos técnicos para info@archtechtour.com." },
+    { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
+    { label: "Publicação no catálogo digital", done: publishedCount > 0, desc: "Seus blocos estarão disponíveis em 3D e RA na plataforma ArchTechTour." },
+  ];
+  const onboardingProgress = onboardingSteps.filter((s) => s.done).length;
 
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Portal do cliente"
-        title={`Olá, ${user.name.split(" ")[0]}. Seu acervo digital está centralizado aqui.`}
-        description="O dashboard foi redesenhado para ficar mais próximo da linguagem da ArchTechTour: mais premium, mais editorial e menos parecido com interface genérica pronta."
+        title={`Olá, ${user.name.split(" ")[0]}. Bem-vindo ao seu portal.`}
+        description={isNewClient
+          ? "Seu contrato está ativo. Acompanhe abaixo os próximos passos para iniciar a produção dos seus blocos 3D."
+          : `Acompanhe o andamento dos seus blocos 3D, aprovações e publicações na plataforma ArchTechTour.`}
         action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{getClientName(cid)}</Badge>}
       />
 
+      {/* ONBOARDING BANNER — shown while not all steps done */}
+      {onboardingProgress < onboardingSteps.length && (
+        <Card className="relative overflow-hidden border-cyan-200/60 bg-[linear-gradient(135deg,rgba(236,254,255,0.98),rgba(240,253,250,0.98))] p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">Onboarding</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">
+                {onboardingProgress === 1 ? "Vamos começar — siga os próximos passos" : `${onboardingProgress} de ${onboardingSteps.length} etapas concluídas`}
+              </h3>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="h-2 w-40 rounded-full bg-slate-200/80 overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500 transition-all" style={{ width: `${(onboardingProgress / onboardingSteps.length) * 100}%` }} />
+              </div>
+              <span className="text-sm font-semibold text-slate-500">{Math.round((onboardingProgress / onboardingSteps.length) * 100)}%</span>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {onboardingSteps.map((step, i) => (
+              <div key={i} className={`rounded-[20px] border p-4 ${step.done ? "border-emerald-200/80 bg-emerald-50/80" : i === onboardingProgress ? "border-cyan-300/60 bg-white shadow-sm" : "border-slate-200/60 bg-white/60"}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${step.done ? "bg-emerald-500 text-white" : i === onboardingProgress ? "bg-cyan-500 text-white" : "bg-slate-200 text-slate-500"}`}>
+                    {step.done ? <CheckCircle className="h-3.5 w-3.5" /> : i + 1}
+                  </div>
+                  <p className={`text-xs font-semibold ${step.done ? "text-emerald-700" : i === onboardingProgress ? "text-cyan-800" : "text-slate-400"}`}>{step.label}</p>
+                </div>
+                <p className="text-xs text-slate-500 leading-5">{step.desc}</p>
+                {i === onboardingProgress && i === 2 && (
+                  <button onClick={() => setPage("blocks")} className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-700">
+                    <FileUp className="h-3 w-3" /> Enviar materiais
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* STATS + CONTRACT */}
       <div className="grid gap-4 xl:grid-cols-[1.28fr_0.92fr]">
         <Card className="relative overflow-hidden border-slate-950/70 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.18),_rgba(6,17,29,1)_48%,_rgba(6,17,29,1)_100%)] p-6 text-white md:p-8">
-          <div className="absolute inset-0 opacity-[0.1] [background-image:linear-gradient(rgba(255,255,255,0.62)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.62)_1px,transparent_1px)] [background-size:52px_52px]" />
+          <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(255,255,255,0.62)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.62)_1px,transparent_1px)] [background-size:52px_52px]" />
           <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
           <div className="relative">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border-white/10 bg-white/8 text-slate-100">Workspace premium</Badge>
-              <Badge className="border-cyan-400/15 bg-cyan-400/10 text-cyan-100">Contrato, produção e publicações</Badge>
+              <Badge className="border-white/10 bg-white/8 text-slate-100">Plano {latestContract?.title?.split("–")[0]?.trim() || "Ativo"}</Badge>
+              {awaiting > 0 && <Badge className="border-amber-400/20 bg-amber-400/15 text-amber-200">{awaiting} {awaiting === 1 ? "item pede" : "itens pedem"} sua atenção</Badge>}
             </div>
-            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.3rem]">Uma leitura mais elegante do contrato e dos blocos da sua marca.</h2>
+            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.1rem]">
+              {isNewClient ? "Seus produtos em 3D e RA começam aqui." : `${publishedCount > 0 ? `${publishedCount} bloco${publishedCount > 1 ? "s" : ""} publicado${publishedCount > 1 ? "s" : ""}.` : "Produção em andamento."} Acompanhe tudo em tempo real.`}
+            </h2>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
-              Em vez de uma grade repetitiva de cards, o foco passa a ser contexto, estado da coleção e próximas ações com mais clareza.
+              {isNewClient
+                ? "Assim que você enviar os arquivos dos seus produtos, a equipe ArchTechTour inicia a digitalização em 3D. Você acompanha cada etapa aqui, com aprovações e publicação ao vivo."
+                : "Cada bloco passa por modelagem, aprovação e publicação. Você recebe notificação a cada etapa que precisar da sua validação."}
             </p>
             <div className="mt-8 grid gap-3 sm:grid-cols-3">
               {[
-                { label: "Contratados", value: contracted, sub: "capacidade disponível" },
-                { label: "Publicados", value: publishedCount, sub: "já ao vivo" },
-                { label: "Aguardando ação", value: awaiting, sub: "arquivos ou validação" },
+                { label: "Blocos contratados", value: contracted, sub: `${contracted - used} disponíveis` },
+                { label: "Em produção", value: inProduction, sub: "sendo trabalhados agora" },
+                { label: "Publicados", value: publishedCount, sub: "ao vivo na plataforma" },
               ].map((item) => (
                 <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/6 p-4 backdrop-blur">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
@@ -884,11 +1015,11 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
             <div className="mt-8 flex flex-wrap gap-3">
               <button onClick={() => setPage("blocks")} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
                 <FileUp className="h-4 w-4" />
-                Enviar materiais
+                {isNewClient ? "Enviar meus arquivos" : "Ver meus blocos"}
               </button>
               <button onClick={() => setPage("contracts")} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10">
                 <FileText className="h-4 w-4" />
-                Ver contrato
+                Meu contrato
               </button>
             </div>
           </div>
@@ -899,15 +1030,15 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Contrato ativo</p>
-                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">{latestContract?.title || "Contrato ArchTechTour"}</h3>
-                <p className="mt-2 text-sm text-slate-500">Início em {latestContract ? fmtDate(latestContract.startDate) : "—"}</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{latestContract?.title || "Contrato ArchTechTour"}</h3>
+                <p className="mt-1.5 text-sm text-slate-500">Início em {latestContract ? fmtDate(latestContract.startDate) : "—"}</p>
               </div>
-              <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{contractUsage}% em uso</Badge>
+              <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{contractUsage}% usado</Badge>
             </div>
             <div className="mt-5 rounded-[22px] border border-slate-200/80 bg-slate-50/80 p-4">
               <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
                 <span>Uso do contrato</span>
-                <span>{used} de {contracted}</span>
+                <span>{used} de {contracted} blocos</span>
               </div>
               <ProgressBar value={contractUsage} className="mt-4" />
               <div className="mt-4 grid grid-cols-2 gap-3">
@@ -926,145 +1057,120 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
           <Card className="p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Próximas ações</p>
-                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">O que pede sua atenção agora</h3>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pendências</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                  {awaiting > 0 ? `${awaiting} item${awaiting > 1 ? "ns" : ""} aguardando você` : "Nenhuma ação pendente"}
+                </h3>
               </div>
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-950 text-white">
-                <AlertTriangle className="h-5 w-5" />
+              <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border text-white ${awaiting > 0 ? "border-amber-200 bg-amber-500" : "border-slate-200/80 bg-slate-100"}`}>
+                <AlertTriangle className={`h-5 w-5 ${awaiting > 0 ? "text-white" : "text-slate-400"}`} />
               </div>
             </div>
             <div className="mt-5 space-y-3">
               {nextActions.length ? nextActions.map((block) => (
-                <button key={block.id} onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[22px] border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
+                <button key={block.id} onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[22px] border border-amber-100 bg-amber-50/60 px-4 py-4 text-left transition hover:border-amber-200 hover:bg-amber-50">
                   <div>
                     <p className="text-sm font-semibold text-slate-800">{block.title}</p>
-                    <p className="mt-1 text-sm text-slate-500">{block.csku}</p>
-                    <div className="mt-3"><StatusBadge status={block.status} /></div>
+                    <p className="mt-0.5 text-xs text-slate-500">{block.csku}</p>
+                    <div className="mt-2.5"><StatusBadge status={block.status} /></div>
                   </div>
-                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                  <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
                 </button>
               )) : (
-                <EmptyState icon={CheckCircle} title="Tudo em ordem" desc="No momento não há itens pendentes de ação do cliente." />
+                <div className="flex flex-col items-center gap-2 py-6 text-center">
+                  <CheckCircle className="h-8 w-8 text-emerald-400" />
+                  <p className="text-sm font-semibold text-slate-700">Tudo em dia</p>
+                  <p className="text-xs text-slate-400">Não há itens aguardando sua aprovação ou envio de arquivos.</p>
+                </div>
               )}
             </div>
           </Card>
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
-        <Card className="p-6">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Momento da coleção</p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Distribuição dos seus blocos</h3>
-            </div>
-            <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{myBlocks.length} itens</Badge>
-          </div>
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {statusSummary.map(([st, cnt]) => (
-              <div key={st} className="rounded-[22px] border border-slate-200/80 bg-slate-50/70 p-4">
-                <StatusBadge status={st as BlockStatus} />
-                <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{cnt}</p>
-                <p className="mt-2 text-sm text-slate-500">Blocos nesta etapa</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        <Card className="p-6">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Publicações</p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Peças já publicadas</h3>
-            </div>
-            <Badge className="border-emerald-200/80 bg-emerald-50 text-emerald-700">{publishedCount} ao vivo</Badge>
-          </div>
-          <div className="mt-6 space-y-3">
-            {liveBlocks.length ? liveBlocks.map((block) => {
-              const publication = PUBLICATIONS.find((pub) => pub.blockId === block.id);
-              return (
-                <div key={block.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/75 p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{block.title}</p>
-                      <p className="mt-1 text-sm text-slate-500">{block.csku}</p>
-                    </div>
-                    <StatusBadge status={block.status} />
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-3 text-sm text-slate-500">
-                    <span>Publicação {publication ? `v${publication.v}` : "ativa"}</span>
-                    {publication && (
-                      <a href={publication.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-semibold text-cyan-700 transition hover:text-cyan-800">
-                        Abrir experiência
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              );
-            }) : (
-              <EmptyState icon={Globe} title="Nenhuma publicação ao vivo" desc="Assim que um bloco for publicado, ele aparecerá aqui com acesso rápido." />
-            )}
-          </div>
-        </Card>
-      </div>
-
+      {/* RECENT BLOCKS + SUPPORT */}
       <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
         <Card className="p-6">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Blocos recentes</p>
-              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Acompanhe os últimos movimentos</h3>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Meus blocos</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
+                {myBlocks.length > 0 ? "Acompanhe cada produto" : "Nenhum bloco iniciado"}
+              </h3>
             </div>
-            <button onClick={() => setPage("blocks")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver todos</button>
+            {myBlocks.length > 0 && <button onClick={() => setPage("blocks")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver todos</button>}
           </div>
           <div className="mt-6 space-y-3">
-            {myBlocks.slice(0, 5).map((b) => (
+            {myBlocks.length > 0 ? myBlocks.slice(0, 5).map((b) => (
               <button key={b.id} onClick={() => { setSelectedBlock(b.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[24px] border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
                 <div>
                   <p className="text-sm font-semibold text-slate-800">{b.title}</p>
-                  <p className="mt-1 text-sm text-slate-500">{b.csku}</p>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <p className="mt-0.5 text-xs text-slate-500">{b.csku}</p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     <StatusBadge status={b.status} />
                     <ServiceBadge type={b.svc} />
                   </div>
                 </div>
-                <ChevronRight className="h-4 w-4 text-slate-400" />
+                <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
               </button>
-            ))}
+            )) : (
+              <div className="flex flex-col items-center gap-3 py-8 text-center rounded-[22px] border-2 border-dashed border-slate-200">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
+                  <Box className="h-6 w-6 text-slate-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Seus blocos aparecerão aqui</p>
+                  <p className="mt-1 text-xs text-slate-400">Após o onboarding, a equipe ATT criará os blocos dos seus produtos.</p>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
 
         <div className="grid gap-4">
-          <Card className="border-emerald-200/80 bg-[linear-gradient(180deg,rgba(236,253,245,0.96),rgba(255,255,255,0.96))] p-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-500/10 text-emerald-600">
-                <Upload className="h-5 w-5" />
+          {/* Published */}
+          <Card className="p-6">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Publicações ao vivo</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{publishedCount > 0 ? `${publishedCount} produto${publishedCount > 1 ? "s" : ""} no catálogo` : "Nenhuma publicação ainda"}</h3>
               </div>
-              <div className="flex-1">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">Ação rápida</p>
-                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Envie materiais com mais rapidez</h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">Centralize CAD, acabamentos, fotos e referências em um fluxo mais claro para o time interno.</p>
-                <button onClick={() => setPage("blocks")} className="mt-4 inline-flex items-center gap-2 rounded-full bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-700">
-                  <FileUp className="h-4 w-4" />
-                  Ir para meus blocos
-                </button>
-              </div>
+              {publishedCount > 0 && <Badge className="border-emerald-200/80 bg-emerald-50 text-emerald-700">{publishedCount} ao vivo</Badge>}
+            </div>
+            <div className="mt-5 space-y-3">
+              {liveBlocks.length ? liveBlocks.map((block) => {
+                const publication = PUBLICATIONS.find((pub) => pub.blockId === block.id);
+                return (
+                  <div key={block.id} className="rounded-[22px] border border-emerald-100 bg-emerald-50/50 p-4">
+                    <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{block.csku}</p>
+                    {publication && (
+                      <a href={publication.url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-700 transition hover:text-cyan-800">
+                        Abrir experiência 3D <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                );
+              }) : (
+                <p className="text-xs text-slate-400 leading-5">Assim que um produto for aprovado e publicado, você poderá acessar o link da experiência 3D e de realidade aumentada diretamente aqui.</p>
+              )}
             </div>
           </Card>
 
+          {/* Support */}
           <Card className="p-6">
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Suporte</p>
-            <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Precisa de ajuda?</h3>
-            <div className="mt-5 space-y-3 text-sm text-slate-600">
-              <div className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3">
-                <MessageSquare className="h-4 w-4 text-slate-400" />
-                <span>info@archtechtour.com</span>
-              </div>
-              <div className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3">
-                <Globe className="h-4 w-4 text-slate-400" />
-                <span>www.archtechtour.com</span>
-              </div>
+            <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">Fale com a equipe ATT</h3>
+            <p className="mt-1.5 text-xs text-slate-500 leading-5">Em caso de dúvidas sobre prazos, aprovações ou arquivos, entre em contato diretamente.</p>
+            <div className="mt-4 space-y-2.5 text-sm">
+              <a href="mailto:info@archtechtour.com" className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3 transition hover:border-slate-300 hover:bg-slate-100/60">
+                <MessageSquare className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                <span className="text-slate-700">info@archtechtour.com</span>
+              </a>
+              <a href="https://archtechtour.com" target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3 transition hover:border-slate-300 hover:bg-slate-100/60">
+                <Globe className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                <span className="text-slate-700">archtechtour.com</span>
+              </a>
             </div>
           </Card>
         </div>
@@ -1190,6 +1296,21 @@ interface AnalyzeResult {
   summary: string;
   issues: string[];
   suggestions: string[];
+  notes?: string[]; // internal ATT team notes — never shown to clients
+}
+
+/** Normalize a filename: lowercase, remove accents, spaces → underscores */
+function normalizeAssetName(original: string): string {
+  const lastDot = original.lastIndexOf(".");
+  const ext = lastDot > 0 ? original.slice(lastDot).toLowerCase() : "";
+  const base = original.slice(0, lastDot > 0 ? lastDot : undefined);
+  const normalized = base
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_.-]/g, "_")
+    .replace(/_+/g, "_")
+    .toLowerCase();
+  return normalized + ext;
 }
 
 function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded }: {
@@ -1200,102 +1321,132 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
   onUploaded: (asset: SeedAsset) => void;
 }) {
   const { currentUser } = useContext(AppContext);
+  const isClient = currentUser?.role === "client";
   const categories = allowedCategories ?? (Object.keys(CATEGORY_LABELS) as AssetCategory[]);
   const [cat, setCat] = useState<AssetCategory>(categories[0]);
-  const [file, setFile] = useState<File | null>(null);
-  const [stage, setStage] = useState<"idle" | "uploading" | "analyzing" | "done" | "error">("idle");
+  const [files, setFiles] = useState<File[]>([]);
+  const [stage, setStage] = useState<"idle" | "processing" | "done">("idle");
+  const [currentIdx, setCurrentIdx] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<AnalyzeResult | null>(null);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [results, setResults] = useState<{ file: File; result: AnalyzeResult | null; error?: string }[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFile = (f: File) => { setFile(f); setStage("idle"); setResult(null); setErrorMsg(""); };
+  // Convert a File to base64 string (data URI prefix removed)
+  const fileToBase64 = (f: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(f);
+    });
+
+  const handleFiles = (newFiles: File[]) => {
+    setFiles(newFiles);
+    setStage("idle");
+    setResults([]);
+    setCurrentIdx(0);
+  };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
+    const dropped = Array.from(e.dataTransfer.files);
+    if (dropped.length > 0) handleFiles(dropped);
   };
 
   const doUpload = async () => {
-    if (!file) return;
-    setStage("uploading");
-    setProgress(10);
-    setErrorMsg("");
-    try {
-      // 1. Get presigned URL from our API
-      const uploadResp = await fetch("/api/upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: file.name,
-          fileType: file.type || "application/octet-stream",
-          category: cat,
+    if (!files.length) return;
+    setStage("processing");
+    const allResults: { file: File; result: AnalyzeResult | null; error?: string }[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setCurrentIdx(i);
+      setProgress(0);
+
+      try {
+        // 1. Get presigned URL
+        const uploadResp = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || "application/octet-stream",
+            category: cat,
+            blockId,
+            clientId,
+          }),
+        });
+        if (!uploadResp.ok) {
+          const err = await uploadResp.json().catch(() => ({}));
+          throw new Error(err.error || "Erro ao obter URL de upload");
+        }
+        const { uploadUrl, readUrl } = await uploadResp.json();
+        setProgress(35);
+
+        // 2. Upload directly to S3
+        const s3Resp = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        });
+        if (!s3Resp.ok) throw new Error("Falha no upload para S3");
+        setProgress(65);
+
+        // 3. AI Analysis
+        const isImg = /^image\//i.test(file.type) || /\.(jpe?g|png|webp|gif|tiff?|bmp|heic)$/i.test(file.name);
+        const MAX_B64 = 4.5 * 1024 * 1024; // 4.5 MB — safe Claude Vision limit
+        let imageBase64: string | null = null;
+        if (isImg && file.size <= MAX_B64) {
+          try { imageBase64 = await fileToBase64(file); } catch { /* skip */ }
+        }
+        const analyzeResp = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileUrl: readUrl,
+            fileName: file.name,
+            category: cat,
+            mimeType: file.type || "application/octet-stream",
+            imageBase64,                         // null for large/non-image files
+            imageMimeType: file.type || null,
+          }),
+        });
+        setProgress(95);
+        const analysis = analyzeResp.ok ? await analyzeResp.json() : null;
+        setProgress(100);
+
+        // 4. Register asset
+        const newAsset: SeedAsset = {
+          id: `ast_${Date.now()}_${i}`,
           blockId,
-          clientId,
-        }),
-      });
-      if (!uploadResp.ok) {
-        const err = await uploadResp.json().catch(() => ({}));
-        throw new Error(err.error || "Erro ao obter URL de upload");
+          cat,
+          name: normalizeAssetName(file.name),
+          size: file.size,
+          v: 1,
+          by: currentUser?.id ?? "u1",
+          uploadedAt: new Date().toISOString(),
+          analysis: analysis ?? undefined,
+        };
+        onUploaded(newAsset);
+        allResults.push({ file, result: analysis });
+      } catch (e: unknown) {
+        allResults.push({ file, result: null, error: e instanceof Error ? e.message : "Erro desconhecido" });
       }
-      const { uploadUrl, readUrl, key } = await uploadResp.json();
-      setProgress(30);
-
-      // 2. Upload directly to S3
-      const s3Resp = await fetch(uploadUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type || "application/octet-stream" },
-      });
-      if (!s3Resp.ok) throw new Error("Falha no upload para S3");
-      setProgress(70);
-
-      // 3. AI Analysis
-      setStage("analyzing");
-      const analyzeResp = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileUrl: readUrl,
-          fileName: file.name,
-          category: cat,
-          mimeType: file.type || "application/octet-stream",
-        }),
-      });
-      setProgress(95);
-      const analysis = analyzeResp.ok ? await analyzeResp.json() : null;
-      setProgress(100);
-
-      // 4. Register asset with analysis
-      const newAsset: SeedAsset = {
-        id: `ast_${Date.now()}`,
-        blockId,
-        cat,
-        name: file.name,
-        size: file.size,
-        v: 1,
-        by: currentUser?.id ?? "u1",
-        uploadedAt: new Date().toISOString(),
-        analysis: analysis ?? undefined,
-      };
-      onUploaded(newAsset);
-      setResult(analysis);
-      setStage("done");
-    } catch (e: unknown) {
-      setStage("error");
-      setErrorMsg(e instanceof Error ? e.message : "Erro desconhecido");
     }
+
+    setResults(allResults);
+    setStage("done");
   };
 
-  const reset = () => { setFile(null); setStage("idle"); setResult(null); setProgress(0); setErrorMsg(""); };
+  const reset = () => {
+    setFiles([]);
+    setStage("idle");
+    setResults([]);
+    setProgress(0);
+    setCurrentIdx(0);
+  };
 
-  const scoreColor = result
-    ? result.score >= 80 ? "text-emerald-600" : result.score >= 50 ? "text-amber-600" : "text-red-600"
-    : "";
-  const scoreBg = result
-    ? result.score >= 80 ? "bg-emerald-50 border-emerald-200" : result.score >= 50 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
-    : "";
+  const approvedCount = results.filter((r) => r.result?.approved).length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -1311,10 +1462,13 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Categoria do Material</label>
             <select value={cat} onChange={(e) => { setCat(e.target.value as AssetCategory); reset(); }}
-              disabled={stage === "uploading" || stage === "analyzing"}
+              disabled={stage === "processing"}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
               {categories.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
             </select>
+            {CATEGORY_HINTS[cat] && (
+              <p className="mt-1.5 text-xs text-slate-400">{CATEGORY_HINTS[cat]}</p>
+            )}
           </div>
 
           {/* Drop zone */}
@@ -1325,95 +1479,131 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
               onClick={() => inputRef.current?.click()}
               className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/40 transition-all"
             >
-              <input ref={inputRef} type="file" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
-              {file ? (
-                <div className="space-y-1">
-                  <div className="flex items-center justify-center gap-2">
+              <input
+                ref={inputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const selected = Array.from(e.target.files || []);
+                  if (selected.length > 0) handleFiles(selected);
+                }}
+              />
+              {files.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-center gap-2 mb-1">
                     <FileText className="w-5 h-5 text-emerald-500" />
-                    <span className="text-sm font-medium text-slate-700 truncate max-w-xs">{file.name}</span>
+                    <span className="text-sm font-medium text-slate-700">
+                      {files.length} arquivo{files.length > 1 ? "s" : ""} selecionado{files.length > 1 ? "s" : ""}
+                    </span>
                   </div>
-                  <p className="text-xs text-slate-400">{fmtSize(file.size)} · Clique para trocar</p>
+                  <div className="space-y-1 max-h-28 overflow-y-auto">
+                    {files.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg">
+                        <span className="truncate flex-1 text-left">{f.name}</span>
+                        <span className="shrink-0 text-slate-400">{fmtSize(f.size)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">Clique para alterar seleção</p>
                 </div>
               ) : (
                 <div className="space-y-2">
                   <Upload className="w-8 h-8 text-slate-300 mx-auto" />
                   <p className="text-sm font-medium text-slate-500">Arraste ou clique para selecionar</p>
-                  <p className="text-xs text-slate-400">Imagens, PDF, CAD, vídeos…</p>
+                  <p className="text-xs text-slate-400">Múltiplos arquivos · Imagens, PDF, CAD, vídeos…</p>
                 </div>
               )}
             </div>
           )}
 
-          {/* Progress bar */}
-          {(stage === "uploading" || stage === "analyzing") && (
+          {/* Progress */}
+          {stage === "processing" && (
             <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500 mb-0.5">
+                <span>Arquivo {currentIdx + 1} de {files.length}</span>
+                <span className="font-medium text-slate-700 truncate max-w-[200px]">{files[currentIdx]?.name}</span>
+              </div>
               <div className="flex items-center gap-2">
                 <div className="flex-1 bg-slate-100 rounded-full h-2">
                   <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
                 </div>
                 <span className="text-xs text-slate-500 w-8 text-right">{progress}%</span>
               </div>
-              <p className="text-sm text-center text-slate-500">
-                {stage === "uploading" ? "⬆️ Enviando para S3…" : "🤖 Agente Claude analisando…"}
-              </p>
+              <p className="text-sm text-center text-slate-500">⏳ Enviando e analisando…</p>
             </div>
           )}
 
-          {/* Error */}
-          {stage === "error" && (
-            <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-2">
-              <p className="text-sm font-medium text-red-700">Erro no upload</p>
-              <p className="text-xs text-red-600">{errorMsg}</p>
-              <button onClick={reset} className="text-xs text-red-600 underline hover:text-red-800">Tentar novamente</button>
-            </div>
-          )}
-
-          {/* Analysis result */}
-          {stage === "done" && result && (
-            <div className={`border rounded-xl p-4 space-y-3 ${scoreBg}`}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {result.approved
-                    ? <Check className="w-5 h-5 text-emerald-600" />
-                    : <AlertTriangle className="w-5 h-5 text-red-500" />}
-                  <span className="text-sm font-semibold text-slate-800">
-                    {result.approved ? "Material aprovado" : "Material reprovado"}
-                  </span>
-                </div>
-                <span className={`text-2xl font-bold ${scoreColor}`}>{result.score}<span className="text-sm font-normal text-slate-400">/100</span></span>
+          {/* Results */}
+          {stage === "done" && results.length > 0 && (
+            <div className="space-y-3">
+              <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold ${
+                approvedCount === results.length
+                  ? "bg-emerald-50 text-emerald-700"
+                  : approvedCount > 0
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-red-50 text-red-700"
+              }`}>
+                {approvedCount === results.length
+                  ? <Check className="w-4 h-4 shrink-0" />
+                  : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                {approvedCount === results.length
+                  ? `${results.length} arquivo${results.length > 1 ? "s" : ""} aprovado${results.length > 1 ? "s" : ""} pelo agente`
+                  : `${approvedCount} de ${results.length} aprovado${approvedCount !== 1 ? "s" : ""} pelo agente`}
               </div>
-              <p className="text-sm text-slate-600">{result.summary}</p>
-              {result.issues?.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold text-red-600 uppercase tracking-wide">Problemas encontrados</p>
-                  {result.issues.map((iss, i) => (
-                    <div key={i} className="flex items-start gap-1.5 text-xs text-red-700">
-                      <X className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />{iss}
+              {results.map(({ file, result, error }, i) => {
+                if (error) return (
+                  <div key={i} className="border border-red-200 bg-red-50 rounded-xl p-3">
+                    <p className="text-xs font-medium text-red-700 truncate">{file.name}</p>
+                    <p className="text-xs text-red-600 mt-0.5">{error}</p>
+                  </div>
+                );
+                if (!result) return (
+                  <div key={i} className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <p className="text-xs font-medium text-emerald-700 truncate">{file.name} · Enviado</p>
+                  </div>
+                );
+                const rBg = result.approved ? "border-emerald-200 bg-emerald-50" : result.score >= 50 ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50";
+                const rColor = result.score >= 80 ? "text-emerald-600" : result.score >= 50 ? "text-amber-600" : "text-red-600";
+                return (
+                  <div key={i} className={`border rounded-xl p-3 space-y-2 ${rBg}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-slate-700 truncate flex-1">{file.name}</p>
+                      <span className={`text-sm font-bold shrink-0 ${rColor}`}>{result.score}<span className="text-xs font-normal text-slate-400">/100</span></span>
                     </div>
-                  ))}
-                </div>
-              )}
-              {result.suggestions?.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sugestões</p>
-                  {result.suggestions.map((s, i) => (
-                    <div key={i} className="flex items-start gap-1.5 text-xs text-slate-600">
-                      <span className="text-emerald-500 mt-0.5 flex-shrink-0">→</span>{s}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Done — no analysis (API not configured) */}
-          {stage === "done" && !result && (
-            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-center gap-3">
-              <Check className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-emerald-800">Arquivo enviado com sucesso</p>
-                <p className="text-xs text-emerald-600">{file?.name} · {fmtSize(file?.size ?? 0)}</p>
-              </div>
+                    <p className="text-xs text-slate-600">{result.summary}</p>
+                    {result.issues?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {result.issues.slice(0, 3).map((iss, j) => (
+                          <div key={j} className="flex items-start gap-1 text-xs text-red-700">
+                            <X className="w-3 h-3 mt-0.5 shrink-0 text-red-400" />{iss}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {result.suggestions?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {result.suggestions.slice(0, 3).map((s, j) => (
+                          <div key={j} className="flex items-start gap-1 text-xs text-slate-600">
+                            <span className="text-emerald-500 shrink-0">→</span>{s}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!isClient && (result as AnalyzeResult & { notes?: string[] }).notes?.length ? (
+                      <div className="space-y-0.5 border-t border-dashed border-slate-300 pt-1.5 mt-1">
+                        <p className="text-[10px] font-semibold text-violet-600 uppercase tracking-wide">🔒 Notas internas</p>
+                        {((result as AnalyzeResult & { notes?: string[] }).notes ?? []).slice(0, 3).map((n, j) => (
+                          <div key={j} className="flex items-start gap-1 text-xs text-violet-700">
+                            <span className="text-violet-400 shrink-0">→</span>{n}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -1423,7 +1613,7 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
           {stage === "done" ? (
             <>
               <button onClick={reset} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
-                Enviar outro
+                Enviar mais
               </button>
               <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
                 Concluir
@@ -1434,11 +1624,15 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
               <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
               <button
                 onClick={doUpload}
-                disabled={!file || stage === "uploading" || stage === "analyzing"}
+                disabled={!files.length || stage === "processing"}
                 className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
               >
                 <Upload className="w-4 h-4" />
-                {stage === "uploading" ? "Enviando…" : stage === "analyzing" ? "Analisando…" : "Enviar e Analisar"}
+                {stage === "processing"
+                  ? "Processando…"
+                  : files.length > 1
+                  ? `Enviar ${files.length} arquivos`
+                  : "Enviar e Analisar"}
               </button>
             </>
           )}
@@ -1627,6 +1821,8 @@ function CreateBlockModal({ user, onClose, onCreate }: {
 // ASSET ROW — shows file + expandable AI analysis
 // ============================================================
 function AssetRow({ asset }: { asset: SeedAsset }) {
+  const { currentUser } = useContext(AppContext);
+  const isClient = currentUser?.role === "client";
   const [expanded, setExpanded] = useState(false);
   const a = asset.analysis;
   const scoreColor = a
@@ -1676,10 +1872,20 @@ function AssetRow({ asset }: { asset: SeedAsset }) {
           )}
           {a.suggestions?.length > 0 && (
             <div className="space-y-0.5">
-              <p className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Sugestões</p>
+              <p className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Recomendações</p>
               {a.suggestions.map((s, i) => (
                 <div key={i} className="flex items-start gap-1 text-slate-600">
                   <span className="text-emerald-500 flex-shrink-0">→</span>{s}
+                </div>
+              ))}
+            </div>
+          )}
+          {!isClient && a.notes && a.notes.length > 0 && (
+            <div className="space-y-0.5 border-t border-dashed border-slate-300 pt-2 mt-1">
+              <p className="font-semibold text-violet-600 uppercase tracking-wide text-[10px]">🔒 Notas internas (equipe ATT)</p>
+              {a.notes.map((n, i) => (
+                <div key={i} className="flex items-start gap-1 text-violet-700">
+                  <span className="text-violet-400 flex-shrink-0">→</span>{n}
                 </div>
               ))}
             </div>
@@ -1699,6 +1905,20 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("overview");
   const [showUpload, setShowUpload] = useState(false);
+
+  // Auto-advance block status when all required files are uploaded
+  useEffect(() => {
+    if (!block || block.status !== "awaiting_client_files") return;
+    const required = READINESS_RULES[block.svc] || [];
+    if (!required.length) return;
+    const blockAssets = assets.filter((a) => a.blockId === block.id);
+    const cats = new Set(blockAssets.map((a) => a.cat));
+    if (required.every((c) => cats.has(c))) {
+      setBlocks(blocks.map((b) =>
+        b.id === block.id ? { ...b, status: "client_files_under_review" as BlockStatus } : b
+      ));
+    }
+  }, [assets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!block) return <EmptyState icon={Package} title="Bloco não encontrado" />;
 
@@ -1898,13 +2118,14 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
           allowedCategories={Object.keys(CATEGORY_LABELS) as AssetCategory[]}
           onClose={() => setShowUpload(false)}
           onUploaded={(asset) => {
-            setAssets([...assets, asset]);
-            const act: SeedActivity = {
-              id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
-              type: "asset_uploaded", desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
+            // Functional updates avoid stale-closure bugs when multiple files are uploaded in sequence
+            setAssets((prev) => [...prev, asset]);
+            setActivities((prev) => [...prev, {
+              id: `al_${Date.now()}_${asset.id}`, blockId: block.id, userId: user.id,
+              type: "asset_uploaded" as const,
+              desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
               at: new Date().toISOString(),
-            };
-            setActivities([...activities, act]);
+            }]);
           }}
         />
       )}
@@ -2333,6 +2554,671 @@ function UsersPage() {
 }
 
 // ============================================================
+// FASE 4 — ONBOARDING WIZARD
+// ============================================================
+const SECTORS = ["Móveis", "Luminária e Iluminação", "Revestimentos", "Metais e Louças", "Design de Interiores", "Arquitetura", "Decoração", "Outro"];
+const PRODUCT_CATEGORIES: Record<ProductCategory, string> = { moveis: "Móveis", luminarias: "Luminárias", revestimentos: "Revestimentos", metais: "Metais / Louças", outros: "Outros" };
+
+function OnboardingWizardPage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
+  const clientId = user.clientId || "";
+  const { blocks, setBlocks, assets } = useContext(AppContext);
+  const [brands, setBrands] = useState<Brand[]>(BRANDS);
+  const [catalog, setCatalog] = useState<CatalogProduct[]>(CATALOG);
+
+  const brand = brands.find((b) => b.clientId === clientId) || { clientId, companyName: "", logoUrl: "", website: "", sector: "", priority: "normal" as Priority, step: 0 };
+  const myProducts = catalog.filter((p) => p.clientId === clientId);
+  const myBlocks = blocks.filter((b) => b.clientId === clientId);
+
+  const [step, setStep] = useState(brand.step > 0 ? Math.min(brand.step, 4) : 0);
+  const [form, setForm] = useState({ companyName: brand.companyName, logoUrl: brand.logoUrl || "", website: brand.website, sector: brand.sector, priority: brand.priority });
+  const [newProd, setNewProd] = useState({ name: "", sku: "", category: "moveis" as ProductCategory });
+  const [editingVar, setEditingVar] = useState<string | null>(null);
+  const [varForm, setVarForm] = useState({ name: "", finishes: "", colors: "", materials: "" });
+
+  const saveBrand = () => {
+    const updated = brands.filter((b) => b.clientId !== clientId);
+    const newBrand: Brand = { ...form, clientId, step: Math.max(1, brand.step) };
+    setBrands([...updated, newBrand]);
+    BRANDS = [...updated, newBrand];
+    setStep(1);
+  };
+
+  const addProduct = () => {
+    if (!newProd.name || !newProd.sku) return;
+    const prod: CatalogProduct = { id: `cp${Date.now()}`, clientId, ...newProd, priority: myProducts.length + 1, variations: [] };
+    const updated = [...catalog, prod];
+    setCatalog(updated);
+    CATALOG = updated;
+    setNewProd({ name: "", sku: "", category: "moveis" });
+  };
+
+  const removeProduct = (id: string) => {
+    const updated = catalog.filter((p) => p.id !== id);
+    setCatalog(updated);
+    CATALOG = updated;
+  };
+
+  const addVariation = (productId: string) => {
+    if (!varForm.name) return;
+    const updated = catalog.map((p) => p.id === productId ? { ...p, variations: [...p.variations, { id: `v${Date.now()}`, ...varForm }] } : p);
+    setCatalog(updated);
+    CATALOG = updated;
+    setEditingVar(null);
+    setVarForm({ name: "", finishes: "", colors: "", materials: "" });
+  };
+
+  // Auto-create SeedBlocks for each catalog product when moving to the file upload step
+  const createBlocksFromCatalog = () => {
+    const clientContracts = CONTRACTS.filter((c) => c.clientId === clientId);
+    const contractId = clientContracts[0]?.id || "";
+    const existingCskus = blocks.filter((b) => b.clientId === clientId).map((b) => b.csku);
+    const currentCount = blocks.filter((b) => b.clientId === clientId).length;
+    const newBlocks: SeedBlock[] = myProducts
+      .filter((p) => !existingCskus.includes(p.sku))
+      .map((p, i) => ({
+        id: `pb_${Date.now()}_${i}`,
+        clientId,
+        contractId,
+        n: currentCount + i + 1,
+        sku: `${clientId.toUpperCase().slice(0, 6)}-${String(currentCount + i + 1).padStart(3, "0")}`,
+        csku: p.sku,
+        title: p.name,
+        svc: "standard" as ServiceType,
+        status: "awaiting_client_files" as BlockStatus,
+        pri: "normal" as Priority,
+        created: new Date().toISOString().slice(0, 10),
+      }));
+    if (newBlocks.length > 0) {
+      setBlocks([...blocks, ...newBlocks]);
+    }
+  };
+
+  const advanceStep = (n: number) => {
+    if (n === 3) createBlocksFromCatalog();
+    const updated = brands.map((b) => b.clientId === clientId ? { ...b, step: Math.max(b.step, n) } : b);
+    setBrands(updated);
+    BRANDS = updated;
+    setStep(n);
+  };
+
+  // Checklist de completude
+  const myBlockIds = myBlocks.map((b) => b.id);
+  const hasCAD = assets.some((a) => myBlockIds.includes(a.blockId) && ["cad", "technical_drawing"].includes(a.cat));
+  const hasPhotos = assets.some((a) => myBlockIds.includes(a.blockId) && ["reference_photo", "finishing"].includes(a.cat));
+  const checks = [
+    { label: "Dados da marca preenchidos", done: !!brand.companyName && !!brand.website && !!brand.sector },
+    { label: "Catálogo com ao menos 1 produto", done: myProducts.length > 0 },
+    { label: "Variações definidas em todos os produtos", done: myProducts.length > 0 && myProducts.every((p) => p.variations.length > 0) },
+    { label: "Arquivos CAD enviados", done: hasCAD },
+    { label: "Fotos de referência enviadas", done: hasPhotos },
+  ];
+  const completeness = Math.round((checks.filter((c) => c.done).length / checks.length) * 100);
+
+  const steps = ["Dados da Marca", "Catálogo de Produtos", "Variações", "Upload de Arquivos", "Completude"];
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader eyebrow="Fase 4 · Onboarding" title="Configure sua presença digital" description="Preencha cada etapa para que nossa equipe possa iniciar a produção dos seus blocos 3D." />
+
+      {/* Progress steps */}
+      <Card className="p-6">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          {steps.map((s, i) => (
+            <React.Fragment key={s}>
+              <button onClick={() => setStep(i)} className={`flex min-w-0 flex-col items-center gap-1.5 rounded-2xl px-4 py-3 text-center transition ${step === i ? "bg-slate-950 text-white" : i < step ? "bg-emerald-50 text-emerald-700" : "text-slate-400 hover:text-slate-600"}`}>
+                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${step === i ? "bg-white/15 text-white" : i < step ? "bg-emerald-200 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                  {i < step ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                </div>
+                <span className="text-[11px] font-semibold whitespace-nowrap">{s}</span>
+              </button>
+              {i < steps.length - 1 && <div className={`h-px flex-1 min-w-[24px] ${i < step ? "bg-emerald-300" : "bg-slate-200"}`} />}
+            </React.Fragment>
+          ))}
+        </div>
+      </Card>
+
+      {/* Step 0 - Brand */}
+      {step === 0 && (
+        <Card className="p-6 md:p-8">
+          <h3 className="text-lg font-semibold text-slate-900 mb-6">Dados da sua marca</h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {([
+              { label: "Nome da empresa", key: "companyName", placeholder: "Ex: Escal Móveis" },
+              { label: "Site", key: "website", placeholder: "Ex: www.escal.com.br" },
+              { label: "Logo (URL)", key: "logoUrl", placeholder: "https://..." },
+            ] as const).map(({ label, key, placeholder }) => (
+              <div key={key}>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">{label}</label>
+                <input value={form[key] || ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder} className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 focus:bg-white transition" />
+              </div>
+            ))}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Setor</label>
+              <select value={form.sector} onChange={(e) => setForm({ ...form, sector: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                <option value="">Selecione...</option>
+                {SECTORS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Prioridade</label>
+              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as Priority })} className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                {(["low", "normal", "high", "urgent"] as Priority[]).map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <button onClick={saveBrand} disabled={!form.companyName || !form.website || !form.sector} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40">
+              Salvar e continuar →
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Step 1 - Catalog */}
+      {step === 1 && (
+        <Card className="p-6 md:p-8">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">Catálogo de produtos</h3>
+          <p className="text-sm text-slate-500 mb-6">Liste todos os produtos que deseja transformar em blocos 3D. Informe nome e SKU.</p>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <input value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} placeholder="Nome do produto" className="flex-1 min-w-[160px] rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 transition" />
+            <input value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value.toUpperCase() })} placeholder="SKU" className="w-40 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 transition" />
+            <select value={newProd.category} onChange={(e) => setNewProd({ ...newProd, category: e.target.value as ProductCategory })} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 transition">
+              {Object.entries(PRODUCT_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <button onClick={addProduct} className="flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition">
+              <Plus className="h-4 w-4" /> Adicionar
+            </button>
+          </div>
+          {myProducts.length === 0 ? (
+            <EmptyState icon={Package} title="Nenhum produto adicionado" desc="Adicione ao menos um produto para continuar." />
+          ) : (
+            <div className="space-y-2">
+              {myProducts.map((p, i) => (
+                <div key={p.id} className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 text-[11px] font-bold text-white">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{p.name}</p>
+                    <p className="text-xs text-slate-500">{p.sku} · {PRODUCT_CATEGORIES[p.category]}</p>
+                  </div>
+                  <button onClick={() => removeProduct(p.id)} className="text-slate-400 hover:text-rose-500 transition"><X className="h-4 w-4" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-6 flex justify-between">
+            <button onClick={() => setStep(0)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+            <button onClick={() => advanceStep(2)} disabled={myProducts.length === 0} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40 transition">
+              Continuar →
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Step 2 - Variations */}
+      {step === 2 && (
+        <div className="space-y-4">
+          {myProducts.length === 0 ? (
+            <Card className="p-8"><EmptyState icon={Package} title="Nenhum produto no catálogo" desc="Volte ao passo anterior e adicione produtos primeiro." /></Card>
+          ) : myProducts.map((p) => (
+            <Card key={p.id} className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{p.sku}</p>
+                  <h4 className="text-base font-semibold text-slate-900">{p.name}</h4>
+                </div>
+                <button onClick={() => { setEditingVar(editingVar === p.id ? null : p.id); setVarForm({ name: "", finishes: "", colors: "", materials: "" }); }} className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 transition">
+                  <Plus className="h-3 w-3" /> Variação
+                </button>
+              </div>
+              {p.variations.length === 0 && <p className="text-sm text-slate-400 italic">Nenhuma variação. Adicione ao menos uma.</p>}
+              <div className="space-y-2 mb-3">
+                {p.variations.map((v) => (
+                  <div key={v.id} className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4">
+                    <p className="text-sm font-semibold text-slate-800 mb-2">{v.name}</p>
+                    <div className="grid grid-cols-3 gap-3 text-xs text-slate-500">
+                      <div><span className="font-medium text-slate-700">Acabamentos:</span><br />{v.finishes || "—"}</div>
+                      <div><span className="font-medium text-slate-700">Cores:</span><br />{v.colors || "—"}</div>
+                      <div><span className="font-medium text-slate-700">Materiais:</span><br />{v.materials || "—"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {editingVar === p.id && (
+                <div className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-4 space-y-3">
+                  <p className="text-xs font-semibold text-cyan-800 uppercase tracking-wider">Nova variação</p>
+                  <input value={varForm.name} onChange={(e) => setVarForm({ ...varForm, name: e.target.value })} placeholder="Nome da variação" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-400 transition" />
+                  {(["finishes", "colors", "materials"] as const).map((field) => (
+                    <input key={field} value={varForm[field]} onChange={(e) => setVarForm({ ...varForm, [field]: e.target.value })} placeholder={{ finishes: "Acabamentos (ex: Couro, Tecido)", colors: "Cores (ex: Bege, Cinza)", materials: "Materiais (ex: MDF, Aço)" }[field]} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-400 transition" />
+                  ))}
+                  <div className="flex gap-2">
+                    <button onClick={() => addVariation(p.id)} className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition">Salvar variação</button>
+                    <button onClick={() => setEditingVar(null)} className="text-xs text-slate-500 hover:text-slate-700">Cancelar</button>
+                  </div>
+                </div>
+              )}
+            </Card>
+          ))}
+          <div className="flex justify-between">
+            <button onClick={() => setStep(1)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+            <button onClick={() => advanceStep(3)} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition">Continuar →</button>
+          </div>
+        </div>
+      )}
+
+      {/* Step 3 - Files */}
+      {step === 3 && (
+        <div className="space-y-4">
+          <Card className="p-6 md:p-8">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">Upload de arquivos</h3>
+            <p className="text-sm text-slate-500 mb-6">Seus produtos foram registrados como blocos. Clique em cada um para abrir e enviar os arquivos técnicos.</p>
+
+            {/* Tipos aceitos */}
+            <div className="grid gap-3 sm:grid-cols-3 mb-6">
+              {[
+                { cat: "CAD / Estrutural", exts: ".step, .dwg, .dxf, .iges", icon: FileUp, color: "text-violet-600 bg-violet-50 border-violet-200" },
+                { cat: "Fotos de referência", exts: ".jpg, .jpeg, .png, .webp", icon: Eye, color: "text-sky-600 bg-sky-50 border-sky-200" },
+                { cat: "Desenho técnico", exts: ".pdf, .dwg, .dxf", icon: Hash, color: "text-slate-600 bg-slate-50 border-slate-200" },
+                { cat: "Acabamento / Material", exts: ".pdf, .png, .jpg", icon: FileText, color: "text-amber-600 bg-amber-50 border-amber-200" },
+                { cat: "Bloco 3D existente", exts: ".glb, .gltf, .obj, .fbx", icon: Box, color: "text-emerald-600 bg-emerald-50 border-emerald-200" },
+                { cat: "Vídeo (opcional)", exts: ".mp4, .mov", icon: Globe, color: "text-rose-600 bg-rose-50 border-rose-200" },
+              ].map((item) => (
+                <div key={item.cat} className={`flex items-start gap-3 rounded-2xl border p-3 ${item.color}`}>
+                  <item.icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold">{item.cat}</p>
+                    <p className="text-[11px] opacity-70 mt-0.5">{item.exts}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Blocks list */}
+            {myBlocks.length === 0 ? (
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center">
+                <p className="text-sm text-slate-500">Nenhum bloco encontrado. Volte ao passo anterior e verifique se os produtos foram adicionados.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{myBlocks.length} bloco{myBlocks.length > 1 ? "s" : ""} aguardando arquivos</p>
+                {myBlocks.map((block) => {
+                  const blockAssets = assets.filter((a) => a.blockId === block.id);
+                  const hasFiles = blockAssets.length > 0;
+                  return (
+                    <div key={block.id} className={`flex items-center justify-between rounded-[22px] border px-4 py-4 ${hasFiles ? "border-emerald-200/80 bg-emerald-50/60" : "border-amber-200/60 bg-amber-50/40"}`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-full flex-shrink-0 ${hasFiles ? "bg-emerald-500 text-white" : "bg-amber-200 text-amber-700"}`}>
+                          {hasFiles ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{block.title}</p>
+                          <p className="text-xs text-slate-500">{block.csku} · {hasFiles ? `${blockAssets.length} arquivo${blockAssets.length > 1 ? "s" : ""} enviado${blockAssets.length > 1 ? "s" : ""}` : "Nenhum arquivo enviado"}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }}
+                        className="ml-4 flex-shrink-0 flex items-center gap-1.5 rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-700"
+                      >
+                        Abrir bloco <ExternalLink className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-between">
+              <button onClick={() => setStep(2)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+              <button onClick={() => advanceStep(4)} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition">Ver checklist →</button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Step 4 - Completeness */}
+      {step === 4 && (
+        <Card className="p-6 md:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Checklist de completude</h3>
+              <p className="text-sm text-slate-500 mt-1">Verifique se tudo está em ordem antes de iniciarmos a produção.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-3xl font-semibold text-slate-900">{completeness}%</p>
+              <p className="text-xs text-slate-500">completo</p>
+            </div>
+          </div>
+          <ProgressBar value={completeness} className="mb-6" />
+          <div className="space-y-3">
+            {checks.map((c) => (
+              <div key={c.label} className={`flex items-center gap-3 rounded-2xl border p-4 ${c.done ? "border-emerald-200/80 bg-emerald-50/60" : "border-amber-200/80 bg-amber-50/60"}`}>
+                <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${c.done ? "bg-emerald-500 text-white" : "bg-amber-200 text-amber-700"}`}>
+                  {c.done ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                </div>
+                <p className={`text-sm font-semibold ${c.done ? "text-emerald-800" : "text-amber-800"}`}>{c.label}</p>
+                {!c.done && <span className="ml-auto text-xs font-medium text-amber-600">Pendente</span>}
+              </div>
+            ))}
+          </div>
+          {completeness === 100 && (
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+              <p className="text-sm font-semibold text-emerald-800">Onboarding completo! Nossa equipe foi notificada e iniciará a produção em breve.</p>
+            </div>
+          )}
+          <div className="mt-6 flex justify-start">
+            <button onClick={() => setStep(3)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 5 — TICKETS DE PRODUÇÃO
+// ============================================================
+const TICKET_STATUS_LABELS: Record<TicketStatus, string> = { new: "Novo", in_production: "Em Produção", internal_review: "Revisão Interna", delivered: "Entregue" };
+const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
+  new: "border-slate-200/80 bg-slate-100/90 text-slate-600",
+  in_production: "border-violet-200/80 bg-violet-50 text-violet-700",
+  internal_review: "border-amber-200/80 bg-amber-50 text-amber-700",
+  delivered: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+};
+
+function ProductionTicketsPage({ user }: { user: SeedUser }) {
+  const { blocks } = useContext(AppContext);
+  const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
+  const [filter, setFilter] = useState<TicketStatus | "all">("all");
+
+  const isClient = user.role === "client";
+  const visible = tickets.filter((t) => {
+    if (isClient && t.clientId !== user.clientId) return false;
+    if (filter !== "all" && t.status !== filter) return false;
+    return true;
+  });
+
+  const updateStatus = (id: string, status: TicketStatus) => {
+    const updated = tickets.map((t) => t.id === id ? { ...t, status } : t);
+    setTickets(updated);
+    TICKETS = updated;
+  };
+
+  const assignTicket = (id: string, userId: string) => {
+    const updated = tickets.map((t) => t.id === id ? { ...t, assignedTo: userId } : t);
+    setTickets(updated);
+    TICKETS = updated;
+  };
+
+  const internalUsers = USERS.filter((u) => u.role !== "client" && u.active);
+  const counts = { all: tickets.filter((t) => !isClient || t.clientId === user.clientId).length, new: 0, in_production: 0, internal_review: 0, delivered: 0 };
+  tickets.filter((t) => !isClient || t.clientId === user.clientId).forEach((t) => { counts[t.status]++; });
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Fase 5 · Produção"
+        title="Tickets de produção"
+        description="Cada ticket representa um bloco 3D em produção, com SLA, responsável e status atualizado."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{counts.all} tickets</Badge>}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        {([["all", "Todos", counts.all], ["new", "Novos", counts.new], ["in_production", "Em Produção", counts.in_production], ["internal_review", "Revisão", counts.internal_review], ["delivered", "Entregues", counts.delivered]] as const).map(([id, label, count]) => (
+          <TabBtn key={id} active={filter === id} label={label} count={count} onClick={() => setFilter(id)} />
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <Card className="p-4"><EmptyState icon={Hash} title="Nenhum ticket encontrado" desc="Não há tickets para o filtro selecionado." /></Card>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((ticket) => {
+            const block = blocks.find((b) => b.id === ticket.blockId);
+            const client = CLIENTS.find((c) => c.id === ticket.clientId);
+            const assignedUser = USERS.find((u) => u.id === ticket.assignedTo);
+            const slaDate = new Date(ticket.slaDate);
+            const daysLeft = Math.ceil((slaDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            const slaUrgent = daysLeft <= 3;
+
+            return (
+              <Card key={ticket.id} className="p-5 md:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <Badge className={TICKET_STATUS_COLORS[ticket.status]}>{TICKET_STATUS_LABELS[ticket.status]}</Badge>
+                      <ServiceBadge type={ticket.plan} />
+                      <PriorityDot priority={ticket.priority} />
+                    </div>
+                    <p className="text-base font-semibold text-slate-900">{ticket.title}</p>
+                    <p className="text-sm text-slate-500 mt-1">{client?.name} · Bloco #{block?.n || "—"} · {block?.sku || ticket.blockId}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className={`text-sm font-semibold ${slaUrgent ? "text-rose-600" : "text-slate-700"}`}>
+                      {slaUrgent ? `⚠ ${daysLeft}d restantes` : `${daysLeft}d até SLA`}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">SLA: {fmtDate(ticket.slaDate)}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+                  {!isClient && (
+                    <>
+                      <select value={ticket.assignedTo || ""} onChange={(e) => assignTicket(ticket.id, e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
+                        <option value="">Sem responsável</option>
+                        {internalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                      <select value={ticket.status} onChange={(e) => updateStatus(ticket.id, e.target.value as TicketStatus)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
+                        {(["new", "in_production", "internal_review", "delivered"] as TicketStatus[]).map((s) => <option key={s} value={s}>{TICKET_STATUS_LABELS[s]}</option>)}
+                      </select>
+                    </>
+                  )}
+                  {assignedUser && (
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[9px] font-bold text-white">
+                        {assignedUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                      </div>
+                      {assignedUser.name}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 7 — PUBLICAÇÕES
+// ============================================================
+function PublicationsPage({ user }: { user: SeedUser }) {
+  const { blocks } = useContext(AppContext);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const isClient = user.role === "client";
+  const pubs = PUBLICATIONS.filter((p) => {
+    if (!isClient) return true;
+    const block = blocks.find((b) => b.id === p.blockId);
+    return block?.clientId === user.clientId;
+  });
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320, pub8: 2980 };
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Fase 7 · Publicação"
+        title="Blocos publicados"
+        description="Todos os blocos 3D disponíveis na plataforma ArchTechTour, com links de embed e métricas de uso."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{pubs.length} publicados</Badge>}
+      />
+
+      {pubs.length === 0 ? (
+        <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc="Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour." /></Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {pubs.map((pub) => {
+            const block = blocks.find((b) => b.id === pub.blockId);
+            const client = CLIENTS.find((c) => c.id === block?.clientId);
+            return (
+              <Card key={pub.id} className="p-5">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{client?.name} · v{pub.v}</p>
+                    <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
+                    <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-2xl font-semibold text-slate-900">{(downloads[pub.id] || 0).toLocaleString("pt-BR")}</p>
+                    <p className="text-xs text-slate-400">downloads</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <ExternalLink className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                    <p className="flex-1 min-w-0 truncate text-xs text-slate-600">{pub.url}</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => copyToClipboard(pub.url, `url-${pub.id}`)} className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-700">
+                        {copied === `url-${pub.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      </button>
+                      <a href={pub.url} target="_blank" rel="noopener noreferrer" className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-700">
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <Hash className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                    <p className="flex-1 min-w-0 truncate text-xs text-slate-600 font-mono">{pub.embed.slice(0, 60)}…</p>
+                    <button onClick={() => copyToClipboard(pub.embed, `embed-${pub.id}`)} className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-700">
+                      {copied === `embed-${pub.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 8 — ANALYTICS
+// ============================================================
+function AnalyticsPage({ user }: { user: SeedUser }) {
+  const { blocks } = useContext(AppContext);
+  const isClient = user.role === "client";
+
+  const myBlocks = isClient ? blocks.filter((b) => b.clientId === user.clientId) : blocks;
+  const published = myBlocks.filter((b) => b.status === "published");
+  const inProd = myBlocks.filter((b) => !["published", "draft", "archived"].includes(b.status));
+  const myPubs = PUBLICATIONS.filter((p) => {
+    const block = blocks.find((b) => b.id === p.blockId);
+    return isClient ? block?.clientId === user.clientId : true;
+  });
+
+  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320, pub8: 2980 };
+  const totalDownloads = myPubs.reduce((s, p) => s + (downloads[p.id] || 0), 0);
+  const topBlocks = myPubs
+    .map((p) => ({ pub: p, block: blocks.find((b) => b.id === p.blockId), dl: downloads[p.id] || 0 }))
+    .sort((a, b) => b.dl - a.dl)
+    .slice(0, 5);
+
+  const clientStats = CLIENTS.map((c) => ({
+    client: c,
+    published: blocks.filter((b) => b.clientId === c.id && b.status === "published").length,
+    total: blocks.filter((b) => b.clientId === c.id).length,
+    downloads: PUBLICATIONS.filter((p) => blocks.find((b) => b.id === p.blockId)?.clientId === c.id).reduce((s, p) => s + (downloads[p.id] || 0), 0),
+  })).filter((s) => s.total > 0).sort((a, b) => b.downloads - a.downloads);
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader eyebrow="Fase 8 · Analytics" title="Métricas e desempenho" description={isClient ? "Acompanhe o alcance dos seus blocos 3D na plataforma ArchTechTour." : "Visão consolidada de todos os clientes, downloads e produção."} />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={Globe} label="Blocos publicados" value={published.length} sub={`de ${myBlocks.length} total`} color="text-emerald-600" />
+        <MetricCard icon={BarChart3} label="Downloads totais" value={totalDownloads.toLocaleString("pt-BR")} sub="na plataforma" color="text-cyan-600" />
+        <MetricCard icon={Layers} label="Em produção" value={inProd.length} sub="aguardando publicação" color="text-violet-600" />
+        <MetricCard icon={CheckCircle} label="Taxa de publicação" value={`${myBlocks.length ? Math.round((published.length / myBlocks.length) * 100) : 0}%`} sub="dos blocos publicados" />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card className="p-6">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-4">Top blocos por downloads</p>
+          {topBlocks.length === 0 ? <EmptyState icon={BarChart3} title="Sem dados" /> : (
+            <div className="space-y-4">
+              {topBlocks.map(({ pub, block, dl }, i) => {
+                const maxDl = topBlocks[0]?.dl || 1;
+                return (
+                  <div key={pub.id}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500">#{i + 1}</span>
+                        <p className="text-sm font-semibold text-slate-800 truncate">{block?.title || pub.blockId}</p>
+                      </div>
+                      <p className="text-sm font-semibold text-slate-900 flex-shrink-0 ml-2">{dl.toLocaleString("pt-BR")}</p>
+                    </div>
+                    <ProgressBar value={Math.round((dl / maxDl) * 100)} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        {!isClient && (
+          <Card className="p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-4">Desempenho por cliente</p>
+            <div className="space-y-3">
+              {clientStats.slice(0, 6).map(({ client, published: pub, total, downloads: dl }) => (
+                <div key={client.id} className="flex items-center gap-3">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-slate-950 text-[10px] font-bold text-white">
+                    {client.code.slice(0, 2)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs font-semibold text-slate-800 truncate">{client.name}</p>
+                      <p className="text-xs text-slate-500 flex-shrink-0 ml-2">{pub}/{total} pub · {dl.toLocaleString("pt-BR")} dl</p>
+                    </div>
+                    <ProgressBar value={total ? Math.round((pub / total) * 100) : 0} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+
+        {isClient && (
+          <Card className="p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-4">Status dos seus blocos</p>
+            <div className="space-y-2">
+              {Object.entries(
+                myBlocks.reduce((acc, b) => { acc[b.status] = (acc[b.status] || 0) + 1; return acc; }, {} as Record<string, number>)
+              ).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
+                <div key={status} className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-2.5">
+                  <StatusBadge status={status as BlockStatus} />
+                  <span className="text-sm font-semibold text-slate-700">{count}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN PORTAL
 // ============================================================
 export default function Portal() {
@@ -2344,6 +3230,26 @@ export default function Portal() {
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
   const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
+
+  // Load users/clients/contracts registered via /contrato flow from localStorage
+  useEffect(() => {
+    try {
+      const storedUsers: SeedUser[] = JSON.parse(localStorage.getItem("att_portal_users") || "[]");
+      storedUsers.forEach((u) => {
+        if (!USERS.find((x) => x.email === u.email)) USERS.push(u);
+      });
+      const storedClients: SeedClient[] = JSON.parse(localStorage.getItem("att_portal_clients") || "[]");
+      storedClients.forEach((c) => {
+        if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c);
+      });
+      const storedContracts: SeedContract[] = JSON.parse(localStorage.getItem("att_portal_contracts") || "[]");
+      storedContracts.forEach((c) => {
+        if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c);
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
     [],
@@ -2364,6 +3270,7 @@ export default function Portal() {
   const renderPage = () => {
     switch (page) {
       case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} />;
+      case "onboarding": return <OnboardingWizardPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "blocks": return <BlocksListPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "block_detail": return <BlockDetailPage blockId={selectedBlock} user={currentUser} setPage={setPage} />;
       case "contracts": return <ContractsPage user={currentUser} setPage={setPage} setSelectedContract={setSelectedContract} />;
@@ -2371,6 +3278,9 @@ export default function Portal() {
       case "clients": return <ClientsPage />;
       case "approvals": return <ApprovalsPage user={currentUser} />;
       case "queue": return <QueuePage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
+      case "tickets": return <ProductionTicketsPage user={currentUser} />;
+      case "publications": return <PublicationsPage user={currentUser} />;
+      case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage />;
       case "users": return <UsersPage />;
       default: return <InternalDashboard setPage={setPage} />;

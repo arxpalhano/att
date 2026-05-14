@@ -20,19 +20,22 @@ const s3 = new S3Client({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
   },
+  // Disable automatic checksum (CRC32) added by SDK v3 >= 3.750 — browser PUT does not send it
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
 
 const BUCKET = process.env.S3_BUCKET_NAME || "archtechtour-assets";
 
 // Extensões permitidas por categoria
 const ALLOWED_EXTENSIONS: Record<string, string[]> = {
-  cad: [".step", ".stp", ".dwg", ".dxf", ".iges", ".igs"],
-  finishing: [".pdf", ".png", ".jpg", ".jpeg"],
-  photos: [".jpg", ".jpeg", ".png", ".webp", ".tiff"],
-  videos: [".mp4", ".mov", ".avi", ".mkv"],
-  technical_drawing: [".pdf", ".dwg", ".dxf"],
-  "3d_block": [".glb", ".gltf", ".obj", ".fbx"],
-  extra_reference: [".pdf", ".png", ".jpg", ".jpeg", ".zip"],
+  cad: [".step", ".stp", ".dwg", ".dxf", ".iges", ".igs", ".skp", ".obj", ".fbx", ".glb", ".gltf", ".3ds", ".max"],
+  finishing: [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".tiff", ".zip"],
+  photos: [".jpg", ".jpeg", ".png", ".webp", ".tiff", ".heic", ".heif"],
+  videos: [".mp4", ".mov", ".avi", ".mkv", ".webm"],
+  technical_drawing: [".pdf", ".dwg", ".dxf", ".png", ".jpg", ".jpeg"],
+  "3d_block": [".glb", ".gltf", ".obj", ".fbx", ".skp", ".stl", ".3ds"],
+  extra_reference: [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".zip", ".docx", ".xlsx"],
 };
 
 export async function POST(req: NextRequest) {

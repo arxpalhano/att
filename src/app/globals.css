@@ -14,10 +14,7 @@ body {
 
 body {
   color: #0f172a;
-  background:
-    radial-gradient(circle at top left, rgba(34, 211, 238, 0.1), transparent 28%),
-    radial-gradient(circle at 100% 0%, rgba(16, 185, 129, 0.08), transparent 24%),
-    linear-gradient(180deg, #f8fbff 0%, #f3f7fb 100%);
+  background: #ffffff;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -51,6 +48,16 @@ button {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* Override browser autofill background on dark inputs */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 40px #1e293b inset !important;
+  -webkit-text-fill-color: #ffffff !important;
+  caret-color: #ffffff;
 }
 
 /* Scrollbar for dark sidebar */

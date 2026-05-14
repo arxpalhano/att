@@ -46,6 +46,7 @@ interface AnalysisResult {
   summary: string;
   issues: string[];
   suggestions: string[];
+  notes?: string[];
   checklist: { item: string; ok: boolean }[];
 }
 
@@ -345,12 +346,18 @@ Responda SOMENTE com JSON válido neste formato exato (sem markdown, sem texto f
   "score": <inteiro 0-100>,
   "approved": <true se score >= 70, false se menor>,
   "summary": "<1-2 frases em português, objetivas: o que está bom e o que falta>",
-  "issues": ["<problema específico e concreto 1>", "<problema 2>"],
-  "suggestions": ["<ação corretiva específica 1>", "<ação 2>"],
+  "issues": ["<problema visível que o CLIENTE precisa corrigir no material — linguagem direta ao cliente>"],
+  "suggestions": ["<ação que o CLIENTE deve tomar para melhorar este arquivo — ex: 'Reenviar foto com iluminação uniforme'>"],
+  "notes": ["<observação INTERNA para a equipe ArchTechTour — ex: 'Solicitar modelo SKP ao cliente', 'Geometria vai exigir retopologia completa'>"],
   "checklist": [
     { "item": "<critério verificado>", "ok": <true/false> }
   ]
 }
+
+IMPORTANTE:
+- "suggestions" = ações para o CLIENTE executar (correções no material enviado)
+- "notes" = observações internas para a EQUIPE ATT (estratégia de produção, pedidos adicionais, alertas técnicos)
+- Nunca misture os dois: o cliente NÃO verá "notes"
 
 Regras do score:
 - 90-100: material perfeito, equipe trabalha sem dúvidas
@@ -364,20 +371,23 @@ Se o material for bom, não invente problemas. Issues e suggestions só quando r
 
 // ─── HANDLER ──────────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
+  let fileName = "";
+  let category = "";
   try {
     const body = await req.json();
-    const { fileUrl, fileName, category, mimeType } = body;
+    ({ fileName, category } = body);
+    const { fileUrl, mimeType, imageBase64, imageMimeType } = body;
 
-    if (!fileUrl || !fileName || !category) {
+    if (!fileName || !category) {
       return NextResponse.json(
-        { error: "Campos obrigatórios: fileUrl, fileName, category" },
+        { error: "Campos obrigatórios: fileName, category" },
         { status: 400 }
       );
     }
 
     const isImage =
       mimeType?.startsWith("image/") ||
-      /\.(jpg|jpeg|png|webp|gif|tiff|bmp)$/i.test(fileName);
+      /\.(jpe?g|png|webp|gif|tiff?|bmp|heic)$/i.test(fileName);
     const isPdf =
       mimeType === "application/pdf" || /\.pdf$/i.test(fileName);
 
@@ -387,36 +397,38 @@ export async function POST(req: NextRequest) {
       // ── Imagens: análise visual via Claude Vision ─────────────────────────
       let base64 = "";
       let validMime: "image/jpeg" | "image/png" | "image/gif" | "image/webp" = "image/jpeg";
-
-      // Claude Vision aceita no máximo ~5MB por imagem (raw bytes antes do base64)
-      const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
       let imageFetchedButTooLarge = false;
 
-      try {
-        const imgResp = await fetch(fileUrl, {
-          headers: { Accept: "image/*" },
-        });
-        if (imgResp.ok) {
-          const buf = await imgResp.arrayBuffer();
-
-          // Determine mime type
-          const ct = imgResp.headers.get("content-type") || mimeType || "";
-          if (ct.includes("png") || /\.png$/i.test(fileName)) validMime = "image/png";
-          else if (ct.includes("webp") || /\.webp$/i.test(fileName)) validMime = "image/webp";
-          else if (ct.includes("gif") || /\.gif$/i.test(fileName)) validMime = "image/gif";
-          else validMime = "image/jpeg";
-
-          if (buf.byteLength <= MAX_IMAGE_BYTES) {
-            base64 = Buffer.from(buf).toString("base64");
-          } else {
-            // Imagem muito grande para Vision API — análise textual com aviso de tamanho
-            const sizeMB = (buf.byteLength / 1024 / 1024).toFixed(1);
-            console.warn(`[Analyze] Imagem grande demais para Vision (${sizeMB}MB > 5MB): ${fileName}`);
-            imageFetchedButTooLarge = true;
+      // Prefer base64 sent directly from the browser (avoids server→S3 round-trip)
+      if (imageBase64) {
+        base64 = imageBase64;
+        const mt = imageMimeType || mimeType || "";
+        if (mt.includes("png") || /\.png$/i.test(fileName)) validMime = "image/png";
+        else if (mt.includes("webp") || /\.webp$/i.test(fileName)) validMime = "image/webp";
+        else if (mt.includes("gif") || /\.gif$/i.test(fileName)) validMime = "image/gif";
+        else validMime = "image/jpeg";
+      } else if (fileUrl) {
+        // Fallback: try to fetch from S3 (large images or non-browser callers)
+        const MAX_IMAGE_BYTES = 4.5 * 1024 * 1024;
+        try {
+          const imgResp = await fetch(fileUrl, { headers: { Accept: "image/*" } });
+          if (imgResp.ok) {
+            const buf = await imgResp.arrayBuffer();
+            const ct = imgResp.headers.get("content-type") || mimeType || "";
+            if (ct.includes("png") || /\.png$/i.test(fileName)) validMime = "image/png";
+            else if (ct.includes("webp") || /\.webp$/i.test(fileName)) validMime = "image/webp";
+            else if (ct.includes("gif") || /\.gif$/i.test(fileName)) validMime = "image/gif";
+            else validMime = "image/jpeg";
+            if (buf.byteLength <= MAX_IMAGE_BYTES) {
+              base64 = Buffer.from(buf).toString("base64");
+            } else {
+              console.warn(`[Analyze] Imagem grande (${(buf.byteLength / 1024 / 1024).toFixed(1)}MB): ${fileName}`);
+              imageFetchedButTooLarge = true;
+            }
           }
+        } catch {
+          // image inaccessible — text-only fallback below
         }
-      } catch {
-        // fallback below — imagem inacessível
       }
 
       if (base64) {
@@ -440,15 +452,19 @@ export async function POST(req: NextRequest) {
           ],
         });
       } else {
-        // Imagem muito grande (>5MB) OU inacessível — análise textual
+        // Large image (>4.5MB) or inaccessible — text-only analysis
         const nota = imageFetchedButTooLarge
-          ? `\n\nNOTA: A imagem foi recebida com sucesso no S3, mas excede 5MB e não pode ser analisada visualmente.
-Faça uma avaliação parcial com base apenas no nome do arquivo.
-Use score: 55, approved: false, e no summary indique que o arquivo foi recebido mas a resolução excessivamente alta requer
-conversão para análise automática. Sugira que o cliente envie uma versão comprimida (máx 3000px no maior lado) para análise automática,
-mantendo o arquivo original para uso na produção.`
+          ? `\n\nNOTA: A imagem foi recebida e salva com sucesso, mas excede o limite para análise visual automática.
+Avalie com base no nome do arquivo e na categoria.
+- Imagens grandes geralmente são de alta resolução — isso é positivo para produção.
+- O arquivo original está seguro para uso pela equipe de modelagem.
+- No summary, indique que a imagem foi recebida com sucesso mas não foi analisada visualmente (tamanho excessivo para análise automática).
+- Nas suggestions, oriente o cliente a também enviar uma versão reduzida (máx 2500px no maior lado) para análise automática.
+- Use um score entre 60-75 (arquivo recebido, análise visual pendente). Não penalize pelo tamanho — arquivo grande é sinal de alta resolução.`
           : `\n\nNOTA IMPORTANTE: A imagem não pôde ser carregada para análise visual.
-Retorne: score: 0, approved: false, issue: "Imagem inacessível — não foi possível realizar análise visual".`;
+Faça uma avaliação apenas com base no nome do arquivo.
+No summary, informe que o arquivo foi recebido mas não pôde ser analisado visualmente.
+Use score entre 50-65, approved: false, e sugira verificação manual da equipe.`;
 
         response = await client.messages.create({
           model: "claude-sonnet-4-6",
@@ -476,11 +492,12 @@ Retorne: score: 0, approved: false, issue: "Imagem inacessível — não foi pos
               buildPrompt(category as AssetCategory, fileName) +
               `\n\nNOTA: Este é um arquivo PDF. Não é possível ler o conteúdo nesta análise automática.
 Retorne uma avaliação parcial com:
-- score: 60 (recebido, aguardando revisão manual)
-- approved: false (requer confirmação manual da equipe)
-- summary: informando que o PDF foi recebido e registrado, mas precisa de revisão manual pela equipe de modelagem
-- issues: ["PDF requer revisão manual — análise automática não verifica conteúdo do documento"]
-- suggestions: liste as informações específicas que a equipe deve verificar ao abrir o PDF, com base nos critérios da categoria ${category}
+- score: 60
+- approved: false
+- summary: "PDF recebido e registrado com sucesso. A equipe de modelagem irá revisar o conteúdo manualmente antes de iniciar a produção."
+- issues: [] (array vazio — não há problema do lado do cliente, o arquivo foi recebido)
+- suggestions: [] (array vazio — não há ação necessária do cliente neste momento)
+- notes: liste aqui as informações específicas que a EQUIPE ATT deve verificar ao abrir o PDF, com base nos critérios da categoria ${category}. Ex: "Verificar se dimensões totais estão cotadas", "Confirmar presença de vistas frontal/lateral/superior"
 - checklist: os critérios como false (não verificados automaticamente)`,
           },
         ],
@@ -523,6 +540,7 @@ um arquivo com nome genérico ("arquivo1.skp", "untitled.obj") merece penalizaç
     if (typeof result.approved !== "boolean") result.approved = result.score >= 70;
     if (!Array.isArray(result.issues)) result.issues = [];
     if (!Array.isArray(result.suggestions)) result.suggestions = [];
+    if (!Array.isArray(result.notes)) result.notes = [];
     if (!Array.isArray(result.checklist)) result.checklist = [];
 
     return NextResponse.json({
@@ -531,17 +549,28 @@ um arquivo com nome genérico ("arquivo1.skp", "untitled.obj") merece penalizaç
       summary: result.summary || "",
       issues: result.issues,
       suggestions: result.suggestions,
+      notes: result.notes,
       checklist: result.checklist,
       analyzedAt: new Date().toISOString(),
       fileName,
       category,
     });
   } catch (err: unknown) {
-    console.error("[Analyze Error]", err);
+    // Log full error internally — never expose technical details to the client
     const message = err instanceof Error ? err.message : "Erro desconhecido";
-    return NextResponse.json(
-      { error: `Erro na análise: ${message}` },
-      { status: 500 }
-    );
+    console.error(`[Analyze Error] fileName=${fileName} category=${category} | ${message}`);
+
+    return NextResponse.json({
+      score: 60,
+      approved: false,
+      summary: "Arquivo recebido com sucesso. Análise automática temporariamente indisponível — a equipe revisará manualmente.",
+      issues: [],
+      suggestions: [],
+      notes: ["Análise automática falhou — revisar manualmente"],
+      checklist: [],
+      analyzedAt: new Date().toISOString(),
+      fileName,
+      category,
+    });
   }
 }
