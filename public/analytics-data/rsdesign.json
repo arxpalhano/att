@@ -1,0 +1,97 @@
+{
+  "_meta": {
+    "is_sample": true,
+    "note": "Dados de exemplo gerados para validação do dashboard. Substitua pelo output da Lambda (analytics-compute) após o deploy."
+  },
+  "cliente": "RS Design",
+  "alias": "rsdesign",
+  "periodo": {
+    "inicio": "2026-04-01",
+    "fim": "2026-04-30",
+    "label": "Abril 2026"
+  },
+  "gerado_em": "2026-05-10T03:00:00Z",
+  "kpis": {
+    "usuarios_unicos": 187,
+    "sessoes_unicas": 412,
+    "media_sessoes": 2.20,
+    "total_downloads": 14,
+    "tempo_medio_min": 1.85,
+    "total_eventos": 823
+  },
+  "engajamento_por_produto": [
+    {
+      "produto": "rsdesign-arquibancada-aris",
+      "produto_display": "Arquibancada Aris",
+      "tempo_medio_sessao_seg": 152,
+      "tempo_total_h": 3.12,
+      "total_eventos": 312
+    },
+    {
+      "produto": "rsdesign-poltrona-uno",
+      "produto_display": "Poltrona Uno",
+      "tempo_medio_sessao_seg": 98,
+      "tempo_total_h": 1.87,
+      "total_eventos": 198
+    },
+    {
+      "produto": "rsdesign-mesa-flat",
+      "produto_display": "Mesa Flat",
+      "tempo_medio_sessao_seg": 76,
+      "tempo_total_h": 0.94,
+      "total_eventos": 89
+    }
+  ],
+  "eventos_por_tipo": [
+    { "rotulo": "botao_ar", "total": 67 },
+    { "rotulo": "sketchup", "total": 34 },
+    { "rotulo": "revit", "total": 28 },
+    { "rotulo": "archicad", "total": 19 },
+    { "rotulo": "botao_whatsapp", "total": 12 }
+  ],
+  "sessoes_por_dia": [
+    { "data": "2026-04-01", "sessoes": 8 },
+    { "data": "2026-04-02", "sessoes": 12 },
+    { "data": "2026-04-03", "sessoes": 16 },
+    { "data": "2026-04-04", "sessoes": 10 },
+    { "data": "2026-04-05", "sessoes": 6 },
+    { "data": "2026-04-06", "sessoes": 18 },
+    { "data": "2026-04-07", "sessoes": 17 },
+    { "data": "2026-04-08", "sessoes": 14 },
+    { "data": "2026-04-09", "sessoes": 20 },
+    { "data": "2026-04-10", "sessoes": 24 },
+    { "data": "2026-04-11", "sessoes": 10 },
+    { "data": "2026-04-12", "sessoes": 7 },
+    { "data": "2026-04-13", "sessoes": 28 },
+    { "data": "2026-04-14", "sessoes": 22 },
+    { "data": "2026-04-15", "sessoes": 19 },
+    { "data": "2026-04-16", "sessoes": 17 },
+    { "data": "2026-04-17", "sessoes": 21 },
+    { "data": "2026-04-18", "sessoes": 9 },
+    { "data": "2026-04-19", "sessoes": 6 },
+    { "data": "2026-04-20", "sessoes": 3 },
+    { "data": "2026-04-21", "sessoes": 3 },
+    { "data": "2026-04-22", "sessoes": 15 },
+    { "data": "2026-04-23", "sessoes": 18 },
+    { "data": "2026-04-24", "sessoes": 16 },
+    { "data": "2026-04-25", "sessoes": 8 },
+    { "data": "2026-04-26", "sessoes": 5 },
+    { "data": "2026-04-27", "sessoes": 19 },
+    { "data": "2026-04-28", "sessoes": 17 },
+    { "data": "2026-04-29", "sessoes": 14 },
+    { "data": "2026-04-30", "sessoes": 10 }
+  ],
+  "origem_acesso": [
+    { "origem": "www.rsdesign.com.br", "total": 29700, "percentual": 73.5 },
+    { "origem": "www.archtechtour.com", "total": 7200, "percentual": 17.8 },
+    { "origem": "Direto", "total": 2400, "percentual": 5.9 },
+    { "origem": "instagram.com", "total": 1100, "percentual": 2.8 }
+  ],
+  "principais_cidades": [
+    { "cidade": "São Paulo", "sessoes": 892 },
+    { "cidade": "Rio de Janeiro", "sessoes": 643 },
+    { "cidade": "Curitiba", "sessoes": 421 },
+    { "cidade": "Porto Alegre", "sessoes": 287 },
+    { "cidade": "Florianópolis", "sessoes": 198 }
+  ]
+}

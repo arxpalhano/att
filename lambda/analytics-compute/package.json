@@ -1,0 +1,19 @@
+{
+  "name": "analytics-compute",
+  "version": "1.0.0",
+  "description": "Lambda que computa analytics do customizador 3D e salva JSON por cliente no S3 (roda todo dia 10).",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "npm run build && zip -r function.zip dist node_modules && aws lambda update-function-code --function-name analytics-compute --zip-file fileb://function.zip"
+  },
+  "dependencies": {
+    "@aws-sdk/client-athena": "^3.600.0",
+    "@aws-sdk/client-s3": "^3.600.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.140",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

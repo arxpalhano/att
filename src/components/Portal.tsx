@@ -8,6 +8,7 @@ import {
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
   BarChart3, ChevronRight, Filter, MessageSquare
 } from "lucide-react";
+import AnalyticsDashboard from "./AnalyticsDashboard";
 
 // ============================================================
 // TYPES & CONSTANTS
@@ -3116,104 +3117,48 @@ function PublicationsPage({ user }: { user: SeedUser }) {
 // FASE 8 — ANALYTICS
 // ============================================================
 function AnalyticsPage({ user }: { user: SeedUser }) {
-  const { blocks } = useContext(AppContext);
   const isClient = user.role === "client";
+  const activeClients = CLIENTS.filter((c) => c.active);
 
-  const myBlocks = isClient ? blocks.filter((b) => b.clientId === user.clientId) : blocks;
-  const published = myBlocks.filter((b) => b.status === "published");
-  const inProd = myBlocks.filter((b) => !["published", "draft", "archived"].includes(b.status));
-  const myPubs = PUBLICATIONS.filter((p) => {
-    const block = blocks.find((b) => b.id === p.blockId);
-    return isClient ? block?.clientId === user.clientId : true;
-  });
+  const defaultClientId = isClient
+    ? user.clientId!
+    : (activeClients.find((c) => c.code === "RSDESIGN")?.id || activeClients[0]?.id || "");
 
-  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320, pub8: 2980 };
-  const totalDownloads = myPubs.reduce((s, p) => s + (downloads[p.id] || 0), 0);
-  const topBlocks = myPubs
-    .map((p) => ({ pub: p, block: blocks.find((b) => b.id === p.blockId), dl: downloads[p.id] || 0 }))
-    .sort((a, b) => b.dl - a.dl)
-    .slice(0, 5);
+  const [selectedClientId, setSelectedClientId] = useState(defaultClientId);
 
-  const clientStats = CLIENTS.map((c) => ({
-    client: c,
-    published: blocks.filter((b) => b.clientId === c.id && b.status === "published").length,
-    total: blocks.filter((b) => b.clientId === c.id).length,
-    downloads: PUBLICATIONS.filter((p) => blocks.find((b) => b.id === p.blockId)?.clientId === c.id).reduce((s, p) => s + (downloads[p.id] || 0), 0),
-  })).filter((s) => s.total > 0).sort((a, b) => b.downloads - a.downloads);
+  const displayClient = CLIENTS.find((c) => c.id === selectedClientId);
+  const clientAlias = displayClient?.code.toLowerCase() || "";
+  const clientName = displayClient?.name || "";
 
   return (
     <div className="space-y-6">
-      <SectionHeader eyebrow="Fase 8 · Analytics" title="Métricas e desempenho" description={isClient ? "Acompanhe o alcance dos seus blocos 3D na plataforma ArchTechTour." : "Visão consolidada de todos os clientes, downloads e produção."} />
-
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Globe} label="Blocos publicados" value={published.length} sub={`de ${myBlocks.length} total`} color="text-emerald-600" />
-        <MetricCard icon={BarChart3} label="Downloads totais" value={totalDownloads.toLocaleString("pt-BR")} sub="na plataforma" color="text-cyan-600" />
-        <MetricCard icon={Layers} label="Em produção" value={inProd.length} sub="aguardando publicação" color="text-violet-600" />
-        <MetricCard icon={CheckCircle} label="Taxa de publicação" value={`${myBlocks.length ? Math.round((published.length / myBlocks.length) * 100) : 0}%`} sub="dos blocos publicados" />
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card className="p-6">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-4">Top blocos por downloads</p>
-          {topBlocks.length === 0 ? <EmptyState icon={BarChart3} title="Sem dados" /> : (
-            <div className="space-y-4">
-              {topBlocks.map(({ pub, block, dl }, i) => {
-                const maxDl = topBlocks[0]?.dl || 1;
-                return (
-                  <div key={pub.id}>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-slate-100 text-[10px] font-bold text-slate-500">#{i + 1}</span>
-                        <p className="text-sm font-semibold text-slate-800 truncate">{block?.title || pub.blockId}</p>
-                      </div>
-                      <p className="text-sm font-semibold text-slate-900 flex-shrink-0 ml-2">{dl.toLocaleString("pt-BR")}</p>
-                    </div>
-                    <ProgressBar value={Math.round((dl / maxDl) * 100)} />
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <SectionHeader
+          eyebrow="Analytics"
+          title="Dashboard de desempenho"
+          description={
+            isClient
+              ? "Acompanhe o alcance e engajamento dos seus produtos 3D na plataforma ArchTechTour."
+              : "Métricas reais do customizador 3D — dados do AWS Athena, atualizados todo dia 10."
+          }
+        />
         {!isClient && (
-          <Card className="p-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-4">Desempenho por cliente</p>
-            <div className="space-y-3">
-              {clientStats.slice(0, 6).map(({ client, published: pub, total, downloads: dl }) => (
-                <div key={client.id} className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-slate-950 text-[10px] font-bold text-white">
-                    {client.code.slice(0, 2)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-1">
-                      <p className="text-xs font-semibold text-slate-800 truncate">{client.name}</p>
-                      <p className="text-xs text-slate-500 flex-shrink-0 ml-2">{pub}/{total} pub · {dl.toLocaleString("pt-BR")} dl</p>
-                    </div>
-                    <ProgressBar value={total ? Math.round((pub / total) * 100) : 0} />
-                  </div>
-                </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Cliente</span>
+            <select
+              value={selectedClientId}
+              onChange={(e) => setSelectedClientId(e.target.value)}
+              className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer"
+            >
+              {activeClients.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
-            </div>
-          </Card>
-        )}
-
-        {isClient && (
-          <Card className="p-6">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-4">Status dos seus blocos</p>
-            <div className="space-y-2">
-              {Object.entries(
-                myBlocks.reduce((acc, b) => { acc[b.status] = (acc[b.status] || 0) + 1; return acc; }, {} as Record<string, number>)
-              ).sort((a, b) => b[1] - a[1]).map(([status, count]) => (
-                <div key={status} className="flex items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-2.5">
-                  <StatusBadge status={status as BlockStatus} />
-                  <span className="text-sm font-semibold text-slate-700">{count}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
+            </select>
+          </div>
         )}
       </div>
+
+      <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} />
     </div>
   );
 }
