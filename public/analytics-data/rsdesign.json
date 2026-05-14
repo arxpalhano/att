@@ -1,97 +1,268 @@
 {
-  "_meta": {
-    "is_sample": true,
-    "note": "Dados de exemplo gerados para validação do dashboard. Substitua pelo output da Lambda (analytics-compute) após o deploy."
-  },
   "cliente": "RS Design",
   "alias": "rsdesign",
   "periodo": {
-    "inicio": "2026-04-01",
-    "fim": "2026-04-30",
-    "label": "Abril 2026"
+    "inicio": "2026-04-15",
+    "fim": "2026-05-14",
+    "label": "2026-04-15 a 2026-05-14"
   },
-  "gerado_em": "2026-05-10T03:00:00Z",
+  "gerado_em": "2026-05-14T21:57:01.345605Z",
   "kpis": {
-    "usuarios_unicos": 187,
-    "sessoes_unicas": 412,
-    "media_sessoes": 2.20,
-    "total_downloads": 14,
-    "tempo_medio_min": 1.85,
-    "total_eventos": 823
+    "usuarios_unicos": 159,
+    "sessoes_unicas": 852,
+    "media_sessoes": 5.36,
+    "total_downloads": 11,
+    "tempo_medio_min": 0.88,
+    "total_eventos": 1988
   },
   "engajamento_por_produto": [
     {
-      "produto": "rsdesign-arquibancada-aris",
+      "produto": "RSDesign-Cadeira-Axis",
+      "produto_display": "Cadeira Axis",
+      "tempo_medio_sessao_seg": 664,
+      "tempo_total_h": 45.68,
+      "total_eventos": 308
+    },
+    {
+      "produto": "RSDesign-Arquibancada-Aris",
       "produto_display": "Arquibancada Aris",
-      "tempo_medio_sessao_seg": 152,
-      "tempo_total_h": 3.12,
-      "total_eventos": 312
+      "tempo_medio_sessao_seg": 102,
+      "tempo_total_h": 4.58,
+      "total_eventos": 287
     },
     {
-      "produto": "rsdesign-poltrona-uno",
-      "produto_display": "Poltrona Uno",
-      "tempo_medio_sessao_seg": 98,
-      "tempo_total_h": 1.87,
-      "total_eventos": 198
+      "produto": "RSDesign-Sofa-Nido-Duo",
+      "produto_display": "Sofa Nido Duo",
+      "tempo_medio_sessao_seg": 278,
+      "tempo_total_h": 12.92,
+      "total_eventos": 211
     },
     {
-      "produto": "rsdesign-mesa-flat",
-      "produto_display": "Mesa Flat",
-      "tempo_medio_sessao_seg": 76,
-      "tempo_total_h": 0.94,
-      "total_eventos": 89
+      "produto": "RSDesign-Pufe-Versa-Baixo-Grand",
+      "produto_display": "Pufe Versa Baixo Grand",
+      "tempo_medio_sessao_seg": 107,
+      "tempo_total_h": 3.45,
+      "total_eventos": 184
+    },
+    {
+      "produto": "RSDesign-Sofa-Trama",
+      "produto_display": "Sofa Trama",
+      "tempo_medio_sessao_seg": 120,
+      "tempo_total_h": 3.29,
+      "total_eventos": 180
+    },
+    {
+      "produto": "RSDesign-Sofa-Casulo-Nido-Individual",
+      "produto_display": "Sofa Casulo Nido Individual",
+      "tempo_medio_sessao_seg": 23,
+      "tempo_total_h": 0.46,
+      "total_eventos": 167
+    },
+    {
+      "produto": "RSDesign-Cabine-Nido-Casulo-Individual",
+      "produto_display": "Cabine Nido Casulo Individual",
+      "tempo_medio_sessao_seg": 410,
+      "tempo_total_h": 14.04,
+      "total_eventos": 152
+    },
+    {
+      "produto": "rsdesign-sofa-casulo-nido",
+      "produto_display": "Sofa Casulo Nido",
+      "tempo_medio_sessao_seg": 314,
+      "tempo_total_h": 5.76,
+      "total_eventos": 117
+    },
+    {
+      "produto": "RSDesign-Sofa-My-Space",
+      "produto_display": "Sofa My Space",
+      "tempo_medio_sessao_seg": 43,
+      "tempo_total_h": 0.64,
+      "total_eventos": 95
+    },
+    {
+      "produto": "RSDesign-Poltrona-Nido",
+      "produto_display": "Poltrona Nido",
+      "tempo_medio_sessao_seg": 552,
+      "tempo_total_h": 8.9,
+      "total_eventos": 74
+    },
+    {
+      "produto": "rsdesign-sofa-nido-alto-individual",
+      "produto_display": "Sofa Nido Alto Individual",
+      "tempo_medio_sessao_seg": 10,
+      "tempo_total_h": 0.07,
+      "total_eventos": 42
+    },
+    {
+      "produto": "rsdesign-sofa-nido-alto-duo",
+      "produto_display": "Sofa Nido Alto Duo",
+      "tempo_medio_sessao_seg": 22,
+      "tempo_total_h": 0.13,
+      "total_eventos": 35
     }
   ],
   "eventos_por_tipo": [
-    { "rotulo": "botao_ar", "total": 67 },
-    { "rotulo": "sketchup", "total": 34 },
-    { "rotulo": "revit", "total": 28 },
-    { "rotulo": "archicad", "total": 19 },
-    { "rotulo": "botao_whatsapp", "total": 12 }
+    {
+      "rotulo": "botao_ar",
+      "total": 113
+    },
+    {
+      "rotulo": "botao_ar_ios",
+      "total": 22
+    },
+    {
+      "rotulo": "sketchup",
+      "total": 10
+    },
+    {
+      "rotulo": "botao_whatsapp",
+      "total": 3
+    },
+    {
+      "rotulo": "archicad",
+      "total": 1
+    }
   ],
   "sessoes_por_dia": [
-    { "data": "2026-04-01", "sessoes": 8 },
-    { "data": "2026-04-02", "sessoes": 12 },
-    { "data": "2026-04-03", "sessoes": 16 },
-    { "data": "2026-04-04", "sessoes": 10 },
-    { "data": "2026-04-05", "sessoes": 6 },
-    { "data": "2026-04-06", "sessoes": 18 },
-    { "data": "2026-04-07", "sessoes": 17 },
-    { "data": "2026-04-08", "sessoes": 14 },
-    { "data": "2026-04-09", "sessoes": 20 },
-    { "data": "2026-04-10", "sessoes": 24 },
-    { "data": "2026-04-11", "sessoes": 10 },
-    { "data": "2026-04-12", "sessoes": 7 },
-    { "data": "2026-04-13", "sessoes": 28 },
-    { "data": "2026-04-14", "sessoes": 22 },
-    { "data": "2026-04-15", "sessoes": 19 },
-    { "data": "2026-04-16", "sessoes": 17 },
-    { "data": "2026-04-17", "sessoes": 21 },
-    { "data": "2026-04-18", "sessoes": 9 },
-    { "data": "2026-04-19", "sessoes": 6 },
-    { "data": "2026-04-20", "sessoes": 3 },
-    { "data": "2026-04-21", "sessoes": 3 },
-    { "data": "2026-04-22", "sessoes": 15 },
-    { "data": "2026-04-23", "sessoes": 18 },
-    { "data": "2026-04-24", "sessoes": 16 },
-    { "data": "2026-04-25", "sessoes": 8 },
-    { "data": "2026-04-26", "sessoes": 5 },
-    { "data": "2026-04-27", "sessoes": 19 },
-    { "data": "2026-04-28", "sessoes": 17 },
-    { "data": "2026-04-29", "sessoes": 14 },
-    { "data": "2026-04-30", "sessoes": 10 }
+    {
+      "data": "2026-04-15",
+      "sessoes": 33
+    },
+    {
+      "data": "2026-04-16",
+      "sessoes": 11
+    },
+    {
+      "data": "2026-04-17",
+      "sessoes": 54
+    },
+    {
+      "data": "2026-04-18",
+      "sessoes": 1
+    },
+    {
+      "data": "2026-04-21",
+      "sessoes": 2
+    },
+    {
+      "data": "2026-04-22",
+      "sessoes": 19
+    },
+    {
+      "data": "2026-04-23",
+      "sessoes": 59
+    },
+    {
+      "data": "2026-04-24",
+      "sessoes": 18
+    },
+    {
+      "data": "2026-04-27",
+      "sessoes": 32
+    },
+    {
+      "data": "2026-04-28",
+      "sessoes": 12
+    },
+    {
+      "data": "2026-04-29",
+      "sessoes": 20
+    },
+    {
+      "data": "2026-04-30",
+      "sessoes": 23
+    },
+    {
+      "data": "2026-05-01",
+      "sessoes": 1
+    },
+    {
+      "data": "2026-05-04",
+      "sessoes": 27
+    },
+    {
+      "data": "2026-05-05",
+      "sessoes": 13
+    },
+    {
+      "data": "2026-05-06",
+      "sessoes": 24
+    },
+    {
+      "data": "2026-05-07",
+      "sessoes": 57
+    },
+    {
+      "data": "2026-05-08",
+      "sessoes": 46
+    },
+    {
+      "data": "2026-05-09",
+      "sessoes": 1
+    },
+    {
+      "data": "2026-05-10",
+      "sessoes": 2
+    },
+    {
+      "data": "2026-05-11",
+      "sessoes": 134
+    },
+    {
+      "data": "2026-05-12",
+      "sessoes": 206
+    },
+    {
+      "data": "2026-05-13",
+      "sessoes": 23
+    },
+    {
+      "data": "2026-05-14",
+      "sessoes": 34
+    }
   ],
   "origem_acesso": [
-    { "origem": "www.rsdesign.com.br", "total": 29700, "percentual": 73.5 },
-    { "origem": "www.archtechtour.com", "total": 7200, "percentual": 17.8 },
-    { "origem": "Direto", "total": 2400, "percentual": 5.9 },
-    { "origem": "instagram.com", "total": 1100, "percentual": 2.8 }
+    {
+      "origem": "projetos4.exentdev.com.br",
+      "total": 451,
+      "percentual": 39.5
+    },
+    {
+      "origem": "Direto",
+      "total": 413,
+      "percentual": 36.1
+    },
+    {
+      "origem": "www.rsdesign.com.br",
+      "total": 268,
+      "percentual": 23.4
+    },
+    {
+      "origem": "www.archtechtour.com",
+      "total": 11,
+      "percentual": 1.0
+    }
   ],
   "principais_cidades": [
-    { "cidade": "São Paulo", "sessoes": 892 },
-    { "cidade": "Rio de Janeiro", "sessoes": 643 },
-    { "cidade": "Curitiba", "sessoes": 421 },
-    { "cidade": "Porto Alegre", "sessoes": 287 },
-    { "cidade": "Florianópolis", "sessoes": 198 }
+    {
+      "cidade": "São Paulo",
+      "sessoes": 900
+    },
+    {
+      "cidade": "Caxias do Sul",
+      "sessoes": 279
+    },
+    {
+      "cidade": "Cotia",
+      "sessoes": 269
+    },
+    {
+      "cidade": "Giengen an der Brenz",
+      "sessoes": 202
+    },
+    {
+      "cidade": "Florianópolis",
+      "sessoes": 114
+    }
   ]
 }

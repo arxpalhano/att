@@ -9,6 +9,7 @@ import {
   BarChart3, ChevronRight, Filter, MessageSquare
 } from "lucide-react";
 import AnalyticsDashboard from "./AnalyticsDashboard";
+import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
 
 // ============================================================
 // TYPES & CONSTANTS
@@ -3125,10 +3126,22 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
     : (activeClients.find((c) => c.code === "RSDESIGN")?.id || activeClients[0]?.id || "");
 
   const [selectedClientId, setSelectedClientId] = useState(defaultClientId);
+  const [tab, setTab] = useState<"dashboard" | "manage">("dashboard");
 
   const displayClient = CLIENTS.find((c) => c.id === selectedClientId);
   const clientAlias = displayClient?.code.toLowerCase() || "";
   const clientName = displayClient?.name || "";
+
+  if (!isClient && tab === "manage") {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setTab("dashboard")} className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition">← Voltar ao dashboard</button>
+        </div>
+        <AnalyticsClientsAdmin />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -3139,26 +3152,35 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
           description={
             isClient
               ? "Acompanhe o alcance e engajamento dos seus produtos 3D na plataforma ArchTechTour."
-              : "Métricas reais do customizador 3D — dados do AWS Athena, atualizados todo dia 10."
+              : "Métricas reais do customizador 3D — dados do AWS Athena. Use 'Atualizar' para puxar dados frescos."
           }
         />
         {!isClient && (
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Cliente</span>
-            <select
-              value={selectedClientId}
-              onChange={(e) => setSelectedClientId(e.target.value)}
-              className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer"
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Cliente</span>
+              <select
+                value={selectedClientId}
+                onChange={(e) => setSelectedClientId(e.target.value)}
+                className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer"
+              >
+                {activeClients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => setTab("manage")}
+              className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition"
+              title="Listar/adicionar clientes na dim_client_alias do Athena"
             >
-              {activeClients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+              Gerenciar clientes
+            </button>
           </div>
         )}
       </div>
 
-      <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} />
+      <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />
     </div>
   );
 }
