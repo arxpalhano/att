@@ -1,47 +1,59 @@
 /**
  * GET /api/debug/aws
- * Debug temporário: lista quais env vars AWS_* estão presentes e tenta um
- * S3 ListBuckets() pra ver se IAM role tá funcionando.
- *
- * REMOVER depois que diagnosticar o deploy no Amplify.
+ * Debug temporário — remover depois de diagnosticar.
  */
 import { NextResponse } from "next/server";
-import { S3Client, ListBucketsCommand } from "@aws-sdk/client-s3";
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { AthenaClient, StartQueryExecutionCommand, GetQueryExecutionCommand } from "@aws-sdk/client-athena";
 
 export async function GET() {
-  // Quais env vars AWS_* estão setadas (só os nomes, sem valores)
   const awsEnvKeys = Object.keys(process.env)
     .filter((k) => k.startsWith("AWS_") || k.startsWith("APP_AWS") || k.startsWith("AMPLIFY"))
     .sort();
 
-  // Testa SDK sem passar credentials → deixa default chain resolver
-  let s3Test: { ok: boolean; buckets?: number; error?: string } = { ok: false };
+  // Test 1: S3 GetObject (algo que temos permissão)
+  let s3Test: any = { ok: false };
   try {
     const s3 = new S3Client({ region: "us-east-1" });
-    const res = await s3.send(new ListBucketsCommand({}));
-    s3Test = { ok: true, buckets: res.Buckets?.length || 0 };
+    const res = await s3.send(new GetObjectCommand({
+      Bucket: "archtechtour-assets",
+      Key: "analytics-cache/rsdesign/latest.json",
+    }));
+    const body = await res.Body?.transformToString();
+    s3Test = { ok: true, bytes: body?.length || 0 };
   } catch (err) {
-    s3Test = {
-      ok: false,
-      error: (err as Error).message,
-    };
+    s3Test = { ok: false, error: (err as Error).message };
+  }
+
+  // Test 2: Athena StartQueryExecution
+  let athenaTest: any = { ok: false };
+  try {
+    const athena = new AthenaClient({ region: "us-east-1" });
+    const res = await athena.send(new StartQueryExecutionCommand({
+      QueryString: "SELECT 1",
+      QueryExecutionContext: { Database: "customizador_events" },
+      WorkGroup: "primary",
+      ResultConfiguration: { OutputLocation: "s3://explorar.archtechtour.com/athena-tmp/" },
+    }));
+    athenaTest = { ok: true, query_id: res.QueryExecutionId };
+  } catch (err) {
+    athenaTest = { ok: false, error: (err as Error).message };
   }
 
   return NextResponse.json({
+    commit: process.env.AWS_COMMIT_ID || "(not set)",
+    branch: process.env.AWS_BRANCH || "(not set)",
     runtime: {
       node: process.version,
-      platform: process.platform,
-      execution_env: process.env.AWS_EXECUTION_ENV || "(not set)",
-      lambda_function_name: process.env.AWS_LAMBDA_FUNCTION_NAME || "(not set)",
-      lambda_function_version: process.env.AWS_LAMBDA_FUNCTION_VERSION || "(not set)",
+      execution_env: process.env.AWS_EXECUTION_ENV,
+      aws_region_env: process.env.AWS_REGION,
+      app_aws_region_env: process.env.APP_AWS_REGION,
+      has_container_creds: !!process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
     },
     aws_env_keys: awsEnvKeys,
-    has_credential_envs: {
-      AWS_ACCESS_KEY_ID: !!process.env.AWS_ACCESS_KEY_ID,
-      AWS_SECRET_ACCESS_KEY: !!process.env.AWS_SECRET_ACCESS_KEY,
-      AWS_SESSION_TOKEN: !!process.env.AWS_SESSION_TOKEN,
-      AWS_REGION: process.env.AWS_REGION || null,
+    tests: {
+      s3_getobject_rsdesign: s3Test,
+      athena_start_query_select_1: athenaTest,
     },
-    s3_list_buckets_test: s3Test,
   });
 }
