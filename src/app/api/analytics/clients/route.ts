@@ -6,6 +6,9 @@
  *   Body: { alias: "novocli", cliente: "Nome do Cliente" }
  *   → INSERT INTO dim_client_alias
  */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 import { NextRequest, NextResponse } from "next/server";
 import {
   AthenaClient,
@@ -86,6 +89,9 @@ export async function GET() {
     return NextResponse.json({ clients });
   } catch (err) {
     const e = err as Error;
+    // Debug detalhado: quais env vars estão presentes
+    const allEnvKeys = Object.keys(process.env).sort();
+    const awsRelated = allEnvKeys.filter(k => k.includes("AWS") || k.includes("AMPLIFY") || k.includes("CONTAINER"));
     return NextResponse.json(
       {
         error: `Falha ao listar clientes: ${e.message}`,
@@ -95,6 +101,9 @@ export async function GET() {
         athena_db: ATHENA_DB,
         athena_output: ATHENA_OUTPUT,
         has_container_creds: !!process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
+        container_creds_value: process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? "SET" : "MISSING",
+        aws_related_env_keys: awsRelated,
+        total_env_vars: allEnvKeys.length,
       },
       { status: 500 }
     );
