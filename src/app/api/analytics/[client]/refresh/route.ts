@@ -15,11 +15,15 @@ export async function POST(
   request: NextRequest,
   { params }: { params: { client: string } }
 ) {
-  if (!process.env.AWS_ACCESS_KEY_ID) {
-    return NextResponse.json(
-      { error: "AWS_ACCESS_KEY_ID não configurado no .env.local" },
-      { status: 500 }
-    );
+  // Auth: em produção exige header com secret. Em dev, aberto.
+  const expectedSecret = process.env.ANALYTICS_REFRESH_SECRET;
+  if (expectedSecret) {
+    const provided =
+      request.headers.get("x-analytics-secret") ||
+      request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+    if (provided !== expectedSecret) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
   }
 
   const alias = params.client.toLowerCase().replace(/[^a-z0-9]/g, "");

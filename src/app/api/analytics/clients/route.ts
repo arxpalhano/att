@@ -16,10 +16,6 @@ export const maxDuration = 30;
 const ATHENA_DB = process.env.ATHENA_DB || "customizador_events";
 
 export async function GET() {
-  if (!process.env.AWS_ACCESS_KEY_ID) {
-    return NextResponse.json({ error: "AWS não configurado" }, { status: 500 });
-  }
-
   try {
     const rows = await runAthenaQuery(
       `SELECT alias, cliente FROM ${ATHENA_DB}.dim_client_alias ORDER BY cliente`
@@ -56,10 +52,6 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  if (!process.env.AWS_ACCESS_KEY_ID) {
-    return NextResponse.json({ error: "AWS não configurado" }, { status: 500 });
-  }
-
   const body = await request.json().catch(() => ({}));
   const { alias, cliente } = body as { alias?: string; cliente?: string };
 

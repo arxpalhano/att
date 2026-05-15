@@ -1,28 +1,18 @@
 /**
- * API Route: /api/analytics/[client]
- * Retorna os dados de analytics de um cliente.
+ * GET /api/analytics/[client]
  *
- * Lógica:
- *   1. Tenta ler o JSON pré-computado do S3 (analytics-cache/{alias}/latest.json)
- *   2. Fallback: lê o arquivo local em /public/analytics-data/{alias}.json
+ * Ordem de leitura:
+ *   1. S3 (analytics-cache/{alias}/latest.json) — fonte de verdade em produção
+ *   2. Fallback: arquivo local em /public/analytics-data/{alias}.json (dev)
  *
- * Env vars necessárias (.env.local):
- *   AWS_REGION, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
- *   ANALYTICS_S3_BUCKET  → bucket onde a Lambda salva os JSONs (ex: archtechtour-assets)
+ * Em produção (Amplify): IAM Role injeta credenciais → SDK resolve sozinho.
+ * Em dev local: usa AWS_ACCESS_KEY_ID/SECRET do .env.local.
  */
-
 import { NextRequest, NextResponse } from "next/server";
-import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { getS3 } from "@/lib/aws-clients";
 import path from "path";
 import fs from "fs";
-
-const s3 = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-  },
-});
 
 const ANALYTICS_BUCKET = process.env.ANALYTICS_S3_BUCKET || "archtechtour-assets";
 
@@ -32,31 +22,29 @@ export async function GET(
 ) {
   const alias = params.client.toLowerCase().replace(/[^a-z0-9]/g, "");
 
-  // 1. Tentar S3
-  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-    try {
-      const cmd = new GetObjectCommand({
-        Bucket: ANALYTICS_BUCKET,
-        Key: `analytics-cache/${alias}/latest.json`,
+  // 1. S3
+  try {
+    const cmd = new GetObjectCommand({
+      Bucket: ANALYTICS_BUCKET,
+      Key: `analytics-cache/${alias}/latest.json`,
+    });
+    const res = await getS3().send(cmd);
+    const body = await res.Body?.transformToString();
+    if (body) {
+      return NextResponse.json(JSON.parse(body), {
+        headers: { "Cache-Control": "public, max-age=300, s-maxage=300" },
       });
-      const res = await s3.send(cmd);
-      const body = await res.Body?.transformToString();
-      if (body) {
-        return NextResponse.json(JSON.parse(body), {
-          headers: { "Cache-Control": "public, max-age=3600" },
-        });
-      }
-    } catch {
-      // S3 indisponível ou arquivo não existe → continua para fallback
     }
+  } catch {
+    // continua para fallback
   }
 
-  // 2. Fallback: arquivo local
+  // 2. Fallback local (dev)
   try {
     const filePath = path.join(process.cwd(), "public", "analytics-data", `${alias}.json`);
     const content = fs.readFileSync(filePath, "utf-8");
     return NextResponse.json(JSON.parse(content), {
-      headers: { "Cache-Control": "public, max-age=300" },
+      headers: { "Cache-Control": "public, max-age=60" },
     });
   } catch {
     return NextResponse.json(

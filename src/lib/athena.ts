@@ -2,31 +2,15 @@
  * Helper para rodar queries Athena de forma síncrona (await até completar).
  */
 import {
-  AthenaClient,
   StartQueryExecutionCommand,
   GetQueryExecutionCommand,
-  GetQueryResultsCommand,
   paginateGetQueryResults,
 } from "@aws-sdk/client-athena";
+import { getAthena } from "./aws-clients";
 
-const REGION = process.env.AWS_REGION || "us-east-1";
 const DB = process.env.ATHENA_DB || "customizador_events";
 const WORKGROUP = process.env.ATHENA_WORKGROUP || "primary";
 const OUTPUT = process.env.ATHENA_OUTPUT || "s3://explorar.archtechtour.com/athena-tmp/";
-
-let _client: AthenaClient | null = null;
-function getAthena() {
-  if (!_client) {
-    _client = new AthenaClient({
-      region: REGION,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-      },
-    });
-  }
-  return _client;
-}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

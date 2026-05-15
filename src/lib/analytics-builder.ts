@@ -257,37 +257,37 @@ export async function buildAnalytics(opts: {
   };
 }
 
-/** Salva o JSON: S3 (se ANALYTICS_S3_BUCKET) e/ou local. */
+/** Salva o JSON: S3 (sempre que possível) + local em dev. */
 export async function saveAnalytics(alias: string, data: AnalyticsJSON): Promise<void> {
-  const fs = await import("fs/promises");
-  const path = await import("path");
+  const body = JSON.stringify(data, null, 2);
+  const isProd = process.env.NODE_ENV === "production";
 
-  // Sempre salva local (pra dev e cache)
+  // 1. S3 (fonte de verdade em produção, cache em dev se configurado)
+  const bucket = process.env.ANALYTICS_S3_BUCKET || "archtechtour-assets";
   try {
-    const filePath = path.join(process.cwd(), "public", "analytics-data", `${alias}.json`);
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
-  } catch (err) {
-    // Em produção (Vercel) o FS é read-only — não falha
-    console.warn("[analytics] não foi possível salvar local:", err);
-  }
-
-  // S3 se configurado
-  const bucket = process.env.ANALYTICS_S3_BUCKET;
-  if (bucket && process.env.AWS_ACCESS_KEY_ID) {
-    const { S3Client, PutObjectCommand } = await import("@aws-sdk/client-s3");
-    const s3 = new S3Client({
-      region: process.env.AWS_REGION || "us-east-1",
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-      },
-    });
-    await s3.send(new PutObjectCommand({
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const { getS3 } = await import("./aws-clients");
+    await getS3().send(new PutObjectCommand({
       Bucket: bucket,
       Key: `analytics-cache/${alias}/latest.json`,
-      Body: JSON.stringify(data, null, 2),
+      Body: body,
       ContentType: "application/json",
     }));
+  } catch (err) {
+    if (isProd) throw err; // em prod, S3 falhar é fatal
+    console.warn("[analytics] S3 indisponível, salvando só local:", (err as Error).message);
+  }
+
+  // 2. Local (só em dev — em prod filesystem é read-only)
+  if (!isProd) {
+    try {
+      const fs = await import("fs/promises");
+      const path = await import("path");
+      const filePath = path.join(process.cwd(), "public", "analytics-data", `${alias}.json`);
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, body, "utf-8");
+    } catch (err) {
+      console.warn("[analytics] não foi possível salvar local:", err);
+    }
   }
 }
