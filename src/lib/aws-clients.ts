@@ -14,17 +14,10 @@ import { AthenaClient } from "@aws-sdk/client-athena";
 const REGION = process.env.APP_AWS_REGION || process.env.AWS_REGION || "us-east-1";
 
 function buildConfig() {
-  const hasExplicitKeys = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
-  // Se temos keys explícitas (dev), usa. Senão, deixa o SDK resolver via IAM role (prod).
-  if (hasExplicitKeys) {
-    return {
-      region: REGION,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
-      },
-    };
-  }
+  // Deixa o SDK resolver credenciais via default provider chain.
+  // - Dev local: pega AWS_ACCESS_KEY_ID/SECRET do .env.local
+  // - Lambda/Amplify SSR: pega creds temporárias da IAM Role (com session token)
+  // Passar credentials explicitamente sem sessionToken QUEBRA em Lambda.
   return { region: REGION };
 }
 
