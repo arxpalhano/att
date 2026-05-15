@@ -58,16 +58,114 @@ export async function buildAnalytics(opts: {
   const inicio = sqlEscape(opts.inicio);
   const fim = sqlEscape(opts.fim);
 
-  // 1. KPIs principais
-  const kpiRows = await runAthenaQuery(`
-    SELECT
-      COUNT(DISTINCT user_id)   AS usuarios_unicos,
-      COUNT(DISTINCT session_id) AS sessoes_unicas,
-      COUNT(*)                   AS total_eventos
-    FROM ${DB}.vw_eventos_base_com_cliente
-    WHERE cliente = '${cli}'
-      AND data_evento BETWEEN '${inicio}' AND '${fim}'
-  `);
+  // PARALELIZA todas as 8 queries — independentes entre si.
+  // Amplify SSR tem timeout de ~30s; serializado dava 504.
+  const [
+    kpiRows,
+    dlRows,
+    tmRowsV2,
+    engRows,
+    evtRows,
+    diaRows,
+    origemRows,
+    cidadeRowsRes,
+  ] = await Promise.all([
+    // 1. KPIs principais
+    runAthenaQuery(`
+      SELECT
+        COUNT(DISTINCT user_id)   AS usuarios_unicos,
+        COUNT(DISTINCT session_id) AS sessoes_unicas,
+        COUNT(*)                   AS total_eventos
+      FROM ${DB}.vw_eventos_base_com_cliente
+      WHERE cliente = '${cli}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+    `),
+    // 2. Total de downloads
+    runAthenaQuery(`
+      SELECT COUNT(*) AS total
+      FROM ${DB}.vw_eventos_base_com_cliente
+      WHERE cliente = '${cli}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND (evento LIKE 'download%' OR evento = 'download_modelo')
+    `),
+    // 3. Tempo médio — v2 (com fallback abaixo)
+    runAthenaQuery(`
+      SELECT AVG(CAST(duracao_s AS DOUBLE)) AS media_seg
+      FROM ${DB}.vw_tempo_medio_aproximado_v2
+      WHERE cliente = '${cli}'
+    `).catch(() => [] as Record<string, string>[]),
+    // 4. Engajamento por produto
+    runAthenaQuery(`
+      WITH sess_dur AS (
+        SELECT produto, session_id,
+               (MAX(CAST(timestamp AS bigint)) - MIN(CAST(timestamp AS bigint))) AS dur
+        FROM ${DB}.vw_eventos_base_com_cliente
+        WHERE cliente = '${cli}'
+          AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        GROUP BY produto, session_id
+      )
+      SELECT
+        e.produto,
+        AVG(CASE WHEN s.dur > 0 AND s.dur < 1800 THEN s.dur ELSE NULL END) AS tempo_medio_seg,
+        SUM(CASE WHEN s.dur > 0 AND s.dur < 1800 THEN s.dur ELSE 0 END) / 3600.0 AS tempo_total_h,
+        COUNT(*) AS total_eventos
+      FROM ${DB}.vw_eventos_base_com_cliente e
+      LEFT JOIN sess_dur s ON e.session_id = s.session_id AND e.produto = s.produto
+      WHERE e.cliente = '${cli}'
+        AND e.data_evento BETWEEN '${inicio}' AND '${fim}'
+      GROUP BY e.produto
+      ORDER BY total_eventos DESC
+      LIMIT 50
+    `),
+    // 5. Eventos por rotulo
+    runAthenaQuery(`
+      SELECT rotulo, COUNT(*) AS total
+      FROM ${DB}.vw_eventos_base_com_cliente
+      WHERE cliente = '${cli}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND rotulo IS NOT NULL AND rotulo <> ''
+        AND LOWER(rotulo) NOT IN ('abertura', 'fechamento', 'abertura_sessao', 'fechamento_sessao')
+      GROUP BY rotulo
+      ORDER BY total DESC
+      LIMIT 10
+    `),
+    // 6. Sessões por dia
+    runAthenaQuery(`
+      SELECT data_evento AS data, COUNT(DISTINCT session_id) AS sessoes
+      FROM ${DB}.vw_eventos_base_com_cliente
+      WHERE cliente = '${cli}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+      GROUP BY data_evento
+      ORDER BY data_evento
+    `),
+    // 7. Origem de acesso
+    runAthenaQuery(`
+      SELECT
+        CASE
+          WHEN referrer IS NULL OR referrer = '' THEN 'Direto'
+          ELSE COALESCE(regexp_extract(referrer, 'https?://([^/]+)', 1), 'Direto')
+        END AS origem,
+        COUNT(*) AS total
+      FROM ${DB}.vw_eventos_base_com_cliente
+      WHERE cliente = '${cli}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND evento = 'session_start'
+      GROUP BY 1
+      ORDER BY total DESC
+      LIMIT 8
+    `),
+    // 8. Principais cidades (view agregada, sem data)
+    runAthenaQuery(`
+      SELECT cidade, eventos
+      FROM ${DB}.vw_eventos_por_localizacao
+      WHERE cliente = '${cli}'
+        AND cidade IS NOT NULL AND cidade <> ''
+      ORDER BY eventos DESC
+      LIMIT 5
+    `).catch(() => [] as Record<string, string>[]),
+  ]);
+
+  // === Processa resultados ===
   const kpi = kpiRows[0] || {};
   const usuarios_unicos = inum(kpi.usuarios_unicos);
   const sessoes_unicas = inum(kpi.sessoes_unicas);
@@ -76,64 +174,30 @@ export async function buildAnalytics(opts: {
     ? Math.round((sessoes_unicas / usuarios_unicos) * 100) / 100
     : 0;
 
-  // 2. Total de downloads
-  const dlRows = await runAthenaQuery(`
-    SELECT COUNT(*) AS total
-    FROM ${DB}.vw_eventos_base_com_cliente
-    WHERE cliente = '${cli}'
-      AND data_evento BETWEEN '${inicio}' AND '${fim}'
-      AND (evento LIKE 'download%' OR evento = 'download_modelo')
-  `);
   const total_downloads = inum(dlRows[0]?.total);
 
-  // 3. Tempo médio aproximado — via vw_tempo_medio_aproximado_v2
+  // Tempo médio: v2 primeiro, fallback p/ cálculo via base
   let tempo_medio_min = 0;
-  try {
-    const tmRows = await runAthenaQuery(`
-      SELECT AVG(CAST(duracao_s AS DOUBLE)) AS media_seg
-      FROM ${DB}.vw_tempo_medio_aproximado_v2
-      WHERE cliente = '${cli}'
-    `);
-    tempo_medio_min = Math.round((num(tmRows[0]?.media_seg) / 60) * 100) / 100;
-  } catch {
-    // fallback: calcular pela view base
-    const tmRows = await runAthenaQuery(`
-      WITH sessoes AS (
-        SELECT session_id,
-               (MAX(CAST(timestamp AS bigint)) - MIN(CAST(timestamp AS bigint))) AS dur
-        FROM ${DB}.vw_eventos_base_com_cliente
-        WHERE cliente = '${cli}'
-          AND data_evento BETWEEN '${inicio}' AND '${fim}'
-        GROUP BY session_id
-      )
-      SELECT AVG(dur) AS media_seg FROM sessoes WHERE dur > 0 AND dur < 1800
-    `);
-    tempo_medio_min = Math.round((num(tmRows[0]?.media_seg) / 60) * 100) / 100;
+  if (tmRowsV2[0]?.media_seg) {
+    tempo_medio_min = Math.round((num(tmRowsV2[0].media_seg) / 60) * 100) / 100;
+  } else {
+    try {
+      const tmFb = await runAthenaQuery(`
+        WITH sessoes AS (
+          SELECT session_id,
+                 (MAX(CAST(timestamp AS bigint)) - MIN(CAST(timestamp AS bigint))) AS dur
+          FROM ${DB}.vw_eventos_base_com_cliente
+          WHERE cliente = '${cli}'
+            AND data_evento BETWEEN '${inicio}' AND '${fim}'
+          GROUP BY session_id
+        )
+        SELECT AVG(dur) AS media_seg FROM sessoes WHERE dur > 0 AND dur < 1800
+      `);
+      tempo_medio_min = Math.round((num(tmFb[0]?.media_seg) / 60) * 100) / 100;
+    } catch {
+      tempo_medio_min = 0;
+    }
   }
-
-  // 4. Engajamento por produto (com dedup por case-insensitive)
-  const engRows = await runAthenaQuery(`
-    WITH sess_dur AS (
-      SELECT produto, session_id,
-             (MAX(CAST(timestamp AS bigint)) - MIN(CAST(timestamp AS bigint))) AS dur
-      FROM ${DB}.vw_eventos_base_com_cliente
-      WHERE cliente = '${cli}'
-        AND data_evento BETWEEN '${inicio}' AND '${fim}'
-      GROUP BY produto, session_id
-    )
-    SELECT
-      e.produto,
-      AVG(CASE WHEN s.dur > 0 AND s.dur < 1800 THEN s.dur ELSE NULL END) AS tempo_medio_seg,
-      SUM(CASE WHEN s.dur > 0 AND s.dur < 1800 THEN s.dur ELSE 0 END) / 3600.0 AS tempo_total_h,
-      COUNT(*) AS total_eventos
-    FROM ${DB}.vw_eventos_base_com_cliente e
-    LEFT JOIN sess_dur s ON e.session_id = s.session_id AND e.produto = s.produto
-    WHERE e.cliente = '${cli}'
-      AND e.data_evento BETWEEN '${inicio}' AND '${fim}'
-    GROUP BY e.produto
-    ORDER BY total_eventos DESC
-    LIMIT 50
-  `);
 
   // Dedup case-insensitive + filtra produtos com lixo HTML
   const agg = new Map<string, {
@@ -167,53 +231,19 @@ export async function buildAnalytics(opts: {
     }))
     .sort((a, b) => b.total_eventos - a.total_eventos);
 
-  // 5. Eventos por rotulo (filtra "abertura" / "fechamento" que são session lifecycle)
-  const evtRows = await runAthenaQuery(`
-    SELECT rotulo, COUNT(*) AS total
-    FROM ${DB}.vw_eventos_base_com_cliente
-    WHERE cliente = '${cli}'
-      AND data_evento BETWEEN '${inicio}' AND '${fim}'
-      AND rotulo IS NOT NULL AND rotulo <> ''
-      AND LOWER(rotulo) NOT IN ('abertura', 'fechamento', 'abertura_sessao', 'fechamento_sessao')
-    GROUP BY rotulo
-    ORDER BY total DESC
-    LIMIT 10
-  `);
+  // 5. Eventos por rotulo
   const eventos_por_tipo = evtRows.map((r) => ({
     rotulo: r.rotulo,
     total: inum(r.total),
   }));
 
   // 6. Sessões por dia
-  const diaRows = await runAthenaQuery(`
-    SELECT data_evento AS data, COUNT(DISTINCT session_id) AS sessoes
-    FROM ${DB}.vw_eventos_base_com_cliente
-    WHERE cliente = '${cli}'
-      AND data_evento BETWEEN '${inicio}' AND '${fim}'
-    GROUP BY data_evento
-    ORDER BY data_evento
-  `);
   const sessoes_por_dia = diaRows.map((r) => ({
     data: r.data,
     sessoes: inum(r.sessoes),
   }));
 
   // 7. Origem de acesso (filtra localhost)
-  const origemRows = await runAthenaQuery(`
-    SELECT
-      CASE
-        WHEN referrer IS NULL OR referrer = '' THEN 'Direto'
-        ELSE COALESCE(regexp_extract(referrer, 'https?://([^/]+)', 1), 'Direto')
-      END AS origem,
-      COUNT(*) AS total
-    FROM ${DB}.vw_eventos_base_com_cliente
-    WHERE cliente = '${cli}'
-      AND data_evento BETWEEN '${inicio}' AND '${fim}'
-      AND evento = 'session_start'
-    GROUP BY 1
-    ORDER BY total DESC
-    LIMIT 8
-  `);
   const origensFiltradas = origemRows
     .filter((r) => !r.origem.toLowerCase().includes("localhost"))
     .slice(0, 6);
@@ -224,24 +254,11 @@ export async function buildAnalytics(opts: {
     percentual: Math.round((inum(r.total) / totalOrigens) * 1000) / 10,
   }));
 
-  // 8. Principais cidades (vw_eventos_por_localizacao é agregada, sem data)
-  let principais_cidades: Array<{ cidade: string; sessoes: number }> = [];
-  try {
-    const cidadeRows = await runAthenaQuery(`
-      SELECT cidade, eventos
-      FROM ${DB}.vw_eventos_por_localizacao
-      WHERE cliente = '${cli}'
-        AND cidade IS NOT NULL AND cidade <> ''
-      ORDER BY eventos DESC
-      LIMIT 5
-    `);
-    principais_cidades = cidadeRows.map((r) => ({
-      cidade: r.cidade,
-      sessoes: inum(r.eventos),
-    }));
-  } catch {
-    // view sem dados
-  }
+  // 8. Principais cidades
+  const principais_cidades = cidadeRowsRes.map((r) => ({
+    cidade: r.cidade,
+    sessoes: inum(r.eventos),
+  }));
 
   return {
     cliente: opts.cliente,
