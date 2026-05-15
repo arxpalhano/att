@@ -11,6 +11,27 @@ export async function GET() {
     .filter((k) => k.startsWith("AWS_") || k.startsWith("APP_AWS") || k.startsWith("AMPLIFY"))
     .sort();
 
+  // Tenta chamar o Amplify Credential Listener direto
+  let listenerCall: any = { skipped: true };
+  const host = process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_HOST;
+  const port = process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_PORT;
+  const lpath = process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_PATH;
+  if (host && port) {
+    const url = `http://${host}:${port}${lpath || ""}`;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const text = await r.text();
+      listenerCall = {
+        url,
+        status: r.status,
+        body_preview: text.slice(0, 500),
+        body_length: text.length,
+      };
+    } catch (err) {
+      listenerCall = { url, error: (err as Error).message };
+    }
+  }
+
   // Test 1: S3 GetObject (algo que temos permissão)
   let s3Test: any = { ok: false };
   try {
@@ -54,6 +75,7 @@ export async function GET() {
     tests: {
       s3_getobject_rsdesign: s3Test,
       athena_start_query_select_1: athenaTest,
+      amplify_listener_call: listenerCall,
     },
   });
 }
