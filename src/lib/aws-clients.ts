@@ -9,7 +9,9 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { AthenaClient } from "@aws-sdk/client-athena";
 
-const REGION = process.env.AWS_REGION || "us-east-1";
+// Em Amplify, env vars com prefixo AWS_* são reservadas → usamos APP_AWS_REGION.
+// Default us-east-1 onde estão Athena + bucket archtechtour-assets.
+const REGION = process.env.APP_AWS_REGION || process.env.AWS_REGION || "us-east-1";
 
 function buildConfig() {
   const hasExplicitKeys = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);

@@ -18,7 +18,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 // Em dev: SDK lê AWS_ACCESS_KEY_ID/SECRET do .env.local automaticamente.
 const hasExplicitKeys = !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY);
 const s3 = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.APP_AWS_REGION || process.env.AWS_REGION || "us-east-1",
   ...(hasExplicitKeys ? {
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
