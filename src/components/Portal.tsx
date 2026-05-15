@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, createContext, useContext, useCallback, ReactNode } from "react";
+import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
   Globe, Search, Bell, LogOut, Menu, X, Plus, Upload, Clock,
@@ -8,6 +8,8 @@ import {
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
   BarChart3, ChevronRight, Filter, MessageSquare
 } from "lucide-react";
+import AnalyticsDashboard from "./AnalyticsDashboard";
+import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
 
 // ============================================================
 // TYPES & CONSTANTS
@@ -23,9 +25,28 @@ type BlockStatus =
   | "awaiting_client_final_validation" | "approved" | "published"
   | "blocked" | "on_hold" | "archived";
 type AssetCategory = "cad" | "finishing" | "photos" | "videos" | "technical_drawing" | "3d_block" | "extra_reference";
+type TicketStatus = "new" | "in_production" | "internal_review" | "delivered";
+type ProductCategory = "moveis" | "luminarias" | "revestimentos" | "metais" | "outros";
+
+interface Brand {
+  clientId: string; companyName: string; logoUrl?: string;
+  website: string; sector: string; priority: Priority; step: number;
+}
+interface ProductVariation {
+  id: string; name: string; finishes: string; colors: string; materials: string;
+}
+interface CatalogProduct {
+  id: string; clientId: string; name: string; sku: string;
+  category: ProductCategory; priority: number; variations: ProductVariation[];
+}
+interface ProductionTicket {
+  id: string; clientId: string; blockId: string; title: string;
+  plan: ServiceType; slaDate: string; priority: Priority;
+  assignedTo?: string; status: TicketStatus;
+}
 
 interface SeedUser {
-  id: string; email: string; name: string; role: UserRole;
+  id: string; email: string; password: string; name: string; role: UserRole;
   clientId?: string; active: boolean;
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
@@ -38,10 +59,13 @@ interface SeedBlock {
   sku: string; csku: string; title: string; desc?: string;
   svc: ServiceType; status: BlockStatus; pri: Priority;
   owner?: string; backup?: string; created: string; published?: string;
+  clientRevisions?: number; // número de revisões solicitadas pelo cliente
 }
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
   name: string; size: number; v: number; by: string;
+  analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; notes?: string[]; };
+  uploadedAt?: string;
 }
 interface SeedApproval {
   id: string; blockId: string; type: string;
@@ -68,34 +92,46 @@ const STATUS_LABELS: Record<BlockStatus, string> = {
 };
 
 const STATUS_COLORS: Record<BlockStatus, string> = {
-  draft: "bg-slate-100 text-slate-600 border-slate-200",
-  awaiting_client_files: "bg-amber-50 text-amber-700 border-amber-200",
-  client_files_under_review: "bg-sky-50 text-sky-700 border-sky-200",
-  ready_to_start: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  in_modeling: "bg-violet-50 text-violet-700 border-violet-200",
-  awaiting_client_material_validation: "bg-orange-50 text-orange-700 border-orange-200",
-  approved_for_programming: "bg-cyan-50 text-cyan-700 border-cyan-200",
-  in_programming: "bg-indigo-50 text-indigo-700 border-indigo-200",
-  internal_review: "bg-pink-50 text-pink-700 border-pink-200",
-  awaiting_client_final_validation: "bg-amber-50 text-amber-700 border-amber-200",
-  approved: "bg-green-50 text-green-700 border-green-200",
-  published: "bg-green-100 text-green-800 border-green-300",
-  blocked: "bg-red-50 text-red-700 border-red-200",
-  on_hold: "bg-slate-50 text-slate-500 border-slate-200",
-  archived: "bg-slate-50 text-slate-400 border-slate-100",
+  draft: "border-slate-200/80 bg-slate-100/90 text-slate-600",
+  awaiting_client_files: "border-amber-200/80 bg-amber-50 text-amber-700",
+  client_files_under_review: "border-sky-200/80 bg-sky-50 text-sky-700",
+  ready_to_start: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+  in_modeling: "border-violet-200/80 bg-violet-50 text-violet-700",
+  awaiting_client_material_validation: "border-orange-200/80 bg-orange-50 text-orange-700",
+  approved_for_programming: "border-cyan-200/80 bg-cyan-50 text-cyan-700",
+  in_programming: "border-indigo-200/80 bg-indigo-50 text-indigo-700",
+  internal_review: "border-fuchsia-200/80 bg-fuchsia-50 text-fuchsia-700",
+  awaiting_client_final_validation: "border-amber-200/80 bg-amber-50 text-amber-700",
+  approved: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+  published: "border-emerald-300/80 bg-emerald-500/10 text-emerald-700",
+  blocked: "border-rose-200/80 bg-rose-50 text-rose-700",
+  on_hold: "border-slate-200/80 bg-slate-100/70 text-slate-500",
+  archived: "border-slate-200/60 bg-slate-50 text-slate-400",
 };
 
 const PRIORITY_COLORS: Record<Priority, string> = {
-  low: "text-slate-400", normal: "text-blue-500", high: "text-orange-500", urgent: "text-red-500",
+  low: "text-slate-400", normal: "text-cyan-600", high: "text-amber-600", urgent: "text-rose-600",
 };
 const PRIORITY_LABELS: Record<Priority, string> = { low: "Baixa", normal: "Normal", high: "Alta", urgent: "Urgente" };
 const SERVICE_LABELS: Record<ServiceType, string> = { standard: "Standard", plus: "Plus", ultra: "Ultra" };
-const SERVICE_COLORS: Record<ServiceType, string> = { standard: "bg-slate-100 text-slate-600", plus: "bg-blue-100 text-blue-700", ultra: "bg-purple-100 text-purple-700" };
+const SERVICE_COLORS: Record<ServiceType, string> = {
+  standard: "border-slate-200/80 bg-slate-100/80 text-slate-600",
+  plus: "border-cyan-200/80 bg-cyan-50 text-cyan-700",
+  ultra: "border-violet-200/80 bg-violet-50 text-violet-700",
+};
 const ROLE_LABELS: Record<UserRole, string> = { admin: "Admin", internal_ops: "Operações", internal_modeling: "Modelagem", internal_programming: "Programação", client: "Cliente" };
 const CATEGORY_LABELS: Record<AssetCategory, string> = {
-  cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos",
+  cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos do produto",
   videos: "Vídeos", technical_drawing: "Desenho Técnico", "3d_block": "Bloco 3D",
   extra_reference: "Ref. Extra",
+};
+const CATEGORY_HINTS: Partial<Record<AssetCategory, string>> = {
+  photos: "Fotos reais do produto: frente, lateral, topo, perspectiva e close-ups de detalhes",
+  finishing: "Catálogo de acabamentos/cores: amostras de madeira, tecido, metal, etc.",
+  cad: "Arquivo CAD do produto: .skp, .obj, .fbx, .step, .dwg, etc.",
+  technical_drawing: "Projeto executivo com cotas e dimensões reais",
+  videos: "Vídeo mostrando mecanismos, aberturas ou detalhes difíceis de fotografar",
+  "3d_block": "Modelo 3D completo enviado pelo cliente (referência ou base)",
 };
 const READINESS_RULES: Record<ServiceType, AssetCategory[]> = {
   standard: ["cad", "finishing", "photos"],
@@ -124,21 +160,21 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
 // SEED DATA
 // ============================================================
 let USERS: SeedUser[] = [
-  { id: "u1", email: "mpesca@archtechtour.com", name: "Mariana Pesca", role: "admin", active: true },
-  { id: "u2", email: "mpalhano@archtechtour.com", name: "Matheus Palhano", role: "admin", active: true },
-  { id: "u3", email: "vsalles@archtechtour.com", name: "Victor Salles", role: "internal_modeling", active: true },
-  { id: "u4", email: "ijesus@archtechtour.com", name: "Igor Augusto", role: "internal_modeling", active: true },
-  { id: "u5", email: "lliles@archtechtour.com", name: "Lucas Liles", role: "internal_programming", active: true },
-  { id: "u6", email: "info@archtechtour.com", name: "Jéssica Ribeiro", role: "internal_ops", active: true },
-  { id: "u7", email: "financeiro@archtechtour.com", name: "Danielli Nunes", role: "internal_ops", active: true },
-  { id: "u8", email: "contato@escal.com.br", name: "Escal Móveis", role: "client", clientId: "c1", active: true },
-  { id: "u9", email: "contato@estudiobola.com.br", name: "Estúdio Bola", role: "client", clientId: "c2", active: true },
-  { id: "u10", email: "contato@wentz.com.br", name: "Wentz", role: "client", clientId: "c3", active: true },
-  { id: "u11", email: "contato@minimaldesign.com.br", name: "Minimal Design", role: "client", clientId: "c4", active: true },
-  { id: "u12", email: "contato@rsdesign.com.br", name: "RS Design", role: "client", clientId: "c5", active: true },
+  { id: "u1", email: "mpesca@archtechtour.com", password: "arch@2025", name: "Mariana Pesca", role: "admin", active: true },
+  { id: "u2", email: "mpalhano@archtechtour.com", password: "arch@2025", name: "Matheus Palhano", role: "admin", active: true },
+  { id: "u3", email: "vsalles@archtechtour.com", password: "arch@2025", name: "Victor Salles", role: "internal_modeling", active: true },
+  { id: "u4", email: "ijesus@archtechtour.com", password: "arch@2025", name: "Igor Augusto", role: "internal_modeling", active: true },
+  { id: "u5", email: "lliles@archtechtour.com", password: "arch@2025", name: "Lucas Liles", role: "internal_programming", active: true },
+  { id: "u6", email: "info@archtechtour.com", password: "arch@2025", name: "Jéssica Ribeiro", role: "internal_ops", active: true },
+  { id: "u7", email: "financeiro@archtechtour.com", password: "arch@2025", name: "Danielli Nunes", role: "internal_ops", active: true },
+  { id: "u8", email: "contato@escal.com.br", password: "escal@2025", name: "Escal Móveis", role: "client", clientId: "c1", active: true },
+  { id: "u9", email: "contato@estudiobola.com.br", password: "bola@2025", name: "Estúdio Bola", role: "client", clientId: "c2", active: true },
+  { id: "u10", email: "contato@wentz.com.br", password: "wentz@2025", name: "Wentz", role: "client", clientId: "c3", active: true },
+  { id: "u11", email: "contato@minimaldesign.com.br", password: "minimal@2025", name: "Minimal Design", role: "client", clientId: "c4", active: true },
+  { id: "u12", email: "contato@rsdesign.com.br", password: "rsdesign@2025", name: "RS Design", role: "client", clientId: "c5", active: true },
 ];
 
-const CLIENTS: SeedClient[] = [
+let CLIENTS: SeedClient[] = [
   { id: "c1", name: "Escal Móveis", code: "ESCAL", contactEmail: "contato@escal.com.br", active: true },
   { id: "c2", name: "Estúdio Bola", code: "EB", contactEmail: "contato@estudiobola.com.br", active: true },
   { id: "c3", name: "Wentz", code: "WENTZ", contactEmail: "contato@wentz.com.br", active: true },
@@ -153,7 +189,7 @@ const CLIENTS: SeedClient[] = [
   { id: "c12", name: "Christie", code: "CHRISTIE", contactEmail: "contato@christie.com.br", active: true },
 ];
 
-const CONTRACTS: SeedContract[] = [
+let CONTRACTS: SeedContract[] = [
   { id: "ct1", clientId: "c1", title: "Contrato 2025 – Linha Completa", totalBlocks: 100, usedBlocks: 12, startDate: "2025-01-15", active: true },
   { id: "ct2", clientId: "c2", title: "Contrato Inicial – MVP", totalBlocks: 30, usedBlocks: 5, startDate: "2025-04-01", active: true },
   { id: "ct3", clientId: "c3", title: "Piloto Haus Concept", totalBlocks: 10, usedBlocks: 2, startDate: "2025-06-01", active: true },
@@ -246,6 +282,32 @@ const PUBLICATIONS: SeedPub[] = [
   { id: "pub8", blockId: "pb21", url: "https://explorar.archtechtour.com/wj/ver-5/umbra/index.html", embed: '<iframe src="https://explorar.archtechtour.com/wj/ver-5/umbra/index.html" width="100%" height="600"></iframe>', env: "production", v: 5 },
 ];
 
+let BRANDS: Brand[] = [
+  { clientId: "c1", companyName: "Escal Móveis", logoUrl: "", website: "www.escal.com.br", sector: "Móveis", priority: "high", step: 5 },
+  { clientId: "c2", companyName: "Estúdio Bola", logoUrl: "", website: "www.estudiobola.com.br", sector: "Design de Interiores", priority: "normal", step: 5 },
+  { clientId: "c3", companyName: "Wentz", logoUrl: "", website: "www.wentz.com.br", sector: "Móveis", priority: "high", step: 4 },
+  { clientId: "c4", companyName: "Minimal Design", logoUrl: "", website: "www.minimaldesign.com.br", sector: "Mobiliário", priority: "normal", step: 2 },
+  { clientId: "c5", companyName: "RS Design", logoUrl: "", website: "www.rsdesign.com.br", sector: "Design", priority: "low", step: 1 },
+];
+
+let CATALOG: CatalogProduct[] = [
+  { id: "cp1", clientId: "c1", name: "Banco Nub", sku: "BANCO-NUB", category: "moveis", priority: 1, variations: [{ id: "v1", name: "Natural", finishes: "Tecido, Couro natural", colors: "Bege, Cinza, Preto", materials: "MDF, Espuma D28, Madeira Freixo" }] },
+  { id: "cp2", clientId: "c1", name: "Banqueta Loai", sku: "BANQUETA-LOAI", category: "moveis", priority: 2, variations: [{ id: "v2", name: "Padrão", finishes: "Laminado, Couro PU", colors: "Caramelo, Off-white", materials: "Aço carbono, Couro PU" }] },
+  { id: "cp3", clientId: "c1", name: "Puff Umma", sku: "PUFF-UMMA", category: "moveis", priority: 3, variations: [{ id: "v3", name: "Redondo", finishes: "Veludo, Bouclê", colors: "Verde musgo, Terracota, Nude", materials: "MDF naval, Espuma D33" }] },
+  { id: "cp4", clientId: "c2", name: "Poltrona Acácia", sku: "POLTRONA-ACACIA", category: "moveis", priority: 1, variations: [{ id: "v4", name: "Acácia Classic", finishes: "Couro natural, Bouclê", colors: "Caramelo, Off-white, Grafite", materials: "Estrutura em aço, Espuma D45" }] },
+  { id: "cp5", clientId: "c2", name: "Banco Pião", sku: "BANCO-PIAO", category: "moveis", priority: 2, variations: [{ id: "v5", name: "Giratório", finishes: "Madeira maciça envernizada", colors: "Freijó, Carvalho, Preto", materials: "Madeira maciça, Aço inox" }] },
+];
+
+let TICKETS: ProductionTicket[] = [
+  { id: "tk1", clientId: "c1", blockId: "pb2", title: "Banqueta Loai – Programação 3D", plan: "plus", slaDate: "2026-05-10", priority: "high", assignedTo: "u5", status: "in_production" },
+  { id: "tk2", clientId: "c1", blockId: "pb3", title: "Puff Umma – Modelagem", plan: "standard", slaDate: "2026-05-15", priority: "normal", assignedTo: "u4", status: "in_production" },
+  { id: "tk3", clientId: "c2", blockId: "pb7", title: "Poltrona Acácia – Revisão Interna", plan: "ultra", slaDate: "2026-04-28", priority: "high", assignedTo: "u3", status: "internal_review" },
+  { id: "tk4", clientId: "c2", blockId: "pb11", title: "Cadeira Cota – Programação 3D", plan: "plus", slaDate: "2026-05-20", priority: "high", assignedTo: "u5", status: "in_production" },
+  { id: "tk5", clientId: "c3", blockId: "pb16", title: "Poltrona Dama – Programação", plan: "ultra", slaDate: "2026-05-05", priority: "high", assignedTo: "u5", status: "in_production" },
+  { id: "tk6", clientId: "c2", blockId: "pb13", title: "Sofá Block – Novo Ticket", plan: "ultra", slaDate: "2026-06-01", priority: "urgent", status: "new" },
+  { id: "tk7", clientId: "c4", blockId: "pb18", title: "Cabine Play Pequena – Modelagem", plan: "standard", slaDate: "2026-05-25", priority: "normal", assignedTo: "u4", status: "in_production" },
+];
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -272,9 +334,11 @@ interface AppState {
   currentUser: SeedUser | null;
   setCurrentUser: (u: SeedUser | null) => void;
   blocks: SeedBlock[];
-  setBlocks: (b: SeedBlock[]) => void;
+  setBlocks: React.Dispatch<React.SetStateAction<SeedBlock[]>>;
   activities: SeedActivity[];
-  setActivities: (a: SeedActivity[]) => void;
+  setActivities: React.Dispatch<React.SetStateAction<SeedActivity[]>>;
+  assets: SeedAsset[];
+  setAssets: React.Dispatch<React.SetStateAction<SeedAsset[]>>;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -283,20 +347,20 @@ const AppContext = createContext<AppState>({} as AppState);
 // ============================================================
 function Badge({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${className}`}>
+    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] ${className}`}>
       {children}
     </span>
   );
 }
 
 function StatusBadge({ status }: { status: BlockStatus }) {
-  return <Badge className={STATUS_COLORS[status] || "bg-slate-100 text-slate-600"}>{STATUS_LABELS[status] || status}</Badge>;
+  return <Badge className={STATUS_COLORS[status] || "border-slate-200 bg-slate-100 text-slate-600"}>{STATUS_LABELS[status] || status}</Badge>;
 }
 
 function PriorityDot({ priority }: { priority: Priority }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-medium ${PRIORITY_COLORS[priority]}`}>
-      <span className="w-1.5 h-1.5 rounded-full bg-current" />
+    <span className={`inline-flex items-center gap-1.5 text-xs font-semibold ${PRIORITY_COLORS[priority]}`}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current shadow-[0_0_12px_currentColor]" />
       {PRIORITY_LABELS[priority]}
     </span>
   );
@@ -308,79 +372,109 @@ function ServiceBadge({ type }: { type: ServiceType }) {
 
 function Card({ children, className = "", onClick }: { children: ReactNode; className?: string; onClick?: () => void }) {
   return (
-    <div onClick={onClick} className={`bg-white rounded-xl border border-slate-200/80 shadow-sm ${onClick ? "cursor-pointer hover:shadow-md hover:border-slate-300 transition-all" : ""} ${className}`}>
+    <div
+      onClick={onClick}
+      className={`rounded-[28px] border border-slate-200/70 bg-white/88 shadow-[0_18px_54px_-34px_rgba(15,23,42,0.45)] backdrop-blur-xl ${onClick ? "cursor-pointer transition duration-300 hover:-translate-y-0.5 hover:border-slate-300/80 hover:shadow-[0_26px_70px_-34px_rgba(15,23,42,0.55)]" : ""} ${className}`}
+    >
       {children}
     </div>
   );
 }
 
-function MetricCard({ icon: Icon, label, value, sub, color = "text-slate-700", onClick }: {
+function MetricCard({ icon: Icon, label, value, sub, color = "text-slate-900", onClick }: {
   icon: any; label: string; value: number | string; sub?: string; color?: string; onClick?: () => void;
 }) {
   return (
-    <Card className="p-5" onClick={onClick}>
-      <div className="flex items-start justify-between">
+    <Card className="relative overflow-hidden p-5 md:p-6" onClick={onClick}>
+      <div className="absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/70 to-transparent" />
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</p>
-          <p className={`text-2xl font-bold mt-1 ${color}`}>{value}</p>
-          {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{label}</p>
+          <p className={`mt-4 text-[1.85rem] font-semibold tracking-tight ${color}`}>{value}</p>
+          {sub && <p className="mt-2 text-sm leading-6 text-slate-500">{sub}</p>}
         </div>
-        <div className="p-2.5 rounded-lg bg-slate-50"><Icon className="w-5 h-5 text-slate-400" /></div>
+        <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/70 bg-slate-950 text-white shadow-[0_20px_34px_-26px_rgba(15,23,42,0.9)]">
+          <Icon className="h-5 w-5" />
+        </div>
       </div>
     </Card>
   );
 }
 
 function ProgressBar({ value, className = "" }: { value: number; className?: string }) {
-  const color = value === 100 ? "bg-emerald-500" : value >= 60 ? "bg-blue-500" : "bg-amber-500";
+  const color = value === 100 ? "from-emerald-400 to-emerald-500" : value >= 60 ? "from-cyan-400 to-blue-500" : "from-amber-300 to-amber-500";
   return (
-    <div className={`w-full bg-slate-100 rounded-full h-2 ${className}`}>
-      <div className={`h-2 rounded-full transition-all duration-500 ${color}`} style={{ width: `${value}%` }} />
+    <div className={`h-2.5 w-full overflow-hidden rounded-full bg-slate-200/80 ${className}`}>
+      <div className={`h-full rounded-full bg-gradient-to-r ${color} transition-all duration-500`} style={{ width: `${value}%` }} />
     </div>
   );
 }
 
 function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-center">
-      <div className="p-4 rounded-2xl bg-slate-50 mb-4"><Icon className="w-8 h-8 text-slate-300" /></div>
-      <p className="text-sm font-medium text-slate-500">{title}</p>
-      {desc && <p className="text-xs text-slate-400 mt-1 max-w-xs">{desc}</p>}
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-[24px] border border-slate-200/80 bg-slate-50/90 shadow-inner shadow-white">
+        <Icon className="h-7 w-7 text-slate-300" />
+      </div>
+      <p className="text-sm font-semibold text-slate-700">{title}</p>
+      {desc && <p className="mt-2 max-w-sm text-sm leading-6 text-slate-500">{desc}</p>}
     </div>
   );
 }
 
 function TabBtn({ active, label, count, onClick }: { active: boolean; label: string; count?: number; onClick: () => void }) {
   return (
-    <button onClick={onClick} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${active ? "bg-slate-900 text-white" : "text-slate-500 hover:text-slate-700 hover:bg-slate-100"}`}>
-      {label}
-      {count !== undefined && <span className={`ml-1.5 text-xs ${active ? "text-slate-300" : "text-slate-400"}`}>({count})</span>}
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-semibold transition ${active ? "border-slate-950 bg-slate-950 text-white shadow-[0_18px_34px_-22px_rgba(15,23,42,0.75)]" : "border-slate-200/80 bg-white/70 text-slate-500 hover:border-slate-300/90 hover:text-slate-700"}`}
+    >
+      <span>{label}</span>
+      {count !== undefined && (
+        <span className={`rounded-full px-2 py-0.5 text-[11px] ${active ? "bg-white/10 text-slate-200" : "bg-slate-100 text-slate-500"}`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }
 
 function DataTable({ columns, data, onRowClick }: { columns: any[]; data: any[]; onRowClick?: (row: any) => void }) {
-  if (!data.length) return <EmptyState icon={Clipboard} title="Nenhum registro encontrado" />;
+  if (!data.length) return <EmptyState icon={Clipboard} title="Nenhum registro encontrado" desc="Tente ajustar os filtros ou criar um novo item." />;
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full">
-        <thead>
-          <tr className="border-b border-slate-100">
-            {columns.map((col: any, i: number) => (
-              <th key={i} className="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{col.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((row: any, ri: number) => (
-            <tr key={ri} onClick={() => onRowClick?.(row)} className={`border-b border-slate-50 ${onRowClick ? "cursor-pointer hover:bg-slate-50" : ""} transition-colors`}>
-              {columns.map((col: any, ci: number) => (
-                <td key={ci} className="px-4 py-3 text-sm">{col.render ? col.render(row) : row[col.key]}</td>
+    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/75">
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse">
+          <thead className="bg-slate-50/85 backdrop-blur">
+            <tr>
+              {columns.map((col: any, i: number) => (
+                <th key={i} className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{col.label}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {data.map((row: any, ri: number) => (
+              <tr key={ri} onClick={() => onRowClick?.(row)} className={`group border-t border-slate-100/90 ${onRowClick ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors`}>
+                {columns.map((col: any, ci: number) => (
+                  <td key={ci} className="px-5 py-4 align-top text-sm text-slate-600">{col.render ? col.render(row) : row[col.key]}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        {eyebrow && <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">{eyebrow}</p>}
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950 md:text-[2.25rem]">{title}</h1>
+        {description && <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-500">{description}</p>}
+      </div>
+      {action}
     </div>
   );
 }
@@ -390,45 +484,118 @@ function DataTable({ columns, data, onRowClick }: { columns: any[]; data: any[];
 // ============================================================
 function LoginPage() {
   const { setCurrentUser } = useContext(AppContext);
-  const [selected, setSelected] = useState<SeedUser | null>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = () => {
+    setError("");
+    setLoading(true);
+    setTimeout(() => {
+      // Check seed users first
+      let user: SeedUser | undefined = USERS.find(
+        (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
+      );
+      // If not found, check users registered via /contrato flow (stored in localStorage)
+      if (!user) {
+        try {
+          const stored = localStorage.getItem("att_portal_users");
+          if (stored) {
+            const registeredUsers: SeedUser[] = JSON.parse(stored);
+            user = registeredUsers.find(
+              (u) => u.email.toLowerCase() === email.trim().toLowerCase() && u.password === password
+            );
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+      if (user) {
+        setCurrentUser(user);
+      } else {
+        setError("E-mail ou senha incorretos. Tente novamente.");
+      }
+      setLoading(false);
+    }, 400);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") handleLogin();
+  };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen bg-[#07111f] flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] bg-gradient-to-b from-emerald-500/8 to-transparent rounded-full blur-3xl pointer-events-none" />
+      <div className="w-full max-w-sm relative">
         <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-2.5 mb-2">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
-              <Box className="w-5 h-5 text-white" />
+          <div className="inline-flex flex-col items-center gap-3">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center shadow-xl shadow-emerald-500/25">
+              <Box className="w-7 h-7 text-white" />
             </div>
-            <span className="text-2xl font-bold text-white tracking-tight">ArchTechTour</span>
+            <div>
+              <p className="text-xl font-bold text-white tracking-tight">ArchTechTour</p>
+              <p className="text-slate-400 text-sm mt-0.5">Portal de Operações</p>
+            </div>
           </div>
-          <p className="text-slate-400 text-sm mt-1">Portal de Operações</p>
         </div>
-        <Card className="p-6">
-          <p className="text-sm font-medium text-slate-700 mb-4">Selecione um usuário para entrar:</p>
-          <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-            {USERS.map((u) => (
-              <button key={u.id} onClick={() => setSelected(u)} className={`w-full text-left px-4 py-3 rounded-lg border transition-all flex items-center justify-between group ${selected?.id === u.id ? "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/20" : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"}`}>
-                <div className="flex items-center gap-3">
-                  <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold ${selected?.id === u.id ? "bg-emerald-500 text-white" : "bg-slate-100 text-slate-500"}`}>
-                    {u.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-slate-800">{u.name}</p>
-                    <p className="text-xs text-slate-400">{u.email}</p>
-                  </div>
-                </div>
-                <Badge className={u.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : u.role === "admin" ? "bg-purple-50 text-purple-600 border-purple-200" : "bg-slate-100 text-slate-600 border-slate-200"}>
-                  {ROLE_LABELS[u.role]}
-                </Badge>
-              </button>
-            ))}
+
+        <div className="rounded-2xl border border-white/10 bg-white/5 backdrop-blur-xl p-6 shadow-2xl">
+          <h2 className="text-base font-semibold text-white mb-5">Entrar na sua conta</h2>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">E-mail</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="seu@email.com"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-white/10 bg-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-slate-700 transition-all"
+                style={{ WebkitTextFillColor: "white" }}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1.5">Senha</label>
+              <div className="relative">
+                <input
+                  type={showPw ? "text" : "password"}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="••••••••"
+                  className="w-full px-3.5 py-2.5 pr-10 rounded-xl border border-white/10 bg-slate-800 text-white placeholder-slate-500 text-sm focus:outline-none focus:border-emerald-400/50 focus:bg-slate-700 transition-all"
+                  style={{ WebkitTextFillColor: "white" }}
+                />
+                <button type="button" onClick={() => setShowPw(!showPw)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                  <Eye className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
-          <button onClick={() => selected && setCurrentUser(selected)} disabled={!selected} className="w-full mt-4 py-2.5 rounded-lg bg-gradient-to-r from-emerald-500 to-cyan-500 text-white text-sm font-semibold disabled:opacity-40 hover:from-emerald-600 hover:to-cyan-600 transition-all shadow-sm">
-            Entrar
+
+          {error && (
+            <div className="mt-4 px-3.5 py-2.5 rounded-xl bg-red-500/10 border border-red-400/20 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+              <p className="text-xs text-red-300">{error}</p>
+            </div>
+          )}
+
+          <button
+            onClick={handleLogin}
+            disabled={!email.trim() || !password || loading}
+            className="w-full mt-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 text-slate-900 text-sm font-bold disabled:opacity-30 hover:brightness-110 transition-all shadow-lg shadow-emerald-500/20"
+          >
+            {loading ? "Verificando..." : "Entrar"}
           </button>
-          <p className="text-xs text-slate-400 text-center mt-3">MVP — Autenticação simplificada para demonstração</p>
-        </Card>
+
+          <p className="text-xs text-slate-500 text-center mt-4">
+            Problemas para acessar? Entre em contato com{" "}
+            <span className="text-slate-400">info@archtechtour.com</span>
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -440,60 +607,100 @@ function LoginPage() {
 function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   page: string; setPage: (p: string) => void; user: SeedUser; collapsed: boolean; setCollapsed: (c: boolean) => void;
 }) {
+  const { blocks } = useContext(AppContext);
   const isClient = user.role === "client";
-  const pendingApprovals = APPROVALS.filter((a) => a.status === "pending").length;
+  const pendingApprovals = APPROVALS.filter((a) => {
+    if (a.status !== "pending") return false;
+    if (!isClient) return true;
+    const relatedBlock = blocks.find((b) => b.id === a.blockId);
+    return relatedBlock?.clientId === user.clientId;
+  }).length;
 
   const navItems = isClient
     ? [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+        { id: "onboarding", icon: Clipboard, label: "Onboarding" },
         { id: "blocks", icon: Package, label: "Meus Blocos" },
-        { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
+        { id: "publications", icon: Globe, label: "Publicações" },
+        { id: "analytics", icon: BarChart3, label: "Analytics" },
+        { id: "contracts", icon: FileText, label: "Contratos" },
       ]
     : [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
+        { id: "tickets", icon: Hash, label: "Tickets" },
         { id: "queue", icon: Layers, label: "Fila de Trabalho" },
         { id: "blocks", icon: Package, label: "Todos os Blocos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
+        { id: "publications", icon: Globe, label: "Publicações" },
+        { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "clients", icon: Users, label: "Clientes" },
         { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "activity", icon: Activity, label: "Atividade" },
         { id: "users", icon: Settings, label: "Usuários" },
       ];
 
+  const workspaceLabel = isClient ? getClientName(user.clientId!) : "Operação Interna";
+
   return (
-    <aside className={`fixed left-0 top-0 h-full bg-slate-900 text-white z-40 transition-all duration-300 flex flex-col ${collapsed ? "w-[64px]" : "w-[240px]"}`}>
-      <div className="px-4 py-4 flex items-center gap-2 border-b border-slate-800/60">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-cyan-500 flex items-center justify-center flex-shrink-0">
-          <Box className="w-4 h-4 text-white" />
-        </div>
-        {!collapsed && <span className="text-sm font-bold tracking-tight">ArchTechTour</span>}
-        <button onClick={() => setCollapsed(!collapsed)} className="ml-auto p-1.5 hover:bg-slate-800 rounded-lg transition-colors">
-          {collapsed ? <Menu className="w-4 h-4" /> : <X className="w-4 h-4" />}
-        </button>
-      </div>
-      <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
-        {navItems.map((item) => (
-          <button key={item.id} onClick={() => setPage(item.id)} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${page === item.id ? "bg-slate-800 text-white font-medium" : "text-slate-400 hover:text-white hover:bg-slate-800/60"}`}>
-            <item.icon className="w-[18px] h-[18px] flex-shrink-0" />
-            {!collapsed && <span className="flex-1 text-left">{item.label}</span>}
-            {!collapsed && item.badge !== undefined && item.badge > 0 && (
-              <span className="bg-red-500 text-white text-[10px] leading-none px-1.5 py-0.5 rounded-full font-bold">{item.badge}</span>
-            )}
-          </button>
-        ))}
-      </nav>
-      <div className="p-3 border-t border-slate-800/60">
-        <div className={`flex items-center gap-2 ${collapsed ? "justify-center" : ""}`}>
-          <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold flex-shrink-0">
-            {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-          </div>
-          {!collapsed && (
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{user.name}</p>
-              <p className="text-[10px] text-slate-500">{ROLE_LABELS[user.role]}</p>
+    <aside className={`fixed left-0 top-0 z-40 flex h-full flex-col border-r border-slate-800/60 backdrop-blur-xl transition-all duration-300 ${collapsed ? "w-[88px]" : "w-[280px]"}`} style={{ backgroundColor: "rgba(7,17,31,0.97)", color: "white" }}>
+      <div className="p-4 pb-3">
+        <div className="rounded-[28px] border border-white/10 bg-white/5 p-3 shadow-[0_24px_48px_-36px_rgba(15,23,42,0.9)]">
+          <div className="flex items-start gap-3">
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 via-cyan-400 to-sky-500 shadow-[0_12px_30px_-12px_rgba(34,211,238,0.55)]">
+              <Box className="h-5 w-5 text-white" />
             </div>
-          )}
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">ArchTechTour</p>
+                <p className="mt-1 text-sm font-semibold text-white">Portal premium</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{workspaceLabel}</p>
+              </div>
+            )}
+            <button onClick={() => setCollapsed(!collapsed)} className="ml-auto flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10 hover:text-white">
+              {collapsed ? <Menu className="h-4 w-4" /> : <X className="h-4 w-4" />}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {!collapsed && <p className="px-6 pb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Navegação</p>}
+
+      <nav className="flex-1 space-y-1 px-3 py-2">
+        {navItems.map((item) => {
+          const active = page === item.id;
+          return (
+            <button
+              key={item.id}
+              onClick={() => setPage(item.id)}
+              className={`group relative flex w-full items-center gap-3 rounded-[20px] px-3.5 py-3 text-sm transition ${active ? "bg-white text-slate-950 shadow-[0_18px_40px_-28px_rgba(255,255,255,0.75)]" : "text-slate-400 hover:bg-white/[0.08] hover:text-slate-100"}`}
+            >
+              {active && !collapsed && <span className="absolute left-0 top-3 bottom-3 w-1 rounded-r-full bg-gradient-to-b from-cyan-400 to-emerald-400" />}
+              <item.icon className={`h-[18px] w-[18px] flex-shrink-0 ${active ? "text-slate-950" : "text-slate-500 group-hover:text-slate-100"}`} />
+              {!collapsed && <span className="flex-1 text-left font-semibold">{item.label}</span>}
+              {!collapsed && item.badge !== undefined && item.badge > 0 && (
+                <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${active ? "bg-rose-100 text-rose-600" : "bg-rose-500/15 text-rose-300"}`}>
+                  {item.badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="p-4 pt-3">
+        <div className={`rounded-[24px] border border-white/10 bg-white/5 p-3 ${collapsed ? "flex justify-center" : ""}`}>
+          <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-xs font-bold text-white">
+              {user.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+            </div>
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-white">{user.name}</p>
+                <p className="mt-0.5 text-xs text-slate-400">{ROLE_LABELS[user.role]}</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </aside>
@@ -509,66 +716,188 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
   blocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
   const pending = APPROVALS.filter((a) => a.status === "pending").length;
   const recent = [...ACTIVITIES].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
+  const activeClients = CLIENTS.map((client) => ({
+    ...client,
+    count: blocks.filter((b) => b.clientId === client.id).length,
+  })).filter((client) => client.count > 0).sort((a, b) => b.count - a.count);
 
   const pipeline = [
     { s: "awaiting_client_files" as BlockStatus, icon: Clock, color: "text-amber-500" },
     { s: "ready_to_start" as BlockStatus, icon: Play, color: "text-emerald-500" },
     { s: "in_modeling" as BlockStatus, icon: Layers, color: "text-violet-500" },
     { s: "in_programming" as BlockStatus, icon: Zap, color: "text-indigo-500" },
-    { s: "internal_review" as BlockStatus, icon: Eye, color: "text-pink-500" },
+    { s: "internal_review" as BlockStatus, icon: Eye, color: "text-fuchsia-500" },
     { s: "awaiting_client_final_validation" as BlockStatus, icon: UserCheck, color: "text-amber-500" },
-    { s: "approved" as BlockStatus, icon: ThumbsUp, color: "text-green-500" },
-    { s: "published" as BlockStatus, icon: Globe, color: "text-green-600" },
+    { s: "approved" as BlockStatus, icon: ThumbsUp, color: "text-emerald-600" },
+    { s: "published" as BlockStatus, icon: Globe, color: "text-emerald-600" },
   ];
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-xl font-bold text-slate-800">Dashboard Interno</h1><p className="text-sm text-slate-500 mt-0.5">Visão geral do pipeline de produção</p></div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard icon={Package} label="Total Blocos" value={blocks.length} />
-        <MetricCard icon={AlertTriangle} label="Bloqueados" value={byStatus["blocked"] || 0} color="text-red-600" />
-        <MetricCard icon={CheckCircle} label="Aprovações Pendentes" value={pending} color="text-amber-600" />
-        <MetricCard icon={Globe} label="Publicados" value={byStatus["published"] || 0} color="text-green-600" />
+      <SectionHeader
+        eyebrow="Painel interno"
+        title="Pipeline digital com mais clareza"
+        description="Uma leitura mais sofisticada do fluxo operacional, aproximando o portal da linguagem de produto e tecnologia da ArchTechTour."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{blocks.length} blocos monitorados</Badge>}
+      />
+
+      <div className="grid gap-4 xl:grid-cols-[1.3fr_0.9fr]">
+        <Card className="relative overflow-hidden border-slate-950/70 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.28),_rgba(6,17,29,1)_44%,_rgba(6,17,29,1)_100%)] p-6 text-white md:p-8">
+          <div className="absolute inset-0 opacity-[0.1] [background-image:linear-gradient(rgba(255,255,255,0.62)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.62)_1px,transparent_1px)] [background-size:52px_52px]" />
+          <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
+          <div className="relative">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="border-white/10 bg-white/8 text-slate-100">Operações ArchTechTour</Badge>
+              <Badge className="border-cyan-400/15 bg-cyan-400/10 text-cyan-100">Produção + validação + publicação</Badge>
+            </div>
+            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.25rem]">Toda a operação em uma interface mais editorial e menos genérica.</h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+              O foco aqui é dar leitura rápida para bloqueios, aprovações, produção e publicações, sem cair na estética padrão de dashboard pronto.
+            </p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                { label: "Total de blocos", value: blocks.length, sub: "Base monitorada" },
+                { label: "Bloqueados", value: byStatus["blocked"] || 0, sub: "Pedem atenção" },
+                { label: "Aprovações", value: pending, sub: "Pendentes" },
+                { label: "Publicados", value: byStatus["published"] || 0, sub: "Ao vivo" },
+              ].map((item) => (
+                <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/6 p-4 backdrop-blur">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{item.value}</p>
+                  <p className="mt-2 text-sm text-slate-300">{item.sub}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
+          <Card className="p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Atalhos</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">Ações mais importantes</h3>
+              </div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/70 bg-slate-950 text-white">
+                <ChevronRight className="h-5 w-5" />
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {[
+                { label: "Fila de trabalho", desc: "Distribua e acompanhe responsáveis", onClick: () => setPage("queue") },
+                { label: "Aprovações pendentes", desc: "Validações aguardando ação", onClick: () => setPage("approvals") },
+                { label: "Todos os blocos", desc: "Faça leituras mais amplas da operação", onClick: () => setPage("blocks") },
+              ].map((item) => (
+                <button key={item.label} onClick={item.onClick} className="flex w-full items-center justify-between rounded-[22px] border border-slate-200/80 bg-slate-50/70 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{item.label}</p>
+                    <p className="mt-1 text-sm text-slate-500">{item.desc}</p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-slate-400" />
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <MetricCard
+            icon={AlertTriangle}
+            label="Bloqueios"
+            value={byStatus["blocked"] || 0}
+            sub="Itens que precisam de destravamento operacional ou retorno do cliente."
+            color="text-rose-600"
+            onClick={() => setPage("queue")}
+          />
+        </div>
       </div>
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-4">Pipeline de Produção</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+
+      <Card className="p-6">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pipeline</p>
+            <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Produção em andamento</h3>
+          </div>
+          <p className="max-w-xl text-sm leading-6 text-slate-500">Os estágios principais aparecem como uma esteira visual para priorização rápida do time.</p>
+        </div>
+        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {pipeline.map(({ s, icon: Icon, color }) => (
-            <button key={s} onClick={() => setPage("blocks")} className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 hover:bg-slate-100 transition-colors text-left">
-              <Icon className={`w-5 h-5 ${color} flex-shrink-0`} />
-              <div><p className="text-lg font-bold text-slate-800">{byStatus[s] || 0}</p><p className="text-xs text-slate-500 leading-tight">{STATUS_LABELS[s]}</p></div>
+            <button key={s} onClick={() => setPage("blocks")} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{STATUS_LABELS[s]}</p>
+                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{byStatus[s] || 0}</p>
+                </div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50">
+                  <Icon className={`h-5 w-5 ${color}`} />
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-between text-sm text-slate-500">
+                <span>Ver detalhes</span>
+                <ChevronRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
+              </div>
             </button>
           ))}
         </div>
       </Card>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="p-5">
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">Blocos por Cliente</h3>
-          {CLIENTS.map((cl) => {
-            const count = blocks.filter((b) => b.clientId === cl.id).length;
-            return (
-              <div key={cl.id} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500">{cl.code.slice(0, 2)}</div>
-                  <span className="text-sm font-medium text-slate-700">{cl.name}</span>
-                </div>
-                <span className="text-sm font-bold text-slate-800">{count}</span>
-              </div>
-            );
-          })}
-        </Card>
-        <Card className="p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">Atividade Recente</h3>
-            <button onClick={() => setPage("activity")} className="text-xs text-blue-600 hover:underline">Ver tudo</button>
+
+      <div className="grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Clientes ativos</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Carga por marca</h3>
+            </div>
+            <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{activeClients.length} contas</Badge>
           </div>
-          <div className="space-y-2.5 max-h-64 overflow-y-auto">
-            {recent.map((act) => (
-              <div key={act.id} className="flex items-start gap-2.5 text-xs">
-                <Activity className="w-3.5 h-3.5 text-slate-300 mt-0.5 flex-shrink-0" />
-                <div className="flex-1 min-w-0"><p className="text-slate-600 truncate">{act.desc}</p><p className="text-slate-400">{getUserName(act.userId)} · {fmtDate(act.at)}</p></div>
-              </div>
-            ))}
+          <div className="mt-6 space-y-4">
+            {activeClients.map((client) => {
+              const pct = Math.round((client.count / blocks.length) * 100);
+              return (
+                <div key={client.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-xs font-semibold text-slate-600 shadow-sm">
+                        {client.code.slice(0, 2)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{client.name}</p>
+                        <p className="text-xs text-slate-400">{client.count} blocos no pipeline</p>
+                      </div>
+                    </div>
+                    <p className="text-sm font-semibold text-slate-700">{pct}%</p>
+                  </div>
+                  <ProgressBar value={pct} className="mt-4" />
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Atividade recente</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Movimentações da operação</h3>
+            </div>
+            <button onClick={() => setPage("activity")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver tudo</button>
+          </div>
+          <div className="mt-6 space-y-3">
+            {recent.map((act) => {
+              const block = blocks.find((b) => b.id === act.blockId);
+              return (
+                <div key={act.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/75 p-4">
+                  <div className="flex gap-3">
+                    <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm">
+                      <Activity className="h-4 w-4 text-slate-400" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-slate-800">{act.desc}</p>
+                      <p className="mt-1 text-sm text-slate-500">{getUserName(act.userId)}</p>
+                      <p className="mt-2 text-xs text-slate-400">{block?.sku ? `${block.sku} · ` : ""}{fmtDate(act.at)}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </Card>
       </div>
@@ -587,59 +916,267 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
   const used = ctrs.reduce((s, c) => s + c.usedBlocks, 0);
   const myBlocks = blocks.filter((b) => b.clientId === cid);
   const awaiting = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).length;
-  const byStatus: Record<string, number> = {};
-  myBlocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
+  const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "approved_for_programming", "in_programming", "internal_review"].includes(b.status)).length;
+  const publishedCount = myBlocks.filter((b) => b.status === "published").length;
+  const contractUsage = contracted ? Math.round((used / contracted) * 100) : 0;
+  const latestContract = [...ctrs].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
+  const nextActions = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).slice(0, 3);
+  const liveBlocks = myBlocks.filter((b) => b.status === "published").slice(0, 3);
+  const isNewClient = myBlocks.length === 0;
+
+  // Onboarding steps — step 0 is always done (contract signed)
+  const onboardingSteps = [
+    { label: "Contrato assinado", done: true, desc: "Seu contrato está ativo e registrado." },
+    { label: "Reunião de onboarding agendada", done: !isNewClient || false, desc: "A equipe ATT entrará em contato em até 5 dias úteis para agendar." },
+    { label: "Envio dos arquivos", done: myBlocks.some((b) => !["awaiting_client_files"].includes(b.status)), desc: "Envie blocos 3D, fotos, logo e desenhos técnicos para info@archtechtour.com." },
+    { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
+    { label: "Publicação no catálogo digital", done: publishedCount > 0, desc: "Seus blocos estarão disponíveis em 3D e RA na plataforma ArchTechTour." },
+  ];
+  const onboardingProgress = onboardingSteps.filter((s) => s.done).length;
 
   return (
     <div className="space-y-6">
-      <div><h1 className="text-xl font-bold text-slate-800">Olá, {user.name.split(" ")[0]}!</h1><p className="text-sm text-slate-500">{getClientName(cid)}</p></div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard icon={FileText} label="Contratados" value={contracted} />
-        <MetricCard icon={Package} label="Utilizados" value={used} />
-        <MetricCard icon={Box} label="Disponíveis" value={contracted - used} color="text-emerald-600" />
-        <MetricCard icon={AlertTriangle} label="Aguardando Ação" value={awaiting} color="text-amber-600" />
-      </div>
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Meus Blocos por Status</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {Object.entries(byStatus).sort((a, b) => b[1] - a[1]).map(([st, cnt]) => (
-            <div key={st} className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50">
-              <StatusBadge status={st as BlockStatus} /><span className="text-sm font-bold text-slate-700">{cnt}</span>
+      <SectionHeader
+        eyebrow="Portal do cliente"
+        title={`Olá, ${user.name.split(" ")[0]}. Bem-vindo ao seu portal.`}
+        description={isNewClient
+          ? "Seu contrato está ativo. Acompanhe abaixo os próximos passos para iniciar a produção dos seus blocos 3D."
+          : `Acompanhe o andamento dos seus blocos 3D, aprovações e publicações na plataforma ArchTechTour.`}
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{getClientName(cid)}</Badge>}
+      />
+
+      {/* ONBOARDING BANNER — shown while not all steps done */}
+      {onboardingProgress < onboardingSteps.length && (
+        <Card className="relative overflow-hidden border-cyan-200/60 bg-[linear-gradient(135deg,rgba(236,254,255,0.98),rgba(240,253,250,0.98))] p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-cyan-700">Onboarding</p>
+              <h3 className="mt-1.5 text-xl font-semibold tracking-tight text-slate-900">
+                {onboardingProgress === 1 ? "Vamos começar — siga os próximos passos" : `${onboardingProgress} de ${onboardingSteps.length} etapas concluídas`}
+              </h3>
             </div>
-          ))}
-        </div>
-      </Card>
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-700">Blocos Recentes</h3>
-          <button onClick={() => setPage("blocks")} className="text-xs text-blue-600 hover:underline">Ver todos</button>
-        </div>
-        {myBlocks.slice(0, 5).map((b) => (
-          <div key={b.id} onClick={() => { setSelectedBlock(b.id); setPage("block_detail"); }} className="flex items-center justify-between py-2.5 border-b border-slate-50 last:border-0 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded transition-colors">
-            <div><p className="text-sm font-medium text-slate-700">{b.title}</p><p className="text-xs text-slate-400">{b.csku}</p></div>
-            <StatusBadge status={b.status} />
+            <div className="flex items-center gap-3">
+              <div className="h-2 w-40 rounded-full bg-slate-200/80 overflow-hidden">
+                <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-cyan-500 transition-all" style={{ width: `${(onboardingProgress / onboardingSteps.length) * 100}%` }} />
+              </div>
+              <span className="text-sm font-semibold text-slate-500">{Math.round((onboardingProgress / onboardingSteps.length) * 100)}%</span>
+            </div>
           </div>
-        ))}
-      </Card>
-      <Card className="p-5 border-l-4 border-l-emerald-400">
-        <div className="flex items-start gap-3">
-          <div className="p-2.5 rounded-lg bg-emerald-50"><Upload className="w-5 h-5 text-emerald-600" /></div>
-          <div className="flex-1">
-            <h3 className="text-sm font-semibold text-slate-700">Enviar Materiais</h3>
-            <p className="text-xs text-slate-500 mt-0.5 mb-3">Envie CAD, acabamentos, fotos e outros materiais para seus blocos em andamento.</p>
-            <button onClick={() => setPage("blocks")} className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors">
-              <FileUp className="w-3.5 h-3.5" /> Ir para Meus Blocos
-            </button>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {onboardingSteps.map((step, i) => (
+              <div key={i} className={`rounded-[20px] border p-4 ${step.done ? "border-emerald-200/80 bg-emerald-50/80" : i === onboardingProgress ? "border-cyan-300/60 bg-white shadow-sm" : "border-slate-200/60 bg-white/60"}`}>
+                <div className="flex items-center gap-2 mb-2">
+                  <div className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${step.done ? "bg-emerald-500 text-white" : i === onboardingProgress ? "bg-cyan-500 text-white" : "bg-slate-200 text-slate-500"}`}>
+                    {step.done ? <CheckCircle className="h-3.5 w-3.5" /> : i + 1}
+                  </div>
+                  <p className={`text-xs font-semibold ${step.done ? "text-emerald-700" : i === onboardingProgress ? "text-cyan-800" : "text-slate-400"}`}>{step.label}</p>
+                </div>
+                <p className="text-xs text-slate-500 leading-5">{step.desc}</p>
+                {i === onboardingProgress && i === 2 && (
+                  <button onClick={() => setPage("blocks")} className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-700">
+                    <FileUp className="h-3 w-3" /> Enviar materiais
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
+        </Card>
+      )}
+
+      {/* STATS + CONTRACT */}
+      <div className="grid gap-4 xl:grid-cols-[1.28fr_0.92fr]">
+        <Card className="relative overflow-hidden border-slate-950/70 bg-[radial-gradient(circle_at_top_left,_rgba(45,212,191,0.18),_rgba(6,17,29,1)_48%,_rgba(6,17,29,1)_100%)] p-6 text-white md:p-8">
+          <div className="absolute inset-0 opacity-[0.07] [background-image:linear-gradient(rgba(255,255,255,0.62)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.62)_1px,transparent_1px)] [background-size:52px_52px]" />
+          <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
+          <div className="relative">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="border-white/10 bg-white/8 text-slate-100">Plano {latestContract?.title?.split("–")[0]?.trim() || "Ativo"}</Badge>
+              {awaiting > 0 && <Badge className="border-amber-400/20 bg-amber-400/15 text-amber-200">{awaiting} {awaiting === 1 ? "item pede" : "itens pedem"} sua atenção</Badge>}
+            </div>
+            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.1rem]">
+              {isNewClient ? "Seus produtos em 3D e RA começam aqui." : `${publishedCount > 0 ? `${publishedCount} bloco${publishedCount > 1 ? "s" : ""} publicado${publishedCount > 1 ? "s" : ""}.` : "Produção em andamento."} Acompanhe tudo em tempo real.`}
+            </h2>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
+              {isNewClient
+                ? "Assim que você enviar os arquivos dos seus produtos, a equipe ArchTechTour inicia a digitalização em 3D. Você acompanha cada etapa aqui, com aprovações e publicação ao vivo."
+                : "Cada bloco passa por modelagem, aprovação e publicação. Você recebe notificação a cada etapa que precisar da sua validação."}
+            </p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              {[
+                { label: "Blocos contratados", value: contracted, sub: `${contracted - used} disponíveis` },
+                { label: "Em produção", value: inProduction, sub: "sendo trabalhados agora" },
+                { label: "Publicados", value: publishedCount, sub: "ao vivo na plataforma" },
+              ].map((item) => (
+                <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/6 p-4 backdrop-blur">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{item.value}</p>
+                  <p className="mt-2 text-sm text-slate-300">{item.sub}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button onClick={() => setPage("blocks")} className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-slate-100">
+                <FileUp className="h-4 w-4" />
+                {isNewClient ? "Enviar meus arquivos" : "Ver meus blocos"}
+              </button>
+              <button onClick={() => setPage("contracts")} className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-white/10">
+                <FileText className="h-4 w-4" />
+                Meu contrato
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        <div className="grid gap-4">
+          <Card className="p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Contrato ativo</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{latestContract?.title || "Contrato ArchTechTour"}</h3>
+                <p className="mt-1.5 text-sm text-slate-500">Início em {latestContract ? fmtDate(latestContract.startDate) : "—"}</p>
+              </div>
+              <Badge className="border-slate-200/80 bg-slate-50 text-slate-600">{contractUsage}% usado</Badge>
+            </div>
+            <div className="mt-5 rounded-[22px] border border-slate-200/80 bg-slate-50/80 p-4">
+              <div className="flex items-center justify-between text-sm font-semibold text-slate-700">
+                <span>Uso do contrato</span>
+                <span>{used} de {contracted} blocos</span>
+              </div>
+              <ProgressBar value={contractUsage} className="mt-4" />
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Disponíveis</p>
+                  <p className="mt-2 text-2xl font-semibold text-emerald-600">{contracted - used}</p>
+                </div>
+                <div className="rounded-2xl bg-white px-4 py-3 shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Em produção</p>
+                  <p className="mt-2 text-2xl font-semibold text-slate-900">{inProduction}</p>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pendências</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">
+                  {awaiting > 0 ? `${awaiting} item${awaiting > 1 ? "ns" : ""} aguardando você` : "Nenhuma ação pendente"}
+                </h3>
+              </div>
+              <div className={`flex h-11 w-11 items-center justify-center rounded-2xl border text-white ${awaiting > 0 ? "border-amber-200 bg-amber-500" : "border-slate-200/80 bg-slate-100"}`}>
+                <AlertTriangle className={`h-5 w-5 ${awaiting > 0 ? "text-white" : "text-slate-400"}`} />
+              </div>
+            </div>
+            <div className="mt-5 space-y-3">
+              {nextActions.length ? nextActions.map((block) => (
+                <button key={block.id} onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[22px] border border-amber-100 bg-amber-50/60 px-4 py-4 text-left transition hover:border-amber-200 hover:bg-amber-50">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{block.csku}</p>
+                    <div className="mt-2.5"><StatusBadge status={block.status} /></div>
+                  </div>
+                  <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                </button>
+              )) : (
+                <div className="flex flex-col items-center gap-2 py-6 text-center">
+                  <CheckCircle className="h-8 w-8 text-emerald-400" />
+                  <p className="text-sm font-semibold text-slate-700">Tudo em dia</p>
+                  <p className="text-xs text-slate-400">Não há itens aguardando sua aprovação ou envio de arquivos.</p>
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
-      </Card>
-      <Card className="p-5">
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">Precisa de ajuda?</h3>
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-slate-500"><MessageSquare className="w-3.5 h-3.5 text-slate-400" /> Contato: info@archtechtour.com</div>
-          <div className="flex items-center gap-2 text-xs text-slate-500"><Globe className="w-3.5 h-3.5 text-slate-400" /> www.archtechtour.com</div>
+      </div>
+
+      {/* RECENT BLOCKS + SUPPORT */}
+      <div className="grid gap-4 xl:grid-cols-[1.08fr_0.92fr]">
+        <Card className="p-6">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Meus blocos</p>
+              <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">
+                {myBlocks.length > 0 ? "Acompanhe cada produto" : "Nenhum bloco iniciado"}
+              </h3>
+            </div>
+            {myBlocks.length > 0 && <button onClick={() => setPage("blocks")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver todos</button>}
+          </div>
+          <div className="mt-6 space-y-3">
+            {myBlocks.length > 0 ? myBlocks.slice(0, 5).map((b) => (
+              <button key={b.id} onClick={() => { setSelectedBlock(b.id); setPage("block_detail"); }} className="flex w-full items-center justify-between rounded-[24px] border border-slate-200/80 bg-slate-50/75 px-4 py-4 text-left transition hover:border-slate-300 hover:bg-slate-100/80">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{b.title}</p>
+                  <p className="mt-0.5 text-xs text-slate-500">{b.csku}</p>
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                    <StatusBadge status={b.status} />
+                    <ServiceBadge type={b.svc} />
+                  </div>
+                </div>
+                <ChevronRight className="h-4 w-4 text-slate-400 flex-shrink-0" />
+              </button>
+            )) : (
+              <div className="flex flex-col items-center gap-3 py-8 text-center rounded-[22px] border-2 border-dashed border-slate-200">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100">
+                  <Box className="h-6 w-6 text-slate-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Seus blocos aparecerão aqui</p>
+                  <p className="mt-1 text-xs text-slate-400">Após o onboarding, a equipe ATT criará os blocos dos seus produtos.</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <div className="grid gap-4">
+          {/* Published */}
+          <Card className="p-6">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Publicações ao vivo</p>
+                <h3 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{publishedCount > 0 ? `${publishedCount} produto${publishedCount > 1 ? "s" : ""} no catálogo` : "Nenhuma publicação ainda"}</h3>
+              </div>
+              {publishedCount > 0 && <Badge className="border-emerald-200/80 bg-emerald-50 text-emerald-700">{publishedCount} ao vivo</Badge>}
+            </div>
+            <div className="mt-5 space-y-3">
+              {liveBlocks.length ? liveBlocks.map((block) => {
+                const publication = PUBLICATIONS.find((pub) => pub.blockId === block.id);
+                return (
+                  <div key={block.id} className="rounded-[22px] border border-emerald-100 bg-emerald-50/50 p-4">
+                    <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+                    <p className="mt-0.5 text-xs text-slate-500">{block.csku}</p>
+                    {publication && (
+                      <a href={publication.url} target="_blank" rel="noreferrer" className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-700 transition hover:text-cyan-800">
+                        Abrir experiência 3D <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                );
+              }) : (
+                <p className="text-xs text-slate-400 leading-5">Assim que um produto for aprovado e publicado, você poderá acessar o link da experiência 3D e de realidade aumentada diretamente aqui.</p>
+              )}
+            </div>
+          </Card>
+
+          {/* Support */}
+          <Card className="p-6">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Suporte</p>
+            <h3 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">Fale com a equipe ATT</h3>
+            <p className="mt-1.5 text-xs text-slate-500 leading-5">Em caso de dúvidas sobre prazos, aprovações ou arquivos, entre em contato diretamente.</p>
+            <div className="mt-4 space-y-2.5 text-sm">
+              <a href="mailto:info@archtechtour.com" className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3 transition hover:border-slate-300 hover:bg-slate-100/60">
+                <MessageSquare className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                <span className="text-slate-700">info@archtechtour.com</span>
+              </a>
+              <a href="https://archtechtour.com" target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-[20px] border border-slate-200/80 bg-slate-50/75 px-4 py-3 transition hover:border-slate-300 hover:bg-slate-100/60">
+                <Globe className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                <span className="text-slate-700">archtechtour.com</span>
+              </a>
+            </div>
+          </Card>
         </div>
-      </Card>
+      </div>
     </div>
   );
 }
@@ -678,7 +1215,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
     a.click(); URL.revokeObjectURL(url);
   };
 
-  const handleCreateBlock = (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => {
+  const handleCreateBlock = (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }): string => {
     const clientBlocks = blocks.filter((b) => b.clientId === data.clientId);
     const n = clientBlocks.length + 1;
     const clientCode = getClientCode(data.clientId);
@@ -698,6 +1235,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
     setShowCreateModal(false);
     setSelectedBlock(newBlock.id);
     setPage("block_detail");
+    return newBlock.id;
   };
 
   return (
@@ -741,7 +1279,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
           { label: "Tipo", render: (r: SeedBlock) => <ServiceBadge type={r.svc} /> },
           { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
           { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
-          { label: "Responsável", render: (r: SeedBlock) => <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> },
+          ...(!isClient ? [{ label: "Responsável", render: (r: SeedBlock) => <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> }] : []),
         ]} />
       </Card>
 
@@ -751,12 +1289,368 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
   );
 }
 
+// ============================================================
+// UPLOAD MODAL — S3 upload + Claude AI analysis
+// ============================================================
+interface AnalyzeResult {
+  score: number;
+  approved: boolean;
+  summary: string;
+  issues: string[];
+  suggestions: string[];
+  notes?: string[]; // internal ATT team notes — never shown to clients
+}
+
+/** Normalize a filename: lowercase, remove accents, spaces → underscores */
+function normalizeAssetName(original: string): string {
+  const lastDot = original.lastIndexOf(".");
+  const ext = lastDot > 0 ? original.slice(lastDot).toLowerCase() : "";
+  const base = original.slice(0, lastDot > 0 ? lastDot : undefined);
+  const normalized = base
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/[^a-zA-Z0-9_.-]/g, "_")
+    .replace(/_+/g, "_")
+    .toLowerCase();
+  return normalized + ext;
+}
+
+function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded }: {
+  blockId: string;
+  clientId: string;
+  allowedCategories?: AssetCategory[];
+  onClose: () => void;
+  onUploaded: (asset: SeedAsset) => void;
+}) {
+  const { currentUser } = useContext(AppContext);
+  const isClient = currentUser?.role === "client";
+  const categories = allowedCategories ?? (Object.keys(CATEGORY_LABELS) as AssetCategory[]);
+  const [cat, setCat] = useState<AssetCategory>(categories[0]);
+  const [files, setFiles] = useState<File[]>([]);
+  const [stage, setStage] = useState<"idle" | "processing" | "done">("idle");
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [progress, setProgress] = useState(0);
+  const [results, setResults] = useState<{ file: File; result: AnalyzeResult | null; error?: string }[]>([]);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Convert a File to base64 string (data URI prefix removed)
+  const fileToBase64 = (f: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve((reader.result as string).split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(f);
+    });
+
+  const handleFiles = (newFiles: File[]) => {
+    setFiles(newFiles);
+    setStage("idle");
+    setResults([]);
+    setCurrentIdx(0);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const dropped = Array.from(e.dataTransfer.files);
+    if (dropped.length > 0) handleFiles(dropped);
+  };
+
+  const doUpload = async () => {
+    if (!files.length) return;
+    setStage("processing");
+    const allResults: { file: File; result: AnalyzeResult | null; error?: string }[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setCurrentIdx(i);
+      setProgress(0);
+
+      try {
+        // 1. Get presigned URL
+        const uploadResp = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            fileType: file.type || "application/octet-stream",
+            category: cat,
+            blockId,
+            clientId,
+          }),
+        });
+        if (!uploadResp.ok) {
+          const err = await uploadResp.json().catch(() => ({}));
+          throw new Error(err.error || "Erro ao obter URL de upload");
+        }
+        const { uploadUrl, readUrl } = await uploadResp.json();
+        setProgress(35);
+
+        // 2. Upload directly to S3
+        const s3Resp = await fetch(uploadUrl, {
+          method: "PUT",
+          body: file,
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+        });
+        if (!s3Resp.ok) throw new Error("Falha no upload para S3");
+        setProgress(65);
+
+        // 3. AI Analysis
+        const isImg = /^image\//i.test(file.type) || /\.(jpe?g|png|webp|gif|tiff?|bmp|heic)$/i.test(file.name);
+        const MAX_B64 = 4.5 * 1024 * 1024; // 4.5 MB — safe Claude Vision limit
+        let imageBase64: string | null = null;
+        if (isImg && file.size <= MAX_B64) {
+          try { imageBase64 = await fileToBase64(file); } catch { /* skip */ }
+        }
+        const analyzeResp = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileUrl: readUrl,
+            fileName: file.name,
+            category: cat,
+            mimeType: file.type || "application/octet-stream",
+            imageBase64,                         // null for large/non-image files
+            imageMimeType: file.type || null,
+          }),
+        });
+        setProgress(95);
+        const analysis = analyzeResp.ok ? await analyzeResp.json() : null;
+        setProgress(100);
+
+        // 4. Register asset
+        const newAsset: SeedAsset = {
+          id: `ast_${Date.now()}_${i}`,
+          blockId,
+          cat,
+          name: normalizeAssetName(file.name),
+          size: file.size,
+          v: 1,
+          by: currentUser?.id ?? "u1",
+          uploadedAt: new Date().toISOString(),
+          analysis: analysis ?? undefined,
+        };
+        onUploaded(newAsset);
+        allResults.push({ file, result: analysis });
+      } catch (e: unknown) {
+        allResults.push({ file, result: null, error: e instanceof Error ? e.message : "Erro desconhecido" });
+      }
+    }
+
+    setResults(allResults);
+    setStage("done");
+  };
+
+  const reset = () => {
+    setFiles([]);
+    setStage("idle");
+    setResults([]);
+    setProgress(0);
+    setCurrentIdx(0);
+  };
+
+  const approvedCount = results.filter((r) => r.result?.approved).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800">Upload de Material</h2>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {/* Category selector */}
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Categoria do Material</label>
+            <select value={cat} onChange={(e) => { setCat(e.target.value as AssetCategory); reset(); }}
+              disabled={stage === "processing"}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              {categories.map((c) => <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+            </select>
+            {CATEGORY_HINTS[cat] && (
+              <p className="mt-1.5 text-xs text-slate-400">{CATEGORY_HINTS[cat]}</p>
+            )}
+          </div>
+
+          {/* Drop zone */}
+          {stage === "idle" && (
+            <div
+              onDrop={handleDrop}
+              onDragOver={(e) => e.preventDefault()}
+              onClick={() => inputRef.current?.click()}
+              className="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-emerald-400 hover:bg-emerald-50/40 transition-all"
+            >
+              <input
+                ref={inputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  const selected = Array.from(e.target.files || []);
+                  if (selected.length > 0) handleFiles(selected);
+                }}
+              />
+              {files.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-center gap-2 mb-1">
+                    <FileText className="w-5 h-5 text-emerald-500" />
+                    <span className="text-sm font-medium text-slate-700">
+                      {files.length} arquivo{files.length > 1 ? "s" : ""} selecionado{files.length > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="space-y-1 max-h-28 overflow-y-auto">
+                    {files.map((f, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 px-3 py-1.5 rounded-lg">
+                        <span className="truncate flex-1 text-left">{f.name}</span>
+                        <span className="shrink-0 text-slate-400">{fmtSize(f.size)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">Clique para alterar seleção</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Upload className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="text-sm font-medium text-slate-500">Arraste ou clique para selecionar</p>
+                  <p className="text-xs text-slate-400">Múltiplos arquivos · Imagens, PDF, CAD, vídeos…</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Progress */}
+          {stage === "processing" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-slate-500 mb-0.5">
+                <span>Arquivo {currentIdx + 1} de {files.length}</span>
+                <span className="font-medium text-slate-700 truncate max-w-[200px]">{files[currentIdx]?.name}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 bg-slate-100 rounded-full h-2">
+                  <div className="bg-emerald-500 h-2 rounded-full transition-all duration-500" style={{ width: `${progress}%` }} />
+                </div>
+                <span className="text-xs text-slate-500 w-8 text-right">{progress}%</span>
+              </div>
+              <p className="text-sm text-center text-slate-500">⏳ Enviando e analisando…</p>
+            </div>
+          )}
+
+          {/* Results */}
+          {stage === "done" && results.length > 0 && (
+            <div className="space-y-3">
+              <div className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold ${
+                approvedCount === results.length
+                  ? "bg-emerald-50 text-emerald-700"
+                  : approvedCount > 0
+                  ? "bg-amber-50 text-amber-700"
+                  : "bg-red-50 text-red-700"
+              }`}>
+                {approvedCount === results.length
+                  ? <Check className="w-4 h-4 shrink-0" />
+                  : <AlertTriangle className="w-4 h-4 shrink-0" />}
+                {approvedCount === results.length
+                  ? `${results.length} arquivo${results.length > 1 ? "s" : ""} aprovado${results.length > 1 ? "s" : ""} pelo agente`
+                  : `${approvedCount} de ${results.length} aprovado${approvedCount !== 1 ? "s" : ""} pelo agente`}
+              </div>
+              {results.map(({ file, result, error }, i) => {
+                if (error) return (
+                  <div key={i} className="border border-red-200 bg-red-50 rounded-xl p-3">
+                    <p className="text-xs font-medium text-red-700 truncate">{file.name}</p>
+                    <p className="text-xs text-red-600 mt-0.5">{error}</p>
+                  </div>
+                );
+                if (!result) return (
+                  <div key={i} className="border border-emerald-200 bg-emerald-50 rounded-xl p-3 flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                    <p className="text-xs font-medium text-emerald-700 truncate">{file.name} · Enviado</p>
+                  </div>
+                );
+                const rBg = result.approved ? "border-emerald-200 bg-emerald-50" : result.score >= 50 ? "border-amber-200 bg-amber-50" : "border-red-200 bg-red-50";
+                const rColor = result.score >= 80 ? "text-emerald-600" : result.score >= 50 ? "text-amber-600" : "text-red-600";
+                return (
+                  <div key={i} className={`border rounded-xl p-3 space-y-2 ${rBg}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-medium text-slate-700 truncate flex-1">{file.name}</p>
+                      <span className={`text-sm font-bold shrink-0 ${rColor}`}>{result.score}<span className="text-xs font-normal text-slate-400">/100</span></span>
+                    </div>
+                    <p className="text-xs text-slate-600">{result.summary}</p>
+                    {result.issues?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {result.issues.slice(0, 3).map((iss, j) => (
+                          <div key={j} className="flex items-start gap-1 text-xs text-red-700">
+                            <X className="w-3 h-3 mt-0.5 shrink-0 text-red-400" />{iss}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {result.suggestions?.length > 0 && (
+                      <div className="space-y-0.5">
+                        {result.suggestions.slice(0, 3).map((s, j) => (
+                          <div key={j} className="flex items-start gap-1 text-xs text-slate-600">
+                            <span className="text-emerald-500 shrink-0">→</span>{s}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!isClient && (result as AnalyzeResult & { notes?: string[] }).notes?.length ? (
+                      <div className="space-y-0.5 border-t border-dashed border-slate-300 pt-1.5 mt-1">
+                        <p className="text-[10px] font-semibold text-violet-600 uppercase tracking-wide">🔒 Notas internas</p>
+                        {((result as AnalyzeResult & { notes?: string[] }).notes ?? []).slice(0, 3).map((n, j) => (
+                          <div key={j} className="flex items-start gap-1 text-xs text-violet-700">
+                            <span className="text-violet-400 shrink-0">→</span>{n}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex justify-between gap-2 p-5 border-t border-slate-100">
+          {stage === "done" ? (
+            <>
+              <button onClick={reset} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">
+                Enviar mais
+              </button>
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">
+                Concluir
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+              <button
+                onClick={doUpload}
+                disabled={!files.length || stage === "processing"}
+                className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40"
+              >
+                <Upload className="w-4 h-4" />
+                {stage === "processing"
+                  ? "Processando…"
+                  : files.length > 1
+                  ? `Enviar ${files.length} arquivos`
+                  : "Enviar e Analisar"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Create Block Modal ---
 function CreateBlockModal({ user, onClose, onCreate }: {
   user: SeedUser;
   onClose: () => void;
-  onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => void;
+  onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => string;
 }) {
+  const { assets, setAssets, activities, setActivities } = useContext(AppContext);
   const isClient = user.role === "client";
   const [title, setTitle] = useState("");
   const [clientSku, setClientSku] = useState("");
@@ -764,11 +1658,37 @@ function CreateBlockModal({ user, onClose, onCreate }: {
   const [contractId, setContractId] = useState("");
   const [serviceType, setServiceType] = useState<ServiceType>("standard");
   const [priority, setPriority] = useState<Priority>("normal");
+  // Upload step
+  const [uploadBlockId, setUploadBlockId] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<Record<string, File>>({});
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const availableContracts = CONTRACTS.filter((c) => c.clientId === clientId && c.active);
   const selectedContract = CONTRACTS.find((c) => c.id === contractId);
   const hasCapacity = selectedContract ? selectedContract.usedBlocks < selectedContract.totalBlocks : false;
   const canSubmit = title.trim() && clientSku.trim() && clientId && contractId && hasCapacity;
+  const requiredCats = READINESS_RULES[serviceType] || [];
+
+  // If block was created, show the upload step
+  if (uploadBlockId) {
+    return (
+      <UploadModal
+        blockId={uploadBlockId}
+        clientId={clientId}
+        allowedCategories={Object.keys(CATEGORY_LABELS) as AssetCategory[]}
+        onClose={onClose}
+        onUploaded={(asset) => {
+          setAssets([...assets, asset]);
+          const act: SeedActivity = {
+            id: `al_${Date.now()}`, blockId: uploadBlockId, userId: user.id,
+            type: "asset_uploaded", desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
+            at: new Date().toISOString(),
+          };
+          setActivities([...activities, act]);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -789,7 +1709,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
           {!isClient && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Cliente *</label>
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setContractId(""); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setContractId(""); setPendingFiles({}); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
                 <option value="">Selecione...</option>
                 {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
               </select>
@@ -806,7 +1726,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Tipo de Serviço</label>
-              <select value={serviceType} onChange={(e) => setServiceType(e.target.value as ServiceType)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              <select value={serviceType} onChange={(e) => { setServiceType(e.target.value as ServiceType); setPendingFiles({}); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
                 {(Object.entries(SERVICE_LABELS) as [ServiceType, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
@@ -817,19 +1737,80 @@ function CreateBlockModal({ user, onClose, onCreate }: {
               </select>
             </div>
           </div>
-          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500">
-            <p className="font-medium text-slate-600 mb-1">Materiais obrigatórios ({SERVICE_LABELS[serviceType]}):</p>
-            <div className="flex flex-wrap gap-1.5">
-              {(READINESS_RULES[serviceType] || []).map((cat) => (
-                <span key={cat} className="px-2 py-0.5 bg-white border border-slate-200 rounded text-slate-600">{CATEGORY_LABELS[cat]}</span>
-              ))}
+
+          {/* File upload per required category */}
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="bg-slate-50 px-3 py-2 flex items-center justify-between">
+              <p className="text-xs font-semibold text-slate-600">Materiais obrigatórios — {SERVICE_LABELS[serviceType]}</p>
+              <span className="text-xs text-slate-400">{Object.keys(pendingFiles).length}/{requiredCats.length} anexados</span>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {requiredCats.map((cat) => {
+                const f = pendingFiles[cat];
+                return (
+                  <div key={cat} className="flex items-center justify-between px-3 py-2.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {f
+                        ? <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                        : <div className="w-4 h-4 rounded-full border-2 border-slate-300 flex-shrink-0" />}
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-slate-700">{CATEGORY_LABELS[cat]}</p>
+                        {f && <p className="text-xs text-slate-400 truncate max-w-[200px]">{f.name} · {fmtSize(f.size)}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 flex-shrink-0">
+                      <input
+                        type="file"
+                        className="hidden"
+                        ref={(el) => { fileInputRefs.current[cat] = el; }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) setPendingFiles((prev) => ({ ...prev, [cat]: file }));
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRefs.current[cat]?.click()}
+                        className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition-colors"
+                      >
+                        {f ? "Trocar" : "Anexar"}
+                      </button>
+                      {f && (
+                        <button
+                          type="button"
+                          onClick={() => setPendingFiles((prev) => { const n = { ...prev }; delete n[cat]; return n; })}
+                          className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-500 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
+          {Object.keys(pendingFiles).length > 0 && (
+            <p className="text-xs text-emerald-600 flex items-center gap-1">
+              <Check className="w-3.5 h-3.5" />
+              {Object.keys(pendingFiles).length} arquivo(s) prontos — serão enviados e analisados após criar o bloco
+            </p>
+          )}
         </div>
         <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors">Cancelar</button>
-          <button onClick={() => canSubmit && onCreate({ title: title.trim(), clientSku: clientSku.trim(), clientId, contractId, serviceType, priority })} disabled={!canSubmit} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors">
-            Criar Bloco
+          <button
+            onClick={() => {
+              if (!canSubmit) return;
+              const newId = onCreate({ title: title.trim(), clientSku: clientSku.trim(), clientId, contractId, serviceType, priority });
+              if (Object.keys(pendingFiles).length > 0) {
+                setUploadBlockId(newId);
+              }
+            }}
+            disabled={!canSubmit}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+          >
+            {Object.keys(pendingFiles).length > 0 ? `Criar e Enviar ${Object.keys(pendingFiles).length} arquivo(s)` : "Criar Bloco"}
           </button>
         </div>
       </div>
@@ -838,18 +1819,113 @@ function CreateBlockModal({ user, onClose, onCreate }: {
 }
 
 // ============================================================
+// ============================================================
+// ASSET ROW — shows file + expandable AI analysis
+// ============================================================
+function AssetRow({ asset }: { asset: SeedAsset }) {
+  const { currentUser } = useContext(AppContext);
+  const isClient = currentUser?.role === "client";
+  const [expanded, setExpanded] = useState(false);
+  const a = asset.analysis;
+  const scoreColor = a
+    ? a.score >= 80 ? "text-emerald-600 bg-emerald-50 border-emerald-200"
+    : a.score >= 50 ? "text-amber-600 bg-amber-50 border-amber-200"
+    : "text-red-600 bg-red-50 border-red-200"
+    : "";
+
+  return (
+    <div className="border-b border-slate-100 last:border-0">
+      <div className="flex items-center justify-between px-3 py-2.5">
+        <div className="flex items-center gap-2 min-w-0">
+          <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
+          <span className="text-sm text-slate-700 truncate">{asset.name}</span>
+          <Badge className="bg-slate-100 text-slate-500 border-slate-200 flex-shrink-0">v{asset.v}</Badge>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className="text-xs text-slate-400">{fmtSize(asset.size)}</span>
+          {a ? (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className={`flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full border ${scoreColor}`}
+            >
+              {a.approved ? <Check className="w-3 h-3" /> : <AlertTriangle className="w-3 h-3" />}
+              {a.score}/100
+            </button>
+          ) : (
+            <span className="text-xs text-slate-300 italic">sem análise</span>
+          )}
+        </div>
+      </div>
+      {expanded && a && (
+        <div className={`mx-3 mb-3 rounded-xl border p-3 space-y-2 text-xs ${
+          a.score >= 80 ? "bg-emerald-50 border-emerald-200" :
+          a.score >= 50 ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
+        }`}>
+          <p className="font-medium text-slate-700">{a.summary}</p>
+          {a.issues?.length > 0 && (
+            <div className="space-y-0.5">
+              <p className="font-semibold text-red-600 uppercase tracking-wide text-[10px]">Problemas</p>
+              {a.issues.map((iss, i) => (
+                <div key={i} className="flex items-start gap-1 text-red-700">
+                  <X className="w-3 h-3 mt-0.5 flex-shrink-0 text-red-400" />{iss}
+                </div>
+              ))}
+            </div>
+          )}
+          {a.suggestions?.length > 0 && (
+            <div className="space-y-0.5">
+              <p className="font-semibold text-slate-500 uppercase tracking-wide text-[10px]">Recomendações</p>
+              {a.suggestions.map((s, i) => (
+                <div key={i} className="flex items-start gap-1 text-slate-600">
+                  <span className="text-emerald-500 flex-shrink-0">→</span>{s}
+                </div>
+              ))}
+            </div>
+          )}
+          {!isClient && a.notes && a.notes.length > 0 && (
+            <div className="space-y-0.5 border-t border-dashed border-slate-300 pt-2 mt-1">
+              <p className="font-semibold text-violet-600 uppercase tracking-wide text-[10px]">🔒 Notas internas (equipe ATT)</p>
+              {a.notes.map((n, i) => (
+                <div key={i} className="flex items-start gap-1 text-violet-700">
+                  <span className="text-violet-400 flex-shrink-0">→</span>{n}
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={() => setExpanded(false)} className="text-slate-400 hover:text-slate-600 underline text-[10px]">Fechar</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // BLOCK DETAIL
 // ============================================================
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
-  const { blocks, setBlocks, activities, setActivities } = useContext(AppContext);
+  const { blocks, setBlocks, activities, setActivities, assets, setAssets } = useContext(AppContext);
   const block = blocks.find((b) => b.id === blockId);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("overview");
+  const [showUpload, setShowUpload] = useState(false);
+
+  // Auto-advance block status when all required files are uploaded
+  useEffect(() => {
+    if (!block || block.status !== "awaiting_client_files") return;
+    const required = READINESS_RULES[block.svc] || [];
+    if (!required.length) return;
+    const blockAssets = assets.filter((a) => a.blockId === block.id);
+    const cats = new Set(blockAssets.map((a) => a.cat));
+    if (required.every((c) => cats.has(c))) {
+      setBlocks(blocks.map((b) =>
+        b.id === block.id ? { ...b, status: "client_files_under_review" as BlockStatus } : b
+      ));
+    }
+  }, [assets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!block) return <EmptyState icon={Package} title="Bloco não encontrado" />;
 
   const contract = CONTRACTS.find((c) => c.id === block.contractId);
-  const blockAssets = ASSETS.filter((a) => a.blockId === block.id);
+  const blockAssets = assets.filter((a) => a.blockId === block.id);
   const blockApprovals = APPROVALS.filter((a) => a.blockId === block.id);
   const blockActivities = activities.filter((a) => a.blockId === block.id).sort((a, b) => b.at.localeCompare(a.at));
   const readiness = checkReadiness(block.id, block.svc);
@@ -857,6 +1933,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const validNext = VALID_TRANSITIONS[block.status] || [];
   const isClient = user.role === "client";
   const [confirmTransition, setConfirmTransition] = useState<BlockStatus | null>(null);
+
+  const MAX_REVISIONS = 3;
+  const revisions = block.clientRevisions ?? 0;
+  const revisionLimitReached = revisions >= MAX_REVISIONS;
+  const revisionWarning = revisions === MAX_REVISIONS - 1;
 
   const handleTransition = (newStatus: BlockStatus) => {
     const updated = blocks.map((b) => b.id === block.id ? { ...b, status: newStatus, ...(newStatus === "published" ? { published: new Date().toISOString().slice(0, 10) } : {}) } : b);
@@ -868,6 +1949,22 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     };
     setActivities([...activities, newAct]);
     setConfirmTransition(null);
+  };
+
+  // Rejeição do cliente = 1 revisão consumida
+  const handleClientReject = (approvalId: string) => {
+    if (revisionLimitReached) return; // bloqueado — revisão paga
+    const updatedBlocks = blocks.map((b) =>
+      b.id === block.id ? { ...b, clientRevisions: revisions + 1 } : b
+    );
+    setBlocks(updatedBlocks);
+    const act: SeedActivity = {
+      id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
+      type: "approval_rejected",
+      desc: `Revisão ${revisions + 1}/${MAX_REVISIONS} solicitada pelo cliente`,
+      at: new Date().toISOString(),
+    };
+    setActivities([...activities, act]);
   };
 
   const copyEmbed = () => {
@@ -900,13 +1997,49 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Informações</h3>
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div><p className="text-xs text-slate-400">Contrato</p><p className="font-medium text-slate-700">{contract?.title || "—"}</p></div>
-                <div><p className="text-xs text-slate-400">Bloco Interno Nº</p><p className="font-medium text-slate-700">#{block.n}</p></div>
+                <div><p className="text-xs text-slate-400">Nº do Bloco</p><p className="font-medium text-slate-700">#{block.n}</p></div>
                 <div><p className="text-xs text-slate-400">Criado em</p><p className="font-medium text-slate-700">{fmtDate(block.created)}</p></div>
-                <div><p className="text-xs text-slate-400">Responsável</p><p className="font-medium text-slate-700">{block.owner ? getUserName(block.owner) : "Não atribuído"}</p></div>
-                <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>
+                {!isClient && <div><p className="text-xs text-slate-400">Responsável</p><p className="font-medium text-slate-700">{block.owner ? getUserName(block.owner) : "Não atribuído"}</p></div>}
+                {!isClient && <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>}
                 {block.published && <div><p className="text-xs text-slate-400">Publicado em</p><p className="font-medium text-slate-700">{fmtDate(block.published)}</p></div>}
+                <div>
+                  <p className="text-xs text-slate-400">Revisões utilizadas</p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <div className="flex gap-1">
+                      {[...Array(MAX_REVISIONS)].map((_, i) => (
+                        <div key={i} className={`w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] font-bold ${i < revisions ? (revisionLimitReached ? "bg-red-500 border-red-500 text-white" : "bg-amber-400 border-amber-400 text-white") : "border-slate-300 text-slate-300"}`}>{i + 1}</div>
+                      ))}
+                    </div>
+                    <span className={`text-xs font-semibold ${revisionLimitReached ? "text-red-600" : revisionWarning ? "text-amber-600" : "text-slate-500"}`}>
+                      {revisionLimitReached ? "Limite atingido" : `${revisions}/${MAX_REVISIONS}`}
+                    </span>
+                  </div>
+                </div>
               </div>
             </Card>
+            {/* Aviso de revisão */}
+            {isClient && revisionWarning && !revisionLimitReached && (
+              <Card className="p-4 border-l-4 border-l-amber-400 bg-amber-50">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-800">Atenção: última revisão gratuita</p>
+                    <p className="text-xs text-amber-700 mt-0.5">Você utilizou {revisions} de {MAX_REVISIONS} revisões incluídas. A próxima rejeição gerará um custo adicional conforme contrato.</p>
+                  </div>
+                </div>
+              </Card>
+            )}
+            {isClient && revisionLimitReached && (
+              <Card className="p-4 border-l-4 border-l-red-400 bg-red-50">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-semibold text-red-800">Limite de revisões atingido</p>
+                    <p className="text-xs text-red-700 mt-0.5">As {MAX_REVISIONS} revisões gratuitas foram utilizadas. Novas solicitações de revisão estão sujeitas a cobrança adicional. Entre em contato com info@archtechtour.com.</p>
+                  </div>
+                </div>
+              </Card>
+            )}
             {!isClient && validNext.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Transições Disponíveis</h3>
@@ -936,7 +2069,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Atividade</h3>
               <div className="space-y-2">
                 {blockActivities.slice(0, 5).map((act) => (
-                  <div key={act.id} className="flex items-start gap-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" /><div><p className="text-slate-600">{act.desc}</p><p className="text-slate-400">{getUserName(act.userId)} · {fmtDate(act.at)}</p></div></div>
+                  <div key={act.id} className="flex items-start gap-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" /><div><p className="text-slate-600">{act.desc}</p><p className="text-slate-400">{isClient ? fmtDate(act.at) : `${getUserName(act.userId)} · ${fmtDate(act.at)}`}</p></div></div>
                 ))}
               </div>
             </Card>
@@ -948,21 +2081,29 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-sm font-semibold text-slate-700">Arquivos ({blockAssets.length})</h3>
-            <button className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-medium rounded-lg hover:bg-slate-800 transition-colors"><Upload className="w-3.5 h-3.5" /> Upload</button>
+            <button
+              onClick={() => setShowUpload(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white text-xs font-medium rounded-lg hover:bg-slate-800 transition-colors"
+            >
+              <Upload className="w-3.5 h-3.5" /> Upload
+            </button>
           </div>
-          {blockAssets.length === 0 ? <EmptyState icon={FileUp} title="Nenhum arquivo enviado" desc="Faça upload dos materiais necessários." /> : (
-            <div className="space-y-3">
+          {blockAssets.length === 0 ? (
+            <div onClick={() => setShowUpload(true)} className="cursor-pointer hover:bg-slate-50 rounded-xl transition-colors">
+              <EmptyState icon={FileUp} title="Nenhum arquivo enviado" desc="Clique em Upload ou aqui para enviar materiais." />
+            </div>
+          ) : (
+            <div className="space-y-4">
               {(Object.keys(CATEGORY_LABELS) as AssetCategory[]).map((cat) => {
                 const catAssets = blockAssets.filter((a) => a.cat === cat);
                 if (!catAssets.length) return null;
                 return (
-                  <div key={cat} className="border border-slate-100 rounded-lg p-3">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">{CATEGORY_LABELS[cat]}</p>
+                  <div key={cat} className="border border-slate-100 rounded-xl overflow-hidden">
+                    <div className="bg-slate-50 px-3 py-2">
+                      <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">{CATEGORY_LABELS[cat]}</p>
+                    </div>
                     {catAssets.map((a) => (
-                      <div key={a.id} className="flex items-center justify-between py-1.5">
-                        <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-slate-400" /><span className="text-sm text-slate-700">{a.name}</span><Badge className="bg-slate-100 text-slate-500 border-slate-200">v{a.v}</Badge></div>
-                        <span className="text-xs text-slate-400">{fmtSize(a.size)}</span>
-                      </div>
+                      <AssetRow key={a.id} asset={a} />
                     ))}
                   </div>
                 );
@@ -970,6 +2111,25 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
             </div>
           )}
         </Card>
+      )}
+
+      {showUpload && (
+        <UploadModal
+          blockId={block.id}
+          clientId={block.clientId}
+          allowedCategories={Object.keys(CATEGORY_LABELS) as AssetCategory[]}
+          onClose={() => setShowUpload(false)}
+          onUploaded={(asset) => {
+            // Functional updates avoid stale-closure bugs when multiple files are uploaded in sequence
+            setAssets((prev) => [...prev, asset]);
+            setActivities((prev) => [...prev, {
+              id: `al_${Date.now()}_${asset.id}`, blockId: block.id, userId: user.id,
+              type: "asset_uploaded" as const,
+              desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
+              at: new Date().toISOString(),
+            }]);
+          }}
+        />
       )}
 
       {tab === "approvals" && (
@@ -986,11 +2146,26 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                     </Badge>
                   </div>
                   {ap.comment && <p className="text-sm text-slate-600 italic">&ldquo;{ap.comment}&rdquo;</p>}
-                  <p className="text-xs text-slate-400 mt-1">Solicitado por {getUserName(ap.by)} em {fmtDate(ap.at)}{ap.decided && ` · Decidido por ${getUserName(ap.decided)}`}</p>
+                  <p className="text-xs text-slate-400 mt-1">Solicitado em {fmtDate(ap.at)}{!isClient && ap.decided ? ` · Decidido por ${getUserName(ap.decided)}` : ""}</p>
                   {ap.status === "pending" && isClient && (
-                    <div className="flex gap-2 mt-3">
-                      <button className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700"><ThumbsUp className="w-3.5 h-3.5" /> Aprovar</button>
-                      <button className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50"><ThumbsDown className="w-3.5 h-3.5" /> Rejeitar</button>
+                    <div className="space-y-2 mt-3">
+                      <div className="flex gap-2">
+                        <button className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
+                          <ThumbsUp className="w-3.5 h-3.5" /> Aprovar
+                        </button>
+                        <button
+                          onClick={() => handleClientReject(ap.id)}
+                          disabled={revisionLimitReached}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          <ThumbsDown className="w-3.5 h-3.5" /> Solicitar revisão {revisions < MAX_REVISIONS ? `(${MAX_REVISIONS - revisions} restantes)` : ""}
+                        </button>
+                      </div>
+                      {revisionLimitReached && (
+                        <p className="text-xs text-red-600 font-medium flex items-center gap-1">
+                          <AlertTriangle className="w-3.5 h-3.5" /> Revisões gratuitas esgotadas — contate info@archtechtour.com para solicitar revisão adicional.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1215,25 +2390,128 @@ function ActivityPage() {
   );
 }
 
+function UserFormModal({
+  title, onClose, onSave, initial,
+}: {
+  title: string;
+  onClose: () => void;
+  onSave: (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => void;
+  initial?: SeedUser;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [email, setEmail] = useState(initial?.email ?? "");
+  const [role, setRole] = useState<UserRole>(initial?.role ?? "internal_ops");
+  const [clientId, setClientId] = useState(initial?.clientId ?? "");
+  const [password, setPassword] = useState(initial?.password ?? "");
+  const [showPw, setShowPw] = useState(false);
+
+  const isEdit = !!initial;
+  const canSave = name.trim() && email.trim() && (!isEdit || password.trim());
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800">{title}</h2>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Nome *</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome completo"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Email *</label>
+            <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@archtechtour.com"
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              {isEdit ? "Nova Senha" : "Senha *"}
+              {isEdit && <span className="text-slate-400 font-normal ml-1">(obrigatório para salvar)</span>}
+            </label>
+            <div className="relative">
+              <input
+                type={showPw ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isEdit ? "Digite a nova senha..." : "Senha de acesso"}
+                className="w-full px-3 py-2 pr-10 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              />
+              <button type="button" onClick={() => setShowPw(!showPw)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                {showPw
+                  ? <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 4.411m0 0L21 21" /></svg>
+                  : <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                }
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Perfil</label>
+            <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+              {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </div>
+          {role === "client" && (
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                <option value="">Selecione...</option>
+                {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
+          <button onClick={() => onSave({ name: name.trim(), email: email.trim(), role, clientId, password })}
+            disabled={!canSave}
+            className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+            {isEdit ? "Salvar Alterações" : "Criar Usuário"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UsersPage() {
   const { currentUser } = useContext(AppContext);
   const [users, setUsers] = useState<SeedUser[]>([...USERS]);
   const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newEmail, setNewEmail] = useState("");
-  const [newRole, setNewRole] = useState<UserRole>("internal_ops");
-  const [newClientId, setNewClientId] = useState("");
+  const [editingUser, setEditingUser] = useState<SeedUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const handleAdd = () => {
-    if (!newName.trim() || !newEmail.trim()) return;
+  const handleAdd = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
     const u: SeedUser = {
-      id: `u_${Date.now()}`, name: newName.trim(), email: newEmail.trim(),
-      role: newRole, active: true, ...(newRole === "client" && newClientId ? { clientId: newClientId } : {}),
+      id: `u_${Date.now()}`, name: data.name, email: data.email, password: data.password,
+      role: data.role, active: true, ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
     };
-    setUsers([...users, u]); USERS.push(u);
-    setNewName(""); setNewEmail(""); setNewRole("internal_ops"); setNewClientId(""); setShowAdd(false);
+    setUsers([...users, u]);
+    USERS.push(u);
+    setShowAdd(false);
   };
+
+  const handleEdit = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
+    if (!editingUser) return;
+    const updated = users.map((u) =>
+      u.id === editingUser.id
+        ? { ...u, name: data.name, email: data.email, role: data.role, password: data.password, clientId: data.role === "client" && data.clientId ? data.clientId : undefined }
+        : u
+    );
+    setUsers(updated);
+    const idx = USERS.findIndex((u) => u.id === editingUser.id);
+    if (idx >= 0) {
+      USERS[idx] = { ...USERS[idx], name: data.name, email: data.email, role: data.role, password: data.password,
+        clientId: data.role === "client" && data.clientId ? data.clientId : undefined };
+    }
+    setEditingUser(null);
+  };
+
   const handleDelete = (id: string) => {
     setUsers(users.filter((u) => u.id !== id));
     const idx = USERS.findIndex((u) => u.id === id);
@@ -1254,43 +2532,655 @@ function UsersPage() {
           { label: "Perfil", render: (r: SeedUser) => <Badge className={r.role === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : r.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"}>{ROLE_LABELS[r.role]}</Badge> },
           { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "\u2014" },
           { label: "Ações", render: (r: SeedUser) => confirmDelete === r.id ? (
-            <div className="flex gap-1"><button onClick={() => handleDelete(r.id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirmar</button><button onClick={() => setConfirmDelete(null)} className="px-2 py-1 text-xs bg-slate-200 text-slate-600 rounded hover:bg-slate-300">Cancelar</button></div>
+            <div className="flex gap-1">
+              <button onClick={() => handleDelete(r.id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirmar</button>
+              <button onClick={() => setConfirmDelete(null)} className="px-2 py-1 text-xs bg-slate-200 text-slate-600 rounded hover:bg-slate-300">Cancelar</button>
+            </div>
           ) : (
-            <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>
+            <div className="flex gap-2">
+              <button onClick={() => setEditingUser(r)} className="text-xs text-slate-500 hover:text-slate-800 hover:underline">Editar</button>
+              <span className="text-slate-200">|</span>
+              <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>
+            </div>
           )},
         ]} />
       </Card>
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={() => setShowAdd(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-5 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-800">Novo Usuário</h2>
-              <button onClick={() => setShowAdd(false)} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <div><label className="block text-xs font-medium text-slate-500 mb-1">Nome *</label><input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nome completo" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" /></div>
-              <div><label className="block text-xs font-medium text-slate-500 mb-1">Email *</label><input value={newEmail} onChange={(e) => setNewEmail(e.target.value)} placeholder="email@archtechtour.com" className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" /></div>
-              <div><label className="block text-xs font-medium text-slate-500 mb-1">Perfil</label>
-                <select value={newRole} onChange={(e) => setNewRole(e.target.value as UserRole)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                  {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-                </select>
+        <UserFormModal title="Novo Usuário" onClose={() => setShowAdd(false)} onSave={handleAdd} />
+      )}
+      {editingUser && (
+        <UserFormModal title="Editar Usuário" onClose={() => setEditingUser(null)} onSave={handleEdit} initial={editingUser} />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 4 — ONBOARDING WIZARD
+// ============================================================
+const SECTORS = ["Móveis", "Luminária e Iluminação", "Revestimentos", "Metais e Louças", "Design de Interiores", "Arquitetura", "Decoração", "Outro"];
+const PRODUCT_CATEGORIES: Record<ProductCategory, string> = { moveis: "Móveis", luminarias: "Luminárias", revestimentos: "Revestimentos", metais: "Metais / Louças", outros: "Outros" };
+
+function OnboardingWizardPage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
+  const clientId = user.clientId || "";
+  const { blocks, setBlocks, assets } = useContext(AppContext);
+  const [brands, setBrands] = useState<Brand[]>(BRANDS);
+  const [catalog, setCatalog] = useState<CatalogProduct[]>(CATALOG);
+
+  const brand = brands.find((b) => b.clientId === clientId) || { clientId, companyName: "", logoUrl: "", website: "", sector: "", priority: "normal" as Priority, step: 0 };
+  const myProducts = catalog.filter((p) => p.clientId === clientId);
+  const myBlocks = blocks.filter((b) => b.clientId === clientId);
+
+  const [step, setStep] = useState(brand.step > 0 ? Math.min(brand.step, 4) : 0);
+  const [form, setForm] = useState({ companyName: brand.companyName, logoUrl: brand.logoUrl || "", website: brand.website, sector: brand.sector, priority: brand.priority });
+  const [newProd, setNewProd] = useState({ name: "", sku: "", category: "moveis" as ProductCategory });
+  const [editingVar, setEditingVar] = useState<string | null>(null);
+  const [varForm, setVarForm] = useState({ name: "", finishes: "", colors: "", materials: "" });
+
+  const saveBrand = () => {
+    const updated = brands.filter((b) => b.clientId !== clientId);
+    const newBrand: Brand = { ...form, clientId, step: Math.max(1, brand.step) };
+    setBrands([...updated, newBrand]);
+    BRANDS = [...updated, newBrand];
+    setStep(1);
+  };
+
+  const addProduct = () => {
+    if (!newProd.name || !newProd.sku) return;
+    const prod: CatalogProduct = { id: `cp${Date.now()}`, clientId, ...newProd, priority: myProducts.length + 1, variations: [] };
+    const updated = [...catalog, prod];
+    setCatalog(updated);
+    CATALOG = updated;
+    setNewProd({ name: "", sku: "", category: "moveis" });
+  };
+
+  const removeProduct = (id: string) => {
+    const updated = catalog.filter((p) => p.id !== id);
+    setCatalog(updated);
+    CATALOG = updated;
+  };
+
+  const addVariation = (productId: string) => {
+    if (!varForm.name) return;
+    const updated = catalog.map((p) => p.id === productId ? { ...p, variations: [...p.variations, { id: `v${Date.now()}`, ...varForm }] } : p);
+    setCatalog(updated);
+    CATALOG = updated;
+    setEditingVar(null);
+    setVarForm({ name: "", finishes: "", colors: "", materials: "" });
+  };
+
+  // Auto-create SeedBlocks for each catalog product when moving to the file upload step
+  const createBlocksFromCatalog = () => {
+    const clientContracts = CONTRACTS.filter((c) => c.clientId === clientId);
+    const contractId = clientContracts[0]?.id || "";
+    const existingCskus = blocks.filter((b) => b.clientId === clientId).map((b) => b.csku);
+    const currentCount = blocks.filter((b) => b.clientId === clientId).length;
+    const newBlocks: SeedBlock[] = myProducts
+      .filter((p) => !existingCskus.includes(p.sku))
+      .map((p, i) => ({
+        id: `pb_${Date.now()}_${i}`,
+        clientId,
+        contractId,
+        n: currentCount + i + 1,
+        sku: `${clientId.toUpperCase().slice(0, 6)}-${String(currentCount + i + 1).padStart(3, "0")}`,
+        csku: p.sku,
+        title: p.name,
+        svc: "standard" as ServiceType,
+        status: "awaiting_client_files" as BlockStatus,
+        pri: "normal" as Priority,
+        created: new Date().toISOString().slice(0, 10),
+      }));
+    if (newBlocks.length > 0) {
+      setBlocks([...blocks, ...newBlocks]);
+    }
+  };
+
+  const advanceStep = (n: number) => {
+    if (n === 3) createBlocksFromCatalog();
+    const updated = brands.map((b) => b.clientId === clientId ? { ...b, step: Math.max(b.step, n) } : b);
+    setBrands(updated);
+    BRANDS = updated;
+    setStep(n);
+  };
+
+  // Checklist de completude
+  const myBlockIds = myBlocks.map((b) => b.id);
+  const hasCAD = assets.some((a) => myBlockIds.includes(a.blockId) && ["cad", "technical_drawing"].includes(a.cat));
+  const hasPhotos = assets.some((a) => myBlockIds.includes(a.blockId) && ["reference_photo", "finishing"].includes(a.cat));
+  const checks = [
+    { label: "Dados da marca preenchidos", done: !!brand.companyName && !!brand.website && !!brand.sector },
+    { label: "Catálogo com ao menos 1 produto", done: myProducts.length > 0 },
+    { label: "Variações definidas em todos os produtos", done: myProducts.length > 0 && myProducts.every((p) => p.variations.length > 0) },
+    { label: "Arquivos CAD enviados", done: hasCAD },
+    { label: "Fotos de referência enviadas", done: hasPhotos },
+  ];
+  const completeness = Math.round((checks.filter((c) => c.done).length / checks.length) * 100);
+
+  const steps = ["Dados da Marca", "Catálogo de Produtos", "Variações", "Upload de Arquivos", "Completude"];
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader eyebrow="Fase 4 · Onboarding" title="Configure sua presença digital" description="Preencha cada etapa para que nossa equipe possa iniciar a produção dos seus blocos 3D." />
+
+      {/* Progress steps */}
+      <Card className="p-6">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          {steps.map((s, i) => (
+            <React.Fragment key={s}>
+              <button onClick={() => setStep(i)} className={`flex min-w-0 flex-col items-center gap-1.5 rounded-2xl px-4 py-3 text-center transition ${step === i ? "bg-slate-950 text-white" : i < step ? "bg-emerald-50 text-emerald-700" : "text-slate-400 hover:text-slate-600"}`}>
+                <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${step === i ? "bg-white/15 text-white" : i < step ? "bg-emerald-200 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                  {i < step ? <Check className="h-3.5 w-3.5" /> : i + 1}
+                </div>
+                <span className="text-[11px] font-semibold whitespace-nowrap">{s}</span>
+              </button>
+              {i < steps.length - 1 && <div className={`h-px flex-1 min-w-[24px] ${i < step ? "bg-emerald-300" : "bg-slate-200"}`} />}
+            </React.Fragment>
+          ))}
+        </div>
+      </Card>
+
+      {/* Step 0 - Brand */}
+      {step === 0 && (
+        <Card className="p-6 md:p-8">
+          <h3 className="text-lg font-semibold text-slate-900 mb-6">Dados da sua marca</h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {([
+              { label: "Nome da empresa", key: "companyName", placeholder: "Ex: Escal Móveis" },
+              { label: "Site", key: "website", placeholder: "Ex: www.escal.com.br" },
+              { label: "Logo (URL)", key: "logoUrl", placeholder: "https://..." },
+            ] as const).map(({ label, key, placeholder }) => (
+              <div key={key}>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">{label}</label>
+                <input value={form[key] || ""} onChange={(e) => setForm({ ...form, [key]: e.target.value })} placeholder={placeholder} className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 focus:bg-white transition" />
               </div>
-              {newRole === "client" && (
-                <div><label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
-                  <select value={newClientId} onChange={(e) => setNewClientId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                    <option value="">Selecione...</option>
-                    {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+            ))}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Setor</label>
+              <select value={form.sector} onChange={(e) => setForm({ ...form, sector: e.target.value })} className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                <option value="">Selecione...</option>
+                {SECTORS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">Prioridade</label>
+              <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as Priority })} className="w-full rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                {(["low", "normal", "high", "urgent"] as Priority[]).map((p) => <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <button onClick={saveBrand} disabled={!form.companyName || !form.website || !form.sector} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:opacity-40">
+              Salvar e continuar →
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Step 1 - Catalog */}
+      {step === 1 && (
+        <Card className="p-6 md:p-8">
+          <h3 className="text-lg font-semibold text-slate-900 mb-2">Catálogo de produtos</h3>
+          <p className="text-sm text-slate-500 mb-6">Liste todos os produtos que deseja transformar em blocos 3D. Informe nome e SKU.</p>
+          <div className="flex flex-wrap gap-3 mb-4">
+            <input value={newProd.name} onChange={(e) => setNewProd({ ...newProd, name: e.target.value })} placeholder="Nome do produto" className="flex-1 min-w-[160px] rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 transition" />
+            <input value={newProd.sku} onChange={(e) => setNewProd({ ...newProd, sku: e.target.value.toUpperCase() })} placeholder="SKU" className="w-40 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 transition" />
+            <select value={newProd.category} onChange={(e) => setNewProd({ ...newProd, category: e.target.value as ProductCategory })} className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-2.5 text-sm outline-none focus:border-cyan-400 transition">
+              {Object.entries(PRODUCT_CATEGORIES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+            <button onClick={addProduct} className="flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition">
+              <Plus className="h-4 w-4" /> Adicionar
+            </button>
+          </div>
+          {myProducts.length === 0 ? (
+            <EmptyState icon={Package} title="Nenhum produto adicionado" desc="Adicione ao menos um produto para continuar." />
+          ) : (
+            <div className="space-y-2">
+              {myProducts.map((p, i) => (
+                <div key={p.id} className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/60 px-4 py-3">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-950 text-[11px] font-bold text-white">{i + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-slate-900">{p.name}</p>
+                    <p className="text-xs text-slate-500">{p.sku} · {PRODUCT_CATEGORIES[p.category]}</p>
+                  </div>
+                  <button onClick={() => removeProduct(p.id)} className="text-slate-400 hover:text-rose-500 transition"><X className="h-4 w-4" /></button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="mt-6 flex justify-between">
+            <button onClick={() => setStep(0)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+            <button onClick={() => advanceStep(2)} disabled={myProducts.length === 0} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40 transition">
+              Continuar →
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Step 2 - Variations */}
+      {step === 2 && (
+        <div className="space-y-4">
+          {myProducts.length === 0 ? (
+            <Card className="p-8"><EmptyState icon={Package} title="Nenhum produto no catálogo" desc="Volte ao passo anterior e adicione produtos primeiro." /></Card>
+          ) : myProducts.map((p) => (
+            <Card key={p.id} className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{p.sku}</p>
+                  <h4 className="text-base font-semibold text-slate-900">{p.name}</h4>
+                </div>
+                <button onClick={() => { setEditingVar(editingVar === p.id ? null : p.id); setVarForm({ name: "", finishes: "", colors: "", materials: "" }); }} className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 transition">
+                  <Plus className="h-3 w-3" /> Variação
+                </button>
+              </div>
+              {p.variations.length === 0 && <p className="text-sm text-slate-400 italic">Nenhuma variação. Adicione ao menos uma.</p>}
+              <div className="space-y-2 mb-3">
+                {p.variations.map((v) => (
+                  <div key={v.id} className="rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4">
+                    <p className="text-sm font-semibold text-slate-800 mb-2">{v.name}</p>
+                    <div className="grid grid-cols-3 gap-3 text-xs text-slate-500">
+                      <div><span className="font-medium text-slate-700">Acabamentos:</span><br />{v.finishes || "—"}</div>
+                      <div><span className="font-medium text-slate-700">Cores:</span><br />{v.colors || "—"}</div>
+                      <div><span className="font-medium text-slate-700">Materiais:</span><br />{v.materials || "—"}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {editingVar === p.id && (
+                <div className="rounded-2xl border border-cyan-200 bg-cyan-50/60 p-4 space-y-3">
+                  <p className="text-xs font-semibold text-cyan-800 uppercase tracking-wider">Nova variação</p>
+                  <input value={varForm.name} onChange={(e) => setVarForm({ ...varForm, name: e.target.value })} placeholder="Nome da variação" className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-400 transition" />
+                  {(["finishes", "colors", "materials"] as const).map((field) => (
+                    <input key={field} value={varForm[field]} onChange={(e) => setVarForm({ ...varForm, [field]: e.target.value })} placeholder={{ finishes: "Acabamentos (ex: Couro, Tecido)", colors: "Cores (ex: Bege, Cinza)", materials: "Materiais (ex: MDF, Aço)" }[field]} className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-cyan-400 transition" />
+                  ))}
+                  <div className="flex gap-2">
+                    <button onClick={() => addVariation(p.id)} className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 transition">Salvar variação</button>
+                    <button onClick={() => setEditingVar(null)} className="text-xs text-slate-500 hover:text-slate-700">Cancelar</button>
+                  </div>
                 </div>
               )}
-            </div>
-            <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
-              <button onClick={() => setShowAdd(false)} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-              <button onClick={handleAdd} disabled={!newName.trim() || !newEmail.trim()} className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">Criar Usuário</button>
-            </div>
+            </Card>
+          ))}
+          <div className="flex justify-between">
+            <button onClick={() => setStep(1)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+            <button onClick={() => advanceStep(3)} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition">Continuar →</button>
           </div>
         </div>
       )}
+
+      {/* Step 3 - Files */}
+      {step === 3 && (
+        <div className="space-y-4">
+          <Card className="p-6 md:p-8">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">Upload de arquivos</h3>
+            <p className="text-sm text-slate-500 mb-6">Seus produtos foram registrados como blocos. Clique em cada um para abrir e enviar os arquivos técnicos.</p>
+
+            {/* Tipos aceitos */}
+            <div className="grid gap-3 sm:grid-cols-3 mb-6">
+              {[
+                { cat: "CAD / Estrutural", exts: ".step, .dwg, .dxf, .iges", icon: FileUp, color: "text-violet-600 bg-violet-50 border-violet-200" },
+                { cat: "Fotos de referência", exts: ".jpg, .jpeg, .png, .webp", icon: Eye, color: "text-sky-600 bg-sky-50 border-sky-200" },
+                { cat: "Desenho técnico", exts: ".pdf, .dwg, .dxf", icon: Hash, color: "text-slate-600 bg-slate-50 border-slate-200" },
+                { cat: "Acabamento / Material", exts: ".pdf, .png, .jpg", icon: FileText, color: "text-amber-600 bg-amber-50 border-amber-200" },
+                { cat: "Bloco 3D existente", exts: ".glb, .gltf, .obj, .fbx", icon: Box, color: "text-emerald-600 bg-emerald-50 border-emerald-200" },
+                { cat: "Vídeo (opcional)", exts: ".mp4, .mov", icon: Globe, color: "text-rose-600 bg-rose-50 border-rose-200" },
+              ].map((item) => (
+                <div key={item.cat} className={`flex items-start gap-3 rounded-2xl border p-3 ${item.color}`}>
+                  <item.icon className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold">{item.cat}</p>
+                    <p className="text-[11px] opacity-70 mt-0.5">{item.exts}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Blocks list */}
+            {myBlocks.length === 0 ? (
+              <div className="rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center">
+                <p className="text-sm text-slate-500">Nenhum bloco encontrado. Volte ao passo anterior e verifique se os produtos foram adicionados.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">{myBlocks.length} bloco{myBlocks.length > 1 ? "s" : ""} aguardando arquivos</p>
+                {myBlocks.map((block) => {
+                  const blockAssets = assets.filter((a) => a.blockId === block.id);
+                  const hasFiles = blockAssets.length > 0;
+                  return (
+                    <div key={block.id} className={`flex items-center justify-between rounded-[22px] border px-4 py-4 ${hasFiles ? "border-emerald-200/80 bg-emerald-50/60" : "border-amber-200/60 bg-amber-50/40"}`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-full flex-shrink-0 ${hasFiles ? "bg-emerald-500 text-white" : "bg-amber-200 text-amber-700"}`}>
+                          {hasFiles ? <CheckCircle className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{block.title}</p>
+                          <p className="text-xs text-slate-500">{block.csku} · {hasFiles ? `${blockAssets.length} arquivo${blockAssets.length > 1 ? "s" : ""} enviado${blockAssets.length > 1 ? "s" : ""}` : "Nenhum arquivo enviado"}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }}
+                        className="ml-4 flex-shrink-0 flex items-center gap-1.5 rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white transition hover:bg-slate-700"
+                      >
+                        Abrir bloco <ExternalLink className="h-3 w-3" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-between">
+              <button onClick={() => setStep(2)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+              <button onClick={() => advanceStep(4)} className="rounded-2xl bg-slate-950 px-6 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 transition">Ver checklist →</button>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Step 4 - Completeness */}
+      {step === 4 && (
+        <Card className="p-6 md:p-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900">Checklist de completude</h3>
+              <p className="text-sm text-slate-500 mt-1">Verifique se tudo está em ordem antes de iniciarmos a produção.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-3xl font-semibold text-slate-900">{completeness}%</p>
+              <p className="text-xs text-slate-500">completo</p>
+            </div>
+          </div>
+          <ProgressBar value={completeness} className="mb-6" />
+          <div className="space-y-3">
+            {checks.map((c) => (
+              <div key={c.label} className={`flex items-center gap-3 rounded-2xl border p-4 ${c.done ? "border-emerald-200/80 bg-emerald-50/60" : "border-amber-200/80 bg-amber-50/60"}`}>
+                <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full ${c.done ? "bg-emerald-500 text-white" : "bg-amber-200 text-amber-700"}`}>
+                  {c.done ? <Check className="h-4 w-4" /> : <AlertTriangle className="h-4 w-4" />}
+                </div>
+                <p className={`text-sm font-semibold ${c.done ? "text-emerald-800" : "text-amber-800"}`}>{c.label}</p>
+                {!c.done && <span className="ml-auto text-xs font-medium text-amber-600">Pendente</span>}
+              </div>
+            ))}
+          </div>
+          {completeness === 100 && (
+            <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-center">
+              <p className="text-sm font-semibold text-emerald-800">Onboarding completo! Nossa equipe foi notificada e iniciará a produção em breve.</p>
+            </div>
+          )}
+          <div className="mt-6 flex justify-start">
+            <button onClick={() => setStep(3)} className="text-sm text-slate-500 hover:text-slate-700">← Voltar</button>
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 5 — TICKETS DE PRODUÇÃO
+// ============================================================
+const TICKET_STATUS_LABELS: Record<TicketStatus, string> = { new: "Novo", in_production: "Em Produção", internal_review: "Revisão Interna", delivered: "Entregue" };
+const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
+  new: "border-slate-200/80 bg-slate-100/90 text-slate-600",
+  in_production: "border-violet-200/80 bg-violet-50 text-violet-700",
+  internal_review: "border-amber-200/80 bg-amber-50 text-amber-700",
+  delivered: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+};
+
+function ProductionTicketsPage({ user }: { user: SeedUser }) {
+  const { blocks } = useContext(AppContext);
+  const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
+  const [filter, setFilter] = useState<TicketStatus | "all">("all");
+
+  const isClient = user.role === "client";
+  const visible = tickets.filter((t) => {
+    if (isClient && t.clientId !== user.clientId) return false;
+    if (filter !== "all" && t.status !== filter) return false;
+    return true;
+  });
+
+  const updateStatus = (id: string, status: TicketStatus) => {
+    const updated = tickets.map((t) => t.id === id ? { ...t, status } : t);
+    setTickets(updated);
+    TICKETS = updated;
+  };
+
+  const assignTicket = (id: string, userId: string) => {
+    const updated = tickets.map((t) => t.id === id ? { ...t, assignedTo: userId } : t);
+    setTickets(updated);
+    TICKETS = updated;
+  };
+
+  const internalUsers = USERS.filter((u) => u.role !== "client" && u.active);
+  const counts = { all: tickets.filter((t) => !isClient || t.clientId === user.clientId).length, new: 0, in_production: 0, internal_review: 0, delivered: 0 };
+  tickets.filter((t) => !isClient || t.clientId === user.clientId).forEach((t) => { counts[t.status]++; });
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Fase 5 · Produção"
+        title="Tickets de produção"
+        description="Cada ticket representa um bloco 3D em produção, com SLA, responsável e status atualizado."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{counts.all} tickets</Badge>}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        {([["all", "Todos", counts.all], ["new", "Novos", counts.new], ["in_production", "Em Produção", counts.in_production], ["internal_review", "Revisão", counts.internal_review], ["delivered", "Entregues", counts.delivered]] as const).map(([id, label, count]) => (
+          <TabBtn key={id} active={filter === id} label={label} count={count} onClick={() => setFilter(id)} />
+        ))}
+      </div>
+
+      {visible.length === 0 ? (
+        <Card className="p-4"><EmptyState icon={Hash} title="Nenhum ticket encontrado" desc="Não há tickets para o filtro selecionado." /></Card>
+      ) : (
+        <div className="space-y-3">
+          {visible.map((ticket) => {
+            const block = blocks.find((b) => b.id === ticket.blockId);
+            const client = CLIENTS.find((c) => c.id === ticket.clientId);
+            const assignedUser = USERS.find((u) => u.id === ticket.assignedTo);
+            const slaDate = new Date(ticket.slaDate);
+            const daysLeft = Math.ceil((slaDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            const slaUrgent = daysLeft <= 3;
+
+            return (
+              <Card key={ticket.id} className="p-5 md:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <Badge className={TICKET_STATUS_COLORS[ticket.status]}>{TICKET_STATUS_LABELS[ticket.status]}</Badge>
+                      <ServiceBadge type={ticket.plan} />
+                      <PriorityDot priority={ticket.priority} />
+                    </div>
+                    <p className="text-base font-semibold text-slate-900">{ticket.title}</p>
+                    <p className="text-sm text-slate-500 mt-1">{client?.name} · Bloco #{block?.n || "—"} · {block?.sku || ticket.blockId}</p>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className={`text-sm font-semibold ${slaUrgent ? "text-rose-600" : "text-slate-700"}`}>
+                      {slaUrgent ? `⚠ ${daysLeft}d restantes` : `${daysLeft}d até SLA`}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">SLA: {fmtDate(ticket.slaDate)}</p>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+                  {!isClient && (
+                    <>
+                      <select value={ticket.assignedTo || ""} onChange={(e) => assignTicket(ticket.id, e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
+                        <option value="">Sem responsável</option>
+                        {internalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                      </select>
+                      <select value={ticket.status} onChange={(e) => updateStatus(ticket.id, e.target.value as TicketStatus)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
+                        {(["new", "in_production", "internal_review", "delivered"] as TicketStatus[]).map((s) => <option key={s} value={s}>{TICKET_STATUS_LABELS[s]}</option>)}
+                      </select>
+                    </>
+                  )}
+                  {assignedUser && (
+                    <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[9px] font-bold text-white">
+                        {assignedUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                      </div>
+                      {assignedUser.name}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 7 — PUBLICAÇÕES
+// ============================================================
+function PublicationsPage({ user }: { user: SeedUser }) {
+  const { blocks } = useContext(AppContext);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  const isClient = user.role === "client";
+  const pubs = PUBLICATIONS.filter((p) => {
+    if (!isClient) return true;
+    const block = blocks.find((b) => b.id === p.blockId);
+    return block?.clientId === user.clientId;
+  });
+
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(id);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320, pub8: 2980 };
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Fase 7 · Publicação"
+        title="Blocos publicados"
+        description="Todos os blocos 3D disponíveis na plataforma ArchTechTour, com links de embed e métricas de uso."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{pubs.length} publicados</Badge>}
+      />
+
+      {pubs.length === 0 ? (
+        <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc="Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour." /></Card>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-2">
+          {pubs.map((pub) => {
+            const block = blocks.find((b) => b.id === pub.blockId);
+            const client = CLIENTS.find((c) => c.id === block?.clientId);
+            return (
+              <Card key={pub.id} className="p-5">
+                <div className="flex items-start justify-between gap-3 mb-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{client?.name} · v{pub.v}</p>
+                    <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
+                    <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-2xl font-semibold text-slate-900">{(downloads[pub.id] || 0).toLocaleString("pt-BR")}</p>
+                    <p className="text-xs text-slate-400">downloads</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <ExternalLink className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                    <p className="flex-1 min-w-0 truncate text-xs text-slate-600">{pub.url}</p>
+                    <div className="flex gap-1">
+                      <button onClick={() => copyToClipboard(pub.url, `url-${pub.id}`)} className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-700">
+                        {copied === `url-${pub.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                      </button>
+                      <a href={pub.url} target="_blank" rel="noopener noreferrer" className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-700">
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                    <Hash className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                    <p className="flex-1 min-w-0 truncate text-xs text-slate-600 font-mono">{pub.embed.slice(0, 60)}…</p>
+                    <button onClick={() => copyToClipboard(pub.embed, `embed-${pub.id}`)} className="flex h-6 w-6 items-center justify-center rounded-lg hover:bg-slate-200 transition text-slate-400 hover:text-slate-700">
+                      {copied === `embed-${pub.id}` ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// FASE 8 — ANALYTICS
+// ============================================================
+function AnalyticsPage({ user }: { user: SeedUser }) {
+  const isClient = user.role === "client";
+  const activeClients = CLIENTS.filter((c) => c.active);
+
+  const defaultClientId = isClient
+    ? user.clientId!
+    : (activeClients.find((c) => c.code === "RSDESIGN")?.id || activeClients[0]?.id || "");
+
+  const [selectedClientId, setSelectedClientId] = useState(defaultClientId);
+  const [tab, setTab] = useState<"dashboard" | "manage">("dashboard");
+
+  const displayClient = CLIENTS.find((c) => c.id === selectedClientId);
+  const clientAlias = displayClient?.code.toLowerCase() || "";
+  const clientName = displayClient?.name || "";
+
+  if (!isClient && tab === "manage") {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-2">
+          <button onClick={() => setTab("dashboard")} className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition">← Voltar ao dashboard</button>
+        </div>
+        <AnalyticsClientsAdmin />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <SectionHeader
+          eyebrow="Analytics"
+          title="Dashboard de desempenho"
+          description={
+            isClient
+              ? "Acompanhe o alcance e engajamento dos seus produtos 3D na plataforma ArchTechTour."
+              : "Métricas reais do customizador 3D — dados do AWS Athena. Use 'Atualizar' para puxar dados frescos."
+          }
+        />
+        {!isClient && (
+          <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Cliente</span>
+              <select
+                value={selectedClientId}
+                onChange={(e) => setSelectedClientId(e.target.value)}
+                className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer"
+              >
+                {activeClients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => setTab("manage")}
+              className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition"
+              title="Listar/adicionar clientes na dim_client_alias do Athena"
+            >
+              Gerenciar clientes
+            </button>
+          </div>
+        )}
+      </div>
+
+      <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />
     </div>
   );
 }
@@ -1306,20 +3196,48 @@ export default function Portal() {
   const [selectedContract, setSelectedContract] = useState("");
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
+  const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
+
+  // Load users/clients/contracts registered via /contrato flow from localStorage
+  useEffect(() => {
+    try {
+      const storedUsers: SeedUser[] = JSON.parse(localStorage.getItem("att_portal_users") || "[]");
+      storedUsers.forEach((u) => {
+        if (!USERS.find((x) => x.email === u.email)) USERS.push(u);
+      });
+      const storedClients: SeedClient[] = JSON.parse(localStorage.getItem("att_portal_clients") || "[]");
+      storedClients.forEach((c) => {
+        if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c);
+      });
+      const storedContracts: SeedContract[] = JSON.parse(localStorage.getItem("att_portal_contracts") || "[]");
+      storedContracts.forEach((c) => {
+        if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c);
+      });
+    } catch {
+      // ignore
+    }
+  }, []);
+  const todayLabel = useMemo(
+    () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
+    [],
+  );
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets }}>
         <LoginPage />
       </AppContext.Provider>
     );
   }
 
   const isClient = currentUser.role === "client";
+  const shellLabel = isClient ? "Portal do cliente" : "Operações internas";
+  const workspaceTitle = isClient ? getClientName(currentUser.clientId!) : "Pipeline ArchTechTour";
 
   const renderPage = () => {
     switch (page) {
       case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} />;
+      case "onboarding": return <OnboardingWizardPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "blocks": return <BlocksListPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "block_detail": return <BlockDetailPage blockId={selectedBlock} user={currentUser} setPage={setPage} />;
       case "contracts": return <ContractsPage user={currentUser} setPage={setPage} setSelectedContract={setSelectedContract} />;
@@ -1327,6 +3245,9 @@ export default function Portal() {
       case "clients": return <ClientsPage />;
       case "approvals": return <ApprovalsPage user={currentUser} />;
       case "queue": return <QueuePage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
+      case "tickets": return <ProductionTicketsPage user={currentUser} />;
+      case "publications": return <PublicationsPage user={currentUser} />;
+      case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage />;
       case "users": return <UsersPage />;
       default: return <InternalDashboard setPage={setPage} />;
@@ -1334,24 +3255,43 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities }}>
-      <div className="min-h-screen bg-slate-50">
+    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets }}>
+      <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
+        <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
-        <div className={`transition-all duration-300 ${collapsed ? "ml-[64px]" : "ml-[240px]"}`}>
-          <header className="sticky top-0 z-30 bg-white/80 backdrop-blur-sm border-b border-slate-200/60 px-6 py-3 flex items-center justify-between">
-            <p className="text-sm text-slate-600">{isClient ? getClientName(currentUser.clientId!) : "Painel Interno"}</p>
-            <div className="flex items-center gap-3">
-              <button className="p-2 hover:bg-slate-100 rounded-lg relative transition-colors">
-                <Bell className="w-[18px] h-[18px] text-slate-500" />
-                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-              </button>
-              <div className="h-5 w-px bg-slate-200" />
-              <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-red-600 transition-colors">
-                <LogOut className="w-4 h-4" /> Sair
-              </button>
+        <div className={`relative transition-all duration-300 ${collapsed ? "ml-[88px]" : "ml-[280px]"}`}>
+          <header className="sticky top-0 z-30 border-b border-white/70 bg-white/70 backdrop-blur-xl">
+            <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-6 py-4 lg:px-8">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">{shellLabel}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm">
+                  <span className="font-semibold text-slate-900">{workspaceTitle}</span>
+                  <span className="h-1 w-1 rounded-full bg-slate-300" />
+                  <span className="text-slate-500">{todayLabel}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="hidden items-center gap-3 rounded-full border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:flex">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-[11px] font-semibold text-white">
+                    {currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-800">{currentUser.name}</p>
+                    <p className="text-[11px] text-slate-500">{ROLE_LABELS[currentUser.role]}</p>
+                  </div>
+                </div>
+                <button className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm transition hover:text-slate-700">
+                  <Bell className="h-[18px] w-[18px]" />
+                  <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500" />
+                </button>
+                <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/85 px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:text-rose-600">
+                  <LogOut className="h-4 w-4" />
+                  Sair
+                </button>
+              </div>
             </div>
           </header>
-          <main className="p-6 max-w-7xl">{renderPage()}</main>
+          <main className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-8">{renderPage()}</main>
         </div>
       </div>
     </AppContext.Provider>
