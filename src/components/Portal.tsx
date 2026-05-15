@@ -3119,18 +3119,46 @@ function PublicationsPage({ user }: { user: SeedUser }) {
 // ============================================================
 function AnalyticsPage({ user }: { user: SeedUser }) {
   const isClient = user.role === "client";
-  const activeClients = CLIENTS.filter((c) => c.active);
-
-  const defaultClientId = isClient
-    ? user.clientId!
-    : (activeClients.find((c) => c.code === "RSDESIGN")?.id || activeClients[0]?.id || "");
-
-  const [selectedClientId, setSelectedClientId] = useState(defaultClientId);
   const [tab, setTab] = useState<"dashboard" | "manage">("dashboard");
 
-  const displayClient = CLIENTS.find((c) => c.id === selectedClientId);
-  const clientAlias = displayClient?.code.toLowerCase() || "";
-  const clientName = displayClient?.name || "";
+  // Admin: lista clientes do dim_client_alias (Athena) — fonte de verdade do alias
+  const [dimClients, setDimClients] = useState<Array<{ alias: string; cliente: string }>>([]);
+  const [selectedAlias, setSelectedAlias] = useState<string>("");
+
+  useEffect(() => {
+    if (isClient) return;
+    fetch("/api/analytics/clients")
+      .then((r) => r.json())
+      .then((d) => {
+        const list = (d.clients || []) as Array<{ alias: string; cliente: string }>;
+        setDimClients(list);
+        // Default: RS Design (urgente), senão primeiro com dashboard
+        const def = list.find((c) => c.alias === "rsdesign") || list[0];
+        if (def) setSelectedAlias(def.alias);
+      })
+      .catch(() => {});
+  }, [isClient]);
+
+  // Para cliente: mapeia clientId → alias via match por nome do cliente no dim
+  // (CLIENTS do portal pode não bater 1-1 com o dim — usa nome como chave)
+  const clientPortalEntry = isClient ? CLIENTS.find((c) => c.id === user.clientId) : null;
+  const clientAlias = isClient
+    ? (dimClients.find((d) => d.cliente.toLowerCase() === (clientPortalEntry?.name || "").toLowerCase())?.alias
+        || clientPortalEntry?.code.toLowerCase()
+        || "")
+    : selectedAlias;
+  const clientName = isClient
+    ? (clientPortalEntry?.name || "")
+    : (dimClients.find((d) => d.alias === selectedAlias)?.cliente || "");
+
+  // Cliente também precisa fetch do dim pra mapear seu alias
+  useEffect(() => {
+    if (!isClient || dimClients.length > 0) return;
+    fetch("/api/analytics/clients")
+      .then((r) => r.json())
+      .then((d) => setDimClients(d.clients || []))
+      .catch(() => {});
+  }, [isClient, dimClients.length]);
 
   if (!isClient && tab === "manage") {
     return (
@@ -3160,12 +3188,14 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Cliente</span>
               <select
-                value={selectedClientId}
-                onChange={(e) => setSelectedClientId(e.target.value)}
+                value={selectedAlias}
+                onChange={(e) => setSelectedAlias(e.target.value)}
                 className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer"
+                disabled={dimClients.length === 0}
               >
-                {activeClients.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
+                {dimClients.length === 0 && <option value="">Carregando…</option>}
+                {dimClients.map((c) => (
+                  <option key={c.alias} value={c.alias}>{c.cliente}</option>
                 ))}
               </select>
             </div>
@@ -3180,7 +3210,11 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
         )}
       </div>
 
-      <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />
+      {clientAlias ? (
+        <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />
+      ) : (
+        <div className="flex items-center justify-center h-32 text-sm text-slate-400">Carregando clientes…</div>
+      )}
     </div>
   );
 }
