@@ -92,21 +92,29 @@ export async function GET() {
     return NextResponse.json({ clients });
   } catch (err) {
     const e = err as Error;
-    // Debug detalhado: quais env vars estão presentes
-    const allEnvKeys = Object.keys(process.env).sort();
-    const awsRelated = allEnvKeys.filter(k => k.includes("AWS") || k.includes("AMPLIFY") || k.includes("CONTAINER"));
+    // Debug: chamar listener Amplify direto
+    let listenerCall: any = { skipped: true };
+    const host = process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_HOST;
+    const port = process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_PORT;
+    const lpath = process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_PATH;
+    if (host && port) {
+      const url = `http://${host}:${port}${lpath || ""}`;
+      try {
+        const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+        const text = await r.text();
+        listenerCall = { url, status: r.status, body_preview: text.slice(0, 600), body_length: text.length };
+      } catch (e2) {
+        listenerCall = { url, error: (e2 as Error).message };
+      }
+    }
     return NextResponse.json(
       {
         error: `Falha ao listar clientes: ${e.message}`,
         name: e.name,
-        stack: e.stack?.split("\n").slice(0, 8),
-        region: REGION,
-        athena_db: ATHENA_DB,
-        athena_output: ATHENA_OUTPUT,
-        has_container_creds: !!process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
-        container_creds_value: process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI ? "SET" : "MISSING",
-        aws_related_env_keys: awsRelated,
-        total_env_vars: allEnvKeys.length,
+        full_uri_set: !!process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI,
+        full_uri_value: process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI || null,
+        listener_call: listenerCall,
+        amplify_listener_enabled: process.env.AWS_AMPLIFY_CREDENTIAL_LISTENER_ENABLED,
       },
       { status: 500 }
     );
