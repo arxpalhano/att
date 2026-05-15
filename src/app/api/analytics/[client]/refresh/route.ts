@@ -5,6 +5,12 @@
  * Roda as queries Athena pro cliente no range pedido, salva o JSON
  * (S3 se ANALYTICS_S3_BUCKET; sempre local) e retorna o JSON.
  */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+import { bootstrapAmplifyCredentials } from "@/lib/amplify-credentials";
+bootstrapAmplifyCredentials();
+
 import { NextRequest, NextResponse } from "next/server";
 import { buildAnalytics, saveAnalytics } from "@/lib/analytics-builder";
 import { runAthenaQuery, sqlEscape } from "@/lib/athena";

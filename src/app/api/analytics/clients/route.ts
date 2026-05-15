@@ -9,6 +9,9 @@
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+import { bootstrapAmplifyCredentials } from "@/lib/amplify-credentials";
+bootstrapAmplifyCredentials();
+
 import { NextRequest, NextResponse } from "next/server";
 import {
   AthenaClient,

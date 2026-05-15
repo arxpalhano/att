@@ -8,6 +8,12 @@
  * Em produção (Amplify): IAM Role injeta credenciais → SDK resolve sozinho.
  * Em dev local: usa AWS_ACCESS_KEY_ID/SECRET do .env.local.
  */
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+import { bootstrapAmplifyCredentials } from "@/lib/amplify-credentials";
+bootstrapAmplifyCredentials();
+
 import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getS3 } from "@/lib/aws-clients";
