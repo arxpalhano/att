@@ -27,9 +27,15 @@ export async function runAthenaQuery(sql: string): Promise<Record<string, string
   );
   const qid = start.QueryExecutionId!;
 
-  // Poll até completar (max 60s)
-  for (let i = 0; i < 40; i++) {
-    await sleep(1500);
+  // Poll com backoff: 200ms, 400ms, 600ms... max 25s (dentro do timeout SSR 30s)
+  let elapsed = 0;
+  for (let i = 0; i < 50; i++) {
+    const wait = Math.min(200 + i * 100, 1500);
+    await sleep(wait);
+    elapsed += wait;
+    if (elapsed > 25000) {
+      throw new Error(`Athena timeout (>25s) — SQL: ${sql.slice(0, 100)}`);
+    }
     const exec = await athena.send(new GetQueryExecutionCommand({ QueryExecutionId: qid }));
     const state = exec.QueryExecution?.Status?.State;
     if (state === "SUCCEEDED") break;
