@@ -85,8 +85,17 @@ export async function GET() {
     }));
     return NextResponse.json({ clients });
   } catch (err) {
+    const e = err as Error;
     return NextResponse.json(
-      { error: `Falha ao listar clientes: ${(err as Error).message}` },
+      {
+        error: `Falha ao listar clientes: ${e.message}`,
+        name: e.name,
+        stack: e.stack?.split("\n").slice(0, 8),
+        region: REGION,
+        athena_db: ATHENA_DB,
+        athena_output: ATHENA_OUTPUT,
+        has_container_creds: !!process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI,
+      },
       { status: 500 }
     );
   }
