@@ -12,14 +12,19 @@
 import { S3Client } from "@aws-sdk/client-s3";
 import { AthenaClient } from "@aws-sdk/client-athena";
 
-// Em Amplify, env vars com prefixo AWS_* são reservadas → usamos APP_AWS_REGION.
-// Default us-east-1 onde estão Athena + bucket archtechtour-assets.
-const REGION = process.env.APP_AWS_REGION || process.env.AWS_REGION || "us-east-1";
+// Toda a infra de analytics está em us-east-1 (Athena DB, dim_client_alias,
+// explorar.archtechtour.com bucket, archtechtour-assets bucket).
+// Amplify SSR roda em sa-east-1 — fazemos cross-region pra acessar Athena.
+// Resolvendo em runtime (cada call), NÃO no module load (env vars podem
+// não estar prontas quando o módulo carrega).
+function getRegion(): string {
+  return process.env.APP_AWS_REGION || "us-east-1";
+}
 
 export function getS3(): S3Client {
-  return new S3Client({ region: REGION });
+  return new S3Client({ region: getRegion() });
 }
 
 export function getAthena(): AthenaClient {
-  return new AthenaClient({ region: REGION });
+  return new AthenaClient({ region: getRegion() });
 }
