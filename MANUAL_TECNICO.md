@@ -367,15 +367,50 @@ CloudWatch Logs → procurar:
 - `/aws/lambda/analytics-compute` (dia 10)
 - `/aws/amplify/d20t94dp8646px/main` (logs do SSR Lambda do portal)
 
-### 5.4 Deploy de mudança no portal
+### 5.4 Workflow de branches (importante!)
 
-1. Branch local: faz commit no `main` (ou via PR `develop` → `main`)
-2. `git push origin main`
-3. Amplify detecta o push automaticamente
-4. Build + deploy roda em ~5-8 min (acompanhar em https://console.aws.amazon.com/amplify/)
-5. Quando ficar verde, validar URL deployada
+```
+main     → PRODUÇÃO. Amplify auto-deploya a cada push.
+develop  → DESENVOLVIMENTO. Sem deploy automático.
+```
 
-### 5.5 Conferir se Parquet tá em dia
+**Regra:** nunca commitar direto no `main`. Sempre desenvolver em `develop`:
+
+```bash
+git checkout develop
+# faz alteração, testa local com npm run dev
+git add . && git commit -m "..."
+git push origin develop
+```
+
+Quando validado em `develop` (local e/ou outra revisão), promover pra produção:
+
+```bash
+# Opção A — PR no GitHub (recomendado, deixa histórico revisável)
+# Abre PR develop → main em:
+#   https://github.com/arxpalhano/att/compare/main...develop
+
+# Opção B — merge local + push (rápido, sem PR)
+git checkout main
+git pull origin main           # garante main atualizada
+git merge --ff-only develop    # falha se houver merge complexo → use PR
+git push origin main
+git checkout develop           # volta pra branch de trabalho
+```
+
+Após push em `main`: Amplify detecta → build → deploy → ~5-8 min até estar live.
+
+**Rollback** caso algo quebre em prod: Amplify Console → app → branch `main` → na lista de builds, clica `⋯` na versão anterior → **Redeploy this version**. Sem precisar reverter git.
+
+### 5.5 Deploy de mudança no portal (resumido)
+
+1. Branch `develop` local → mudança → `npm run dev` testa
+2. `git push origin develop`
+3. PR `develop → main` (ou merge fast-forward)
+4. Amplify auto-deploya `main` → ~5-8 min
+5. Valida URL produção
+
+### 5.6 Conferir se Parquet tá em dia
 
 Query rápida (deve retornar a data de hoje ou ontem):
 ```sql
