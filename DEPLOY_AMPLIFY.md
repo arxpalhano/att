@@ -13,8 +13,9 @@
 - [ ] **Passo 3** — Configurar variáveis de ambiente no Amplify
 - [ ] **Passo 4** — Trigger do primeiro deploy
 - [ ] **Passo 5** — Apontar domínio (`app.archtechtour.com` ou similar)
-- [ ] **Passo 6** — Deploy da Lambda mensal `analytics-compute`
-- [ ] **Passo 7** — Criar EventBridge rule (dia 10)
+- [ ] **Passo 6** — Deploy da Lambda mensal `parquet-monthly-etl` (dia 5)
+- [ ] **Passo 7** — Deploy da Lambda mensal `analytics-compute` (dia 10)
+- [ ] **Passo 8** — Criar EventBridge rules pra ambas
 
 ---
 

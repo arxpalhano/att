@@ -1,0 +1,19 @@
+{
+  "name": "parquet-monthly-etl",
+  "version": "1.0.0",
+  "description": "Lambda que migra eventos JSON do mês anterior para Parquet particionado (roda todo dia 5).",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc index.ts --target es2022 --module commonjs --esModuleInterop --outDir dist",
+    "package": "npm run build && cp package.json dist/ && cd dist && npm install --omit=dev && zip -r ../function.zip .",
+    "deploy": "npm run package && aws lambda update-function-code --function-name parquet-monthly-etl --zip-file fileb://function.zip --region us-east-1"
+  },
+  "dependencies": {
+    "@aws-sdk/client-athena": "^3.600.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.140",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}

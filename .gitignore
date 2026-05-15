@@ -11,3 +11,9 @@ _decode.js
 src/Nova pasta/
 src/projeto.zip
 *.zip
+lambda/parquet-monthly-etl/node_modules
+lambda/parquet-monthly-etl/dist
+lambda/parquet-monthly-etl/function.zip
+lambda/analytics-compute/node_modules
+lambda/analytics-compute/dist
+lambda/analytics-compute/function.zip

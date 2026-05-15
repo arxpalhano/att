@@ -1,7 +1,19 @@
 # Lambda: analytics-compute
 
-Roda todo **dia 10** às 03h00 UTC via EventBridge.  
-Consulta o Athena e salva um JSON por cliente no S3 → o portal lê e exibe o dashboard.
+Roda todo **dia 10 às 03h UTC** via EventBridge.
+Chama o endpoint `/api/analytics/[alias]/refresh` do Amplify pra cada cliente da `dim_client_alias`.
+O endpoint do Amplify lê do **eventos_parquet** (rápido) e salva o JSON por cliente no S3.
+
+---
+
+## Pipeline mensal completo
+
+```
+Dia 1-31  →  Lambda do customizador escreve JSONs em eventos/
+Dia 5 03h →  Lambda parquet-monthly-etl: INSERT do mês anterior em eventos_parquet
+Dia 10 03h → ESTA Lambda: chama /api/analytics/[alias]/refresh pra cada cliente
+             (Amplify lê do Parquet rápido, salva JSON por cliente no S3)
+```
 
 ---
 
@@ -11,10 +23,10 @@ Consulta o Athena e salva um JSON por cliente no S3 → o portal lê e exibe o d
 cd lambda/analytics-compute
 npm install
 npm run build           # compila TypeScript → dist/
-npm run deploy          # cria o zip e sobe para a Lambda
+npm run deploy          # cria zip e sobe Lambda
 ```
 
-> A Lambda precisa ter a variável de ambiente `ANALYTICS_BUCKET` configurada no console AWS.
+> A Lambda precisa de `ANALYTICS_API_URL` configurado no console AWS.
 
 ---
 
@@ -22,68 +34,47 @@ npm run deploy          # cria o zip e sobe para a Lambda
 
 | Variável | Valor |
 |---|---|
-| `ANALYTICS_BUCKET` | `archtechtour-assets` (ou o bucket que preferir) |
+| `ANALYTICS_API_URL` | `https://main.d20t94dp8646px.amplifyapp.com` (ou domínio customizado) |
 | `ATHENA_DB` | `customizador_events` |
-| `ATHENA_WORKGROUP` | `primary` |
-| `ATHENA_OUTPUT` | `s3://archtechtour-assets/athena-tmp/` |
+| `ATHENA_OUTPUT` | `s3://explorar.archtechtour.com/athena-tmp/` |
+| `ANALYTICS_REFRESH_SECRET` | (opcional) — se setado, Lambda envia no header `x-analytics-secret` |
 
 ---
 
-## IAM Role da Lambda
+## IAM Role
 
-A Lambda precisa de permissões para:
-- `s3:GetObject` + `s3:PutObject` no `ANALYTICS_BUCKET`
-- `athena:StartQueryExecution`, `athena:GetQueryExecution`, `athena:GetQueryResults`
-- `s3:GetObject` + `s3:PutObject` no bucket do Athena output (`ATHENA_OUTPUT`)
-- `s3:GetObject` no bucket de eventos (`explorar.archtechtour.com`) para o Athena ler
-
-O `powerbi-athena-user` já tem essas permissões — pode criar uma IAM Role com a mesma policy.
+Mesma role do Amplify SSR (`amplify-archtechtour-portal-ssr`) — já tem athena + s3.
 
 ---
 
 ## EventBridge (agendamento dia 10)
 
-No console AWS → EventBridge → Rules → Create rule:
+Console AWS → EventBridge → Rules → Create rule:
 
-- **Schedule**: `cron(0 3 10 * ? *)` → todo dia 10 às 03h UTC (meia-noite BRT)
+- **Schedule**: `cron(0 3 10 * ? *)` → todo dia 10 às 03h UTC
 - **Target**: Lambda `analytics-compute`
 
 ---
 
-## Rodar manualmente para RS Design (agora)
+## Como funciona
 
-Para popular o dashboard da RS Design com dados reais antes do dia 10, invoke a Lambda manualmente:
+A Lambda é "burra" — não faz queries Athena diretamente. Em vez disso:
 
+1. Lista clientes do `dim_client_alias` (1 query Athena rápida)
+2. Pra cada cliente, chama `POST {ANALYTICS_API_URL}/api/analytics/{alias}/refresh`
+3. O endpoint Amplify roda as queries Athena no Parquet (rápido) e salva no S3
+4. Loga sucesso/erro pra cada cliente
+
+Vantagem: lógica de analytics num lugar só (`src/lib/analytics-builder.ts` no portal).
+
+---
+
+## Test invoke manual
+
+Console AWS → Lambda → `analytics-compute` → aba **Test** → payload `{}` → **Test**.
+
+Ou via CLI:
 ```bash
-aws lambda invoke \
-  --function-name analytics-compute \
-  --payload '{}' \
-  output.json
-
+aws lambda invoke --function-name analytics-compute --payload '{}' output.json
 cat output.json
 ```
-
-Ou no console AWS → Lambda → Test → evento vazio `{}`.
-
----
-
-## Como o portal lê os dados
-
-`GET /api/analytics/rsdesign`
-
-1. Tenta `s3://ANALYTICS_BUCKET/analytics-cache/rsdesign/latest.json`
-2. Fallback: `public/analytics-data/rsdesign.json` (arquivo de exemplo local)
-
-O alias (`rsdesign`) vem do código do cliente em letras minúsculas (`RSDESIGN.toLowerCase()`).
-
----
-
-## Adicionar novo cliente
-
-1. Inserir na `dim_client_alias` do Athena:
-   ```sql
-   INSERT INTO customizador_events.dim_client_alias (alias, cliente)
-   VALUES ('novoalias', 'Nome do Cliente');
-   ```
-2. Invocar a Lambda (ela vai criar o JSON automaticamente).
-3. Adicionar o cliente no Portal (`CLIENTS` em `Portal.tsx` e o usuário com `role: "client"`).
