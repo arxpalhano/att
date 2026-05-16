@@ -14,23 +14,7 @@ const CLIENTS = [
   "Minimal Design", "WJ Luminárias", "Estúdio Bola", "DEXCO",
 ];
 
-const TESTIMONIALS = [
-  {
-    quote: "Em 3 semanas tínhamos 40 produtos em 3D na plataforma. Arquitetos de São Paulo a Lisboa já estão especificando nossa linha.",
-    name: "Marcela F.",
-    role: "Diretora Comercial · Escal Móveis",
-  },
-  {
-    quote: "O customizador de RA virou nosso principal argumento de venda. O cliente vê o sofá na sala dele antes de comprar.",
-    name: "Rafael K.",
-    role: "CEO · Estúdio Bola",
-  },
-  {
-    quote: "Reduzimos o ciclo de vendas B2B pela metade. Arquitetos especificam nossos produtos sem precisar visitar o showroom.",
-    name: "Ana P.",
-    role: "Gerente de Marketing · Tidelli",
-  },
-];
+// Testimonials moved inside component to use translations
 
 function VideoModal({ onClose }: { onClose: () => void }) {
   const t = useT();
@@ -97,6 +81,12 @@ export default function LandingPage() {
     { n: "01", title: t("steps.s1.title"), desc: t("steps.s1.desc") },
     { n: "02", title: t("steps.s2.title"), desc: t("steps.s2.desc") },
     { n: "03", title: t("steps.s3.title"), desc: t("steps.s3.desc") },
+  ];
+
+  const TESTIMONIALS = [
+    { quote: t("testimonial.1.quote"), name: "Marcela F.", role: t("testimonial.1.role") },
+    { quote: t("testimonial.2.quote"), name: "Rafael K.", role: t("testimonial.2.role") },
+    { quote: t("testimonial.3.quote"), name: "Ana P.", role: t("testimonial.3.role") },
   ];
 
   const NUMBERS = [
@@ -377,7 +367,7 @@ export default function LandingPage() {
                 periodKey: "plans.perMonth" as const,
                 descKey: "plans.starter.desc" as const,
                 features: [
-                  "10 produtos em 3D",
+                  t("plans.starter.products"),
                   t("plans.f1"), t("plans.f2"), t("plans.f3"), t("plans.f4"),
                 ],
                 highlight: false,
@@ -388,7 +378,7 @@ export default function LandingPage() {
                 periodKey: "plans.perMonth" as const,
                 descKey: "plans.pro.desc" as const,
                 features: [
-                  "50 produtos em 3D",
+                  t("plans.pro.products"),
                   t("plans.f5"), t("plans.f6"), t("plans.f7"), t("plans.f8"), t("plans.f3"),
                 ],
                 highlight: true,

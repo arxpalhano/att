@@ -91,8 +91,17 @@ const translations: Record<Lang, Record<string, string>> = {
     "plans.underConsult": "Sob consulta",
 
     "plans.starter.desc": "Ideal para marcas iniciando no digital 3D.",
+    "plans.starter.products": "10 produtos em 3D",
     "plans.pro.desc": "Para catálogos médios com customizador de RA.",
+    "plans.pro.products": "50 produtos em 3D",
     "plans.enterprise.desc": "Volume ilimitado com gerente dedicado.",
+
+    "testimonial.1.quote": "Em 3 semanas tínhamos 40 produtos em 3D na plataforma. Arquitetos de São Paulo a Lisboa já estão especificando nossa linha.",
+    "testimonial.1.role": "Diretora Comercial · Escal Móveis",
+    "testimonial.2.quote": "O customizador de RA virou nosso principal argumento de venda. O cliente vê o sofá na sala dele antes de comprar.",
+    "testimonial.2.role": "CEO · Estúdio Bola",
+    "testimonial.3.quote": "Reduzimos o ciclo de vendas B2B pela metade. Arquitetos especificam nossos produtos sem precisar visitar o showroom.",
+    "testimonial.3.role": "Gerente de Marketing · Tidelli",
 
     "plans.f1": "Portal de acompanhamento",
     "plans.f2": "Aprovação online",
@@ -222,8 +231,17 @@ const translations: Record<Lang, Record<string, string>> = {
     "plans.underConsult": "Custom pricing",
 
     "plans.starter.desc": "Ideal for brands starting in digital 3D.",
+    "plans.starter.products": "10 products in 3D",
     "plans.pro.desc": "For medium catalogs with AR customizer.",
+    "plans.pro.products": "50 products in 3D",
     "plans.enterprise.desc": "Unlimited volume with dedicated manager.",
+
+    "testimonial.1.quote": "In 3 weeks we had 40 products in 3D on the platform. Architects from São Paulo to Lisbon are already specifying our line.",
+    "testimonial.1.role": "Commercial Director · Escal Móveis",
+    "testimonial.2.quote": "The AR customizer became our main sales argument. The client sees the sofa in their living room before buying.",
+    "testimonial.2.role": "CEO · Estúdio Bola",
+    "testimonial.3.quote": "We cut the B2B sales cycle in half. Architects specify our products without needing to visit the showroom.",
+    "testimonial.3.role": "Marketing Manager · Tidelli",
 
     "plans.f1": "Tracking portal",
     "plans.f2": "Online approval",
@@ -353,8 +371,17 @@ const translations: Record<Lang, Record<string, string>> = {
     "plans.underConsult": "Precio a consultar",
 
     "plans.starter.desc": "Ideal para marcas que inician en el 3D digital.",
+    "plans.starter.products": "10 productos en 3D",
     "plans.pro.desc": "Para catálogos medianos con personalizador de RA.",
+    "plans.pro.products": "50 productos en 3D",
     "plans.enterprise.desc": "Volumen ilimitado con gerente dedicado.",
+
+    "testimonial.1.quote": "En 3 semanas teníamos 40 productos en 3D en la plataforma. Arquitectos de São Paulo a Lisboa ya están especificando nuestra línea.",
+    "testimonial.1.role": "Directora Comercial · Escal Móveis",
+    "testimonial.2.quote": "El personalizador de RA se convirtió en nuestro principal argumento de venta. El cliente ve el sofá en su sala antes de comprar.",
+    "testimonial.2.role": "CEO · Estúdio Bola",
+    "testimonial.3.quote": "Reducimos el ciclo de ventas B2B a la mitad. Los arquitectos especifican nuestros productos sin necesitar visitar el showroom.",
+    "testimonial.3.role": "Gerente de Marketing · Tidelli",
 
     "plans.f1": "Portal de seguimiento",
     "plans.f2": "Aprobación online",
@@ -484,8 +511,17 @@ const translations: Record<Lang, Record<string, string>> = {
     "plans.underConsult": "Sur devis",
 
     "plans.starter.desc": "Idéal pour les marques débutant dans le 3D digital.",
+    "plans.starter.products": "10 produits en 3D",
     "plans.pro.desc": "Pour les catalogues moyens avec personnalisateur RA.",
+    "plans.pro.products": "50 produits en 3D",
     "plans.enterprise.desc": "Volume illimité avec manager dédié.",
+
+    "testimonial.1.quote": "En 3 semaines nous avions 40 produits en 3D sur la plateforme. Des architectes de São Paulo à Lisbonne spécifient déjà notre gamme.",
+    "testimonial.1.role": "Directrice Commerciale · Escal Móveis",
+    "testimonial.2.quote": "Le personnalisateur RA est devenu notre principal argument de vente. Le client voit le canapé dans son salon avant d'acheter.",
+    "testimonial.2.role": "CEO · Estúdio Bola",
+    "testimonial.3.quote": "Nous avons réduit de moitié le cycle de vente B2B. Les architectes spécifient nos produits sans avoir à visiter le showroom.",
+    "testimonial.3.role": "Responsable Marketing · Tidelli",
 
     "plans.f1": "Portail de suivi",
     "plans.f2": "Approbation en ligne",
