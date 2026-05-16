@@ -7,7 +7,7 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 // ─── Vídeo de demonstração ─────────────────────────────────────────────────────
 const VIDEO_EMBED_URL: string | null = "https://www.youtube.com/embed/ta6uwJaqvz4";
-const LOGO_URL = "https://www.archtechtour.com/wp-content/uploads/2025/09/logo-archtechtour-oficial.svg";
+const LOGO_URL = "/logo.svg";
 
 const CLIENTS = [
   "Escal Móveis", "Wentz", "Tidelli", "Hunter Douglas",
@@ -105,7 +105,9 @@ export default function LandingPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-5 py-3">
           <Link href="/">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={LOGO_URL} alt="ArchTechTour" className="h-9 w-auto" />
+            <span style={{ display: "inline-block", height: "36px", width: "120px", overflow: "hidden", flexShrink: 0 }}>
+              <img src={LOGO_URL} alt="ArchTechTour" style={{ height: "36px", width: "auto" }} />
+            </span>
           </Link>
 
           <div className="hidden items-center gap-7 text-sm text-[#6B6760] sm:flex">
@@ -117,7 +119,7 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-3">
             <LanguageSwitcher theme="light" />
-            <Link href="/portal" className="text-sm text-[#6B6760] hover:text-[#0D0D0D] transition">
+            <Link href="/portal" className="hidden sm:block text-sm text-[#6B6760] hover:text-[#0D0D0D] transition">
               {t("nav.login")}
             </Link>
             <Link
