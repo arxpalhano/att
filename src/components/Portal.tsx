@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
+import { signIn, useSession } from "next-auth/react";
 import { useT } from "@/lib/i18n";
 import LanguageSwitcher from "./LanguageSwitcher";
 import {
@@ -494,6 +495,32 @@ function LoginPage() {
   const [showPw, setShowPw] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const { data: session } = useSession();
+
+  // Auto-login when Microsoft SSO session arrives
+  useEffect(() => {
+    if (!session?.user?.email) return;
+    const msEmail = (session.user.email as string).toLowerCase();
+    // Match against seed users by email
+    const user = USERS.find((u) => u.email.toLowerCase() === msEmail);
+    if (user) {
+      setCurrentUser(user);
+    } else {
+      // Auto-create a temporary session for any @archtechtour.com Microsoft user
+      if (msEmail.endsWith("@archtechtour.com")) {
+        setCurrentUser({
+          id: `ms_${Date.now()}`,
+          email: msEmail,
+          password: "",
+          name: (session.user.name as string | null | undefined) ?? msEmail,
+          role: "admin",
+          active: true,
+        });
+      } else {
+        setError("Conta Microsoft não autorizada para este portal.");
+      }
+    }
+  }, [session, setCurrentUser]);
 
   const handleLogin = () => {
     setError("");
@@ -594,6 +621,25 @@ function LoginPage() {
             className="w-full mt-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 text-slate-900 text-sm font-bold disabled:opacity-30 hover:brightness-110 transition-all shadow-lg shadow-emerald-500/20"
           >
             {loading ? "Verificando..." : "Entrar"}
+          </button>
+
+          <div className="flex items-center gap-3 my-4">
+            <div className="flex-1 h-px bg-white/10" />
+            <span className="text-xs text-slate-500">ou</span>
+            <div className="flex-1 h-px bg-white/10" />
+          </div>
+
+          <button
+            onClick={() => signIn("azure-ad", { callbackUrl: "/portal" })}
+            className="w-full py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all flex items-center justify-center gap-2.5 text-sm font-semibold text-white"
+          >
+            <svg width="18" height="18" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+              <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+              <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+              <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+              <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+            </svg>
+            Entrar com Microsoft
           </button>
 
           <p className="text-xs text-slate-500 text-center mt-4">
