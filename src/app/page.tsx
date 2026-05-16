@@ -2,6 +2,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight, Play, CheckCircle, Star, Quote, Layers, Globe, Smartphone, Sparkles, X } from "lucide-react";
+import { useT } from "@/lib/i18n";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
 // ─── Vídeo de demonstração ─────────────────────────────────────────────────────
 const VIDEO_EMBED_URL: string | null = "https://www.youtube.com/embed/ta6uwJaqvz4";
@@ -10,47 +12,6 @@ const LOGO_URL = "https://www.archtechtour.com/wp-content/uploads/2025/09/logo-a
 const CLIENTS = [
   "Escal Móveis", "Wentz", "Tidelli", "Hunter Douglas",
   "Minimal Design", "WJ Luminárias", "Estúdio Bola", "DEXCO",
-];
-
-const BENEFITS = [
-  {
-    icon: Layers,
-    title: "Do projeto ao 3D interativo",
-    desc: "Envie fotos, CAD ou desenhos técnicos e nossa equipe entrega seu produto como um bloco 3D configurável — sem você precisar tocar em nenhum software.",
-  },
-  {
-    icon: Globe,
-    title: "Visível para arquitetos do mundo todo",
-    desc: "Seus produtos ficam disponíveis na plataforma ArchTechTour, usada por profissionais de arquitetura em mais de 40 países para especificar e comprar.",
-  },
-  {
-    icon: Smartphone,
-    title: "Realidade Aumentada no bolso do arquiteto",
-    desc: "Com um QR code, o arquiteto posiciona seu móvel em escala real no ambiente do cliente — direto pelo celular, sem app, sem treinamento.",
-  },
-  {
-    icon: Sparkles,
-    title: "Customizador de acabamentos",
-    desc: "O cliente final escolhe cor, revestimento e material em tempo real no modelo 3D. Você vende mais sem precisar ter todos os acabamentos em estoque.",
-  },
-];
-
-const STEPS = [
-  {
-    n: "01",
-    title: "Você envia os arquivos",
-    desc: "Fotos do produto, arquivos CAD, fichas técnicas e catálogo de acabamentos — tudo pelo portal, no seu tempo.",
-  },
-  {
-    n: "02",
-    title: "A gente transforma em 3D",
-    desc: "Nossa equipe modela, texturiza e configura cada produto. Você acompanha o progresso e aprova antes da publicação.",
-  },
-  {
-    n: "03",
-    title: "Seu produto chega ao mundo",
-    desc: "Publicado na plataforma com embed para seu site, QR code para RA e visibilidade para arquitetos globalmente.",
-  },
 ];
 
 const TESTIMONIALS = [
@@ -71,14 +32,8 @@ const TESTIMONIALS = [
   },
 ];
 
-const NUMBERS = [
-  { value: "40+", label: "países alcançados" },
-  { value: "500+", label: "marcas na plataforma" },
-  { value: "20K+", label: "downloads por mês" },
-  { value: "7 dias", label: "prazo médio de entrega" },
-];
-
 function VideoModal({ onClose }: { onClose: () => void }) {
+  const t = useT();
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm p-4"
@@ -108,9 +63,9 @@ function VideoModal({ onClose }: { onClose: () => void }) {
               <Play className="h-9 w-9 text-white ml-1" />
             </div>
             <div>
-              <p className="text-xl font-semibold text-white mb-2">Vídeo em produção</p>
+              <p className="text-xl font-semibold text-white mb-2">{t("video.title")}</p>
               <p className="text-white/40 text-sm max-w-sm">
-                Estamos produzindo um vídeo mostrando a transformação completa — do projeto ao 3D interativo com Realidade Aumentada.
+                {t("video.desc")}
               </p>
             </div>
             <a
@@ -118,7 +73,7 @@ function VideoModal({ onClose }: { onClose: () => void }) {
               className="mt-2 flex items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-[#0D0D0D] hover:bg-neutral-100 transition"
               onClick={(e) => e.stopPropagation()}
             >
-              Solicitar demo ao vivo <ArrowRight className="h-4 w-4" />
+              {t("video.requestDemo")} <ArrowRight className="h-4 w-4" />
             </a>
           </div>
         )}
@@ -129,6 +84,27 @@ function VideoModal({ onClose }: { onClose: () => void }) {
 
 export default function LandingPage() {
   const [showVideo, setShowVideo] = useState(false);
+  const t = useT();
+
+  const BENEFITS = [
+    { icon: Layers, title: t("benefits.b1.title"), desc: t("benefits.b1.desc") },
+    { icon: Globe, title: t("benefits.b2.title"), desc: t("benefits.b2.desc") },
+    { icon: Smartphone, title: t("benefits.b3.title"), desc: t("benefits.b3.desc") },
+    { icon: Sparkles, title: t("benefits.b4.title"), desc: t("benefits.b4.desc") },
+  ];
+
+  const STEPS = [
+    { n: "01", title: t("steps.s1.title"), desc: t("steps.s1.desc") },
+    { n: "02", title: t("steps.s2.title"), desc: t("steps.s2.desc") },
+    { n: "03", title: t("steps.s3.title"), desc: t("steps.s3.desc") },
+  ];
+
+  const NUMBERS = [
+    { value: "40+", label: t("numbers.countries") },
+    { value: "500+", label: t("numbers.brands") },
+    { value: "20K+", label: t("numbers.downloads") },
+    { value: "7 dias", label: t("numbers.delivery") },
+  ];
 
   return (
     <div className="min-h-screen bg-white text-[#0D0D0D]">
@@ -143,21 +119,22 @@ export default function LandingPage() {
           </Link>
 
           <div className="hidden items-center gap-7 text-sm text-[#6B6760] sm:flex">
-            <a href="#como-funciona" className="hover:text-[#0D0D0D] transition">Como funciona</a>
-            <a href="#beneficios" className="hover:text-[#0D0D0D] transition">Benefícios</a>
-            <a href="#planos" className="hover:text-[#0D0D0D] transition">Planos</a>
-            <a href="#clientes" className="hover:text-[#0D0D0D] transition">Clientes</a>
+            <a href="#como-funciona" className="hover:text-[#0D0D0D] transition">{t("nav.howItWorks")}</a>
+            <a href="#beneficios" className="hover:text-[#0D0D0D] transition">{t("nav.benefits")}</a>
+            <a href="#planos" className="hover:text-[#0D0D0D] transition">{t("nav.plans")}</a>
+            <a href="#clientes" className="hover:text-[#0D0D0D] transition">{t("nav.clients")}</a>
           </div>
 
           <div className="flex items-center gap-3">
+            <LanguageSwitcher theme="light" />
             <Link href="/portal" className="text-sm text-[#6B6760] hover:text-[#0D0D0D] transition">
-              Entrar
+              {t("nav.login")}
             </Link>
             <Link
               href="/planos"
               className="flex items-center gap-1.5 rounded-full bg-[#0D0D0D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#2A2A2A] transition"
             >
-              Começar agora <ArrowRight className="h-3.5 w-3.5" />
+              {t("nav.startNow")} <ArrowRight className="h-3.5 w-3.5" />
             </Link>
           </div>
         </div>
@@ -179,19 +156,18 @@ export default function LandingPage() {
         <div className="relative mx-auto max-w-4xl text-center">
           <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/50 tracking-wide">
             <Star className="h-3 w-3 text-white/30" />
-            Mais de 500 marcas de móveis e design já na plataforma
+            {t("hero.badge")}
           </div>
 
           <h1 className="text-4xl font-semibold leading-[1.08] tracking-tight text-white md:text-[3.5rem]">
-            Seu produto em 3D interativo
-            <br className="hidden md:block" /> e Realidade Aumentada —
+            {t("hero.title1")}
+            <br className="hidden md:block" /> {t("hero.title2")}
             <br />
-            <span className="text-white/40">para arquitetos do mundo todo</span>
+            <span className="text-white/40">{t("hero.title3")}</span>
           </h1>
 
           <p className="mx-auto mt-7 max-w-xl text-base leading-7 text-white/40">
-            Transformamos catálogos de móveis e revestimentos em experiências digitais imersivas.
-            Seu cliente vê, personaliza e especifica — sem sair do lugar.
+            {t("hero.subtitle")}
           </p>
 
           <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
@@ -199,20 +175,20 @@ export default function LandingPage() {
               href="/planos"
               className="flex items-center gap-2 rounded-full bg-white px-7 py-3 text-sm font-semibold text-[#0D0D0D] hover:bg-neutral-100 transition"
             >
-              Ver planos e preços <ArrowRight className="h-4 w-4" />
+              {t("hero.seePlans")} <ArrowRight className="h-4 w-4" />
             </Link>
             <button
               onClick={() => setShowVideo(true)}
               className="flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-7 py-3 text-sm font-semibold text-white/70 hover:text-white hover:bg-white/8 transition"
             >
-              <Play className="h-3.5 w-3.5" /> Ver demo
+              <Play className="h-3.5 w-3.5" /> {t("hero.seeDemo")}
             </button>
           </div>
 
           <div className="mt-12 flex flex-wrap items-center justify-center gap-6 text-xs text-white/25">
-            {["Sem app para instalar", "Entrega em até 7 dias úteis", "Sem contrato de fidelidade"].map((t) => (
-              <span key={t} className="flex items-center gap-1.5">
-                <CheckCircle className="h-3 w-3" /> {t}
+            {[t("hero.noApp"), t("hero.delivery"), t("hero.noContract")].map((item) => (
+              <span key={item} className="flex items-center gap-1.5">
+                <CheckCircle className="h-3 w-3" /> {item}
               </span>
             ))}
           </div>
@@ -223,15 +199,15 @@ export default function LandingPage() {
       <section id="demo" className="bg-[#F5F3F0] px-5 py-20">
         <div className="mx-auto max-w-5xl">
           <div className="text-center mb-10">
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-2">A transformação</p>
-            <h2 className="text-2xl font-semibold tracking-tight text-[#0D0D0D]">Do arquivo ao produto interativo em dias</h2>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-2">{t("transformation.label")}</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-[#0D0D0D]">{t("transformation.title")}</h2>
           </div>
 
           <div className="overflow-hidden rounded-[28px] border border-[#E5E0DA] bg-white shadow-sm">
             <div className="grid md:grid-cols-2 min-h-[340px]">
               {/* Left — input */}
               <div className="flex flex-col justify-center p-8 md:p-12 border-b md:border-b-0 md:border-r border-[#E5E0DA]">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-5">Você envia</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-5">{t("transformation.youSend")}</p>
                 <div className="space-y-3">
                   {[
                     { label: "Fotos do produto", ext: ".JPG", cls: "text-[#8B7355] bg-[#8B7355]/8 border-[#8B7355]/25" },
@@ -249,7 +225,7 @@ export default function LandingPage() {
 
               {/* Right — output */}
               <div className="flex flex-col justify-center p-8 md:p-12">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-5">A gente entrega</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-5">{t("transformation.weDeliver")}</p>
                 <div className="space-y-3">
                   {[
                     { icon: "🧊", label: "Modelo 3D interativo", desc: "Navegável no browser, sem app" },
@@ -272,7 +248,7 @@ export default function LandingPage() {
 
             <div className="border-t border-[#E5E0DA] bg-[#F8F7F5] px-8 py-4 flex items-center justify-between flex-wrap gap-3">
               <p className="text-xs text-[#A09890]">Do arquivo do cliente ao produto interativo em Realidade Aumentada</p>
-              <span className="text-xs font-semibold text-[#0D0D0D]">Prazo médio: 7 dias úteis</span>
+              <span className="text-xs font-semibold text-[#0D0D0D]">{t("transformation.avgTime")}</span>
             </div>
           </div>
         </div>
@@ -294,12 +270,12 @@ export default function LandingPage() {
       <section id="como-funciona" className="bg-[#F5F3F0] px-5 py-24">
         <div className="mx-auto max-w-5xl">
           <div className="text-center mb-14">
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">Como funciona</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">{t("howItWorks.label")}</p>
             <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">
-              Simples para você.<br className="hidden md:block" /> Impressionante para seu cliente.
+              {t("howItWorks.title")}
             </h2>
             <p className="mt-4 text-[#6B6760] max-w-lg mx-auto text-sm leading-7">
-              Você não precisa saber nada de 3D. É só enviar seus materiais — cuidamos de todo o resto.
+              {t("howItWorks.subtitle")}
             </p>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
@@ -325,8 +301,8 @@ export default function LandingPage() {
       <section id="beneficios" className="bg-white px-5 py-24">
         <div className="mx-auto max-w-6xl">
           <div className="text-center mb-14">
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">Por que a ArchTechTour</p>
-            <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">O que muda para a sua marca</h2>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">{t("benefits.label")}</p>
+            <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">{t("benefits.title")}</h2>
           </div>
           <div className="grid gap-5 sm:grid-cols-2">
             {BENEFITS.map((b) => (
@@ -348,17 +324,17 @@ export default function LandingPage() {
       <section className="bg-[#F5F3F0] px-5 py-24">
         <div className="mx-auto max-w-6xl">
           <div className="text-center mb-14">
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">Resultados reais</p>
-            <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">O que dizem nossos clientes</h2>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">{t("testimonials.label")}</p>
+            <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">{t("testimonials.title")}</h2>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
-            {TESTIMONIALS.map((t) => (
-              <div key={t.name} className="rounded-[20px] border border-[#E5E0DA] bg-white p-6 flex flex-col gap-4">
+            {TESTIMONIALS.map((item) => (
+              <div key={item.name} className="rounded-[20px] border border-[#E5E0DA] bg-white p-6 flex flex-col gap-4">
                 <Quote className="h-5 w-5 text-[#C0BBB4] flex-shrink-0" />
-                <p className="text-sm leading-7 text-[#3A3630] flex-1">&ldquo;{t.quote}&rdquo;</p>
+                <p className="text-sm leading-7 text-[#3A3630] flex-1">&ldquo;{item.quote}&rdquo;</p>
                 <div className="pt-2 border-t border-[#ECEAE6]">
-                  <p className="text-sm font-semibold text-[#0D0D0D]">{t.name}</p>
-                  <p className="text-xs text-[#A09890] mt-0.5">{t.role}</p>
+                  <p className="text-sm font-semibold text-[#0D0D0D]">{item.name}</p>
+                  <p className="text-xs text-[#A09890] mt-0.5">{item.role}</p>
                 </div>
               </div>
             ))}
@@ -370,7 +346,7 @@ export default function LandingPage() {
       <section id="clientes" className="border-y border-[#ECEAE6] bg-white px-5 py-16">
         <div className="mx-auto max-w-5xl text-center">
           <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-8">
-            Marcas que já estão no digital 3D
+            {t("clients.label")}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-2.5">
             {CLIENTS.map((name) => (
@@ -389,34 +365,42 @@ export default function LandingPage() {
       <section id="planos" className="bg-[#F5F3F0] px-5 py-24">
         <div className="mx-auto max-w-5xl">
           <div className="text-center mb-12">
-            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">Planos e preços</p>
-            <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">Comece hoje, sem vendedor</h2>
-            <p className="mt-4 text-sm text-[#6B6760]">Assine online, pague com Pix ou cartão e inicie o onboarding no mesmo dia.</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-3">{t("plans.label")}</p>
+            <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">{t("plans.title")}</h2>
+            <p className="mt-4 text-sm text-[#6B6760]">{t("plans.subtitle")}</p>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
             {[
               {
                 name: "Starter",
                 price: "R$ 1.990",
-                period: "/mês",
-                desc: "Ideal para marcas iniciando no digital 3D.",
-                features: ["10 produtos em 3D", "Portal de acompanhamento", "Aprovação online", "NF-e automática", "Suporte por e-mail"],
+                periodKey: "plans.perMonth" as const,
+                descKey: "plans.starter.desc" as const,
+                features: [
+                  "10 produtos em 3D",
+                  t("plans.f1"), t("plans.f2"), t("plans.f3"), t("plans.f4"),
+                ],
                 highlight: false,
               },
               {
                 name: "Pro",
                 price: "R$ 4.490",
-                period: "/mês",
-                desc: "Para catálogos médios com customizador de RA.",
-                features: ["50 produtos em 3D", "Customizador de RA", "Variações de acabamento", "Analytics avançado", "Suporte prioritário", "NF-e automática"],
+                periodKey: "plans.perMonth" as const,
+                descKey: "plans.pro.desc" as const,
+                features: [
+                  "50 produtos em 3D",
+                  t("plans.f5"), t("plans.f6"), t("plans.f7"), t("plans.f8"), t("plans.f3"),
+                ],
                 highlight: true,
               },
               {
                 name: "Enterprise",
-                price: "Sob consulta",
-                period: "",
-                desc: "Volume ilimitado com gerente dedicado.",
-                features: ["Produtos ilimitados", "Gerente de conta dedicado", "SLA garantido em contrato", "Integração personalizada", "Relatórios executivos", "NF-e e Invoice internacional"],
+                price: t("plans.underConsult"),
+                periodKey: null,
+                descKey: "plans.enterprise.desc" as const,
+                features: [
+                  t("plans.f14"), t("plans.f9"), t("plans.f10"), t("plans.f11"), t("plans.f12"), t("plans.f13"),
+                ],
                 highlight: false,
               },
             ].map((plan) => (
@@ -430,7 +414,7 @@ export default function LandingPage() {
               >
                 {plan.highlight && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-4 py-1 text-[10px] font-bold uppercase tracking-widest text-white/70">
-                    Mais popular
+                    {t("plans.popular")}
                   </div>
                 )}
                 <p className={`text-[10px] font-bold uppercase tracking-widest mb-3 ${plan.highlight ? "text-white/35" : "text-[#A09890]"}`}>
@@ -438,9 +422,9 @@ export default function LandingPage() {
                 </p>
                 <div className="flex items-baseline gap-1 mb-1">
                   <span className={`text-3xl font-semibold ${plan.highlight ? "text-white" : "text-[#0D0D0D]"}`}>{plan.price}</span>
-                  {plan.period && <span className={`text-sm ${plan.highlight ? "text-white/35" : "text-[#A09890]"}`}>{plan.period}</span>}
+                  {plan.periodKey && <span className={`text-sm ${plan.highlight ? "text-white/35" : "text-[#A09890]"}`}>{t(plan.periodKey)}</span>}
                 </div>
-                <p className={`text-xs mb-6 ${plan.highlight ? "text-white/35" : "text-[#A09890]"}`}>{plan.desc}</p>
+                <p className={`text-xs mb-6 ${plan.highlight ? "text-white/35" : "text-[#A09890]"}`}>{t(plan.descKey)}</p>
                 <ul className="space-y-2.5 mb-8 flex-1">
                   {plan.features.map((f) => (
                     <li key={f} className={`flex items-center gap-2 text-sm ${plan.highlight ? "text-white/70" : "text-[#3A3630]"}`}>
@@ -457,7 +441,7 @@ export default function LandingPage() {
                       : "border border-[#0D0D0D] text-[#0D0D0D] hover:bg-[#0D0D0D] hover:text-white"
                   }`}
                 >
-                  {plan.name === "Enterprise" ? "Falar com a equipe" : "Começar agora"}
+                  {plan.name === "Enterprise" ? t("plans.talkTeam") : t("plans.startNow")}
                 </Link>
               </div>
             ))}
@@ -478,27 +462,27 @@ export default function LandingPage() {
 
         <div className="relative mx-auto max-w-3xl text-center">
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-medium text-white/40">
-            <Star className="h-3 w-3 text-white/25" /> Primeiros blocos entregues em até 7 dias úteis
+            <Star className="h-3 w-3 text-white/25" /> {t("cta.badge")}
           </div>
           <h2 className="text-3xl font-semibold tracking-tight text-white md:text-5xl mb-5">
-            Pronto para levar seu catálogo ao{" "}
-            <span className="text-white/40">mundo digital 3D?</span>
+            {t("cta.title1")}{" "}
+            <span className="text-white/40">{t("cta.title2")}</span>
           </h2>
           <p className="text-white/35 mb-10 text-base max-w-lg mx-auto leading-7">
-            Escolha seu plano, assine em minutos e comece o onboarding hoje — sem vendedor, sem reunião obrigatória.
+            {t("cta.subtitle")}
           </p>
           <div className="flex flex-wrap items-center justify-center gap-3">
             <Link
               href="/planos"
               className="inline-flex items-center gap-2 rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-[#0D0D0D] hover:bg-neutral-100 transition"
             >
-              Ver planos <ArrowRight className="h-4 w-4" />
+              {t("cta.seePlans")} <ArrowRight className="h-4 w-4" />
             </Link>
             <a
               href="mailto:info@archtechtour.com"
               className="inline-flex items-center gap-2 rounded-full border border-white/12 bg-white/4 px-8 py-3.5 text-sm font-semibold text-white/60 hover:text-white hover:bg-white/8 transition"
             >
-              Falar com a equipe
+              {t("cta.talkTeam")}
             </a>
           </div>
         </div>
@@ -510,11 +494,11 @@ export default function LandingPage() {
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={LOGO_URL} alt="ArchTechTour" className="h-7 w-auto" />
-            <span className="text-xs text-white/20">· 3D & RA para marcas de design</span>
+            <span className="text-xs text-white/20">· {t("footer.tagline")}</span>
           </div>
           <div className="flex flex-wrap gap-6 text-xs text-white/25">
-            <a href="#" className="hover:text-white/50 transition">Termos de uso</a>
-            <a href="#" className="hover:text-white/50 transition">Privacidade</a>
+            <a href="#" className="hover:text-white/50 transition">{t("footer.terms")}</a>
+            <a href="#" className="hover:text-white/50 transition">{t("footer.privacy")}</a>
             <a href="mailto:info@archtechtour.com" className="hover:text-white/50 transition">info@archtechtour.com</a>
           </div>
         </div>

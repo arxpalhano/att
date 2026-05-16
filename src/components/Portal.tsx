@@ -1,5 +1,7 @@
 "use client";
 import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
+import { useT } from "@/lib/i18n";
+import LanguageSwitcher from "./LanguageSwitcher";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
   Globe, Search, Bell, LogOut, Menu, X, Plus, Upload, Clock,
@@ -3121,6 +3123,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
 // FASE 8 — ANALYTICS
 // ============================================================
 function AnalyticsPage({ user }: { user: SeedUser }) {
+  const t = useT();
   const isClient = user.role === "client";
   const [tab, setTab] = useState<"dashboard" | "manage">("dashboard");
 
@@ -3196,7 +3199,7 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
                 className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm outline-none focus:ring-2 focus:ring-cyan-500/30 cursor-pointer"
                 disabled={dimClients.length === 0}
               >
-                {dimClients.length === 0 && <option value="">Carregando…</option>}
+                {dimClients.length === 0 && <option value="">{t("portal.loading")}</option>}
                 {dimClients.map((c) => (
                   <option key={c.alias} value={c.alias}>{c.cliente}</option>
                 ))}
@@ -3216,8 +3219,46 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
       {clientAlias ? (
         <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />
       ) : (
-        <div className="flex items-center justify-center h-32 text-sm text-slate-400">Carregando clientes…</div>
+        <div className="flex items-center justify-center h-32 text-sm text-slate-400">{t("portal.loading")}</div>
       )}
+    </div>
+  );
+}
+
+// ─── Portal header actions (extracted to use hooks) ────────────────────────
+function PortalHeaderActions({
+  currentUser,
+  setCurrentUser,
+  setPage,
+}: {
+  currentUser: SeedUser;
+  setCurrentUser: (u: SeedUser | null) => void;
+  setPage: (p: string) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="flex items-center gap-3">
+      <div className="hidden items-center gap-3 rounded-full border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:flex">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-[11px] font-semibold text-white">
+          {currentUser.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2)}
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold text-slate-800">{currentUser.name}</p>
+          <p className="text-[11px] text-slate-500">{ROLE_LABELS[currentUser.role]}</p>
+        </div>
+      </div>
+      <LanguageSwitcher theme="light" />
+      <button className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm transition hover:text-slate-700">
+        <Bell className="h-[18px] w-[18px]" />
+        <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500" />
+      </button>
+      <button
+        onClick={() => { setCurrentUser(null); setPage("dashboard"); }}
+        className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/85 px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:text-rose-600"
+      >
+        <LogOut className="h-4 w-4" />
+        {t("portal.logout")}
+      </button>
     </div>
   );
 }
@@ -3307,25 +3348,7 @@ export default function Portal() {
                   <span className="text-slate-500">{todayLabel}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="hidden items-center gap-3 rounded-full border border-slate-200/80 bg-white/80 px-3 py-2 shadow-sm md:flex">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-[11px] font-semibold text-white">
-                    {currentUser.name.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                  </div>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-slate-800">{currentUser.name}</p>
-                    <p className="text-[11px] text-slate-500">{ROLE_LABELS[currentUser.role]}</p>
-                  </div>
-                </div>
-                <button className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm transition hover:text-slate-700">
-                  <Bell className="h-[18px] w-[18px]" />
-                  <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500" />
-                </button>
-                <button onClick={() => { setCurrentUser(null); setPage("dashboard"); }} className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/85 px-4 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition hover:border-rose-200 hover:text-rose-600">
-                  <LogOut className="h-4 w-4" />
-                  Sair
-                </button>
-              </div>
+              <PortalHeaderActions currentUser={currentUser} setCurrentUser={setCurrentUser} setPage={setPage} />
             </div>
           </header>
           <main className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-8">{renderPage()}</main>
