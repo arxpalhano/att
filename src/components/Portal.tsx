@@ -175,6 +175,7 @@ let USERS: SeedUser[] = [
   { id: "u10", email: "contato@wentz.com.br", password: "wentz@2025", name: "Wentz", role: "client", clientId: "c3", active: true },
   { id: "u11", email: "contato@minimaldesign.com.br", password: "minimal@2025", name: "Minimal Design", role: "client", clientId: "c4", active: true },
   { id: "u12", email: "contato@rsdesign.com.br", password: "rsdesign@2025", name: "RS Design", role: "client", clientId: "c5", active: true },
+  { id: "u13", email: "contato@wjluminarias.com.br", password: "wj@2025", name: "WJ Luminárias", role: "client", clientId: "c11", active: true },
 ];
 
 let CLIENTS: SeedClient[] = [
@@ -188,7 +189,7 @@ let CLIENTS: SeedClient[] = [
   { id: "c8", name: "Docol", code: "DOCOL", contactEmail: "contato@docol.com.br", active: true },
   { id: "c9", name: "Pedro Franco", code: "PF", contactEmail: "contato@pedrofranco.com.br", active: true },
   { id: "c10", name: "DEXCO", code: "DEXCO", contactEmail: "contato@dexco.com.br", active: true },
-  { id: "c11", name: "WJ Luminárias", code: "WJ", contactEmail: "contato@wjluminarias.com.br", active: true },
+  { id: "c11", name: "WJ Luminárias", code: "wj", contactEmail: "contato@wjluminarias.com.br", active: true },
   { id: "c12", name: "Christie", code: "CHRISTIE", contactEmail: "contato@christie.com.br", active: true },
   { id: "c13", name: "Cadeiras Rosa", code: "CADEIRASROSA", contactEmail: "contato@cadeirasrosa.com.br", active: true },
   { id: "c14", name: "Jader Almeida", code: "JADER", contactEmail: "contato@jaderalmeida.com", active: true },
@@ -199,6 +200,7 @@ let CONTRACTS: SeedContract[] = [
   { id: "ct1", clientId: "c1", title: "Contrato 2025 – Linha Completa", totalBlocks: 100, usedBlocks: 12, startDate: "2025-01-15", active: true },
   { id: "ct2", clientId: "c2", title: "Contrato Inicial – MVP", totalBlocks: 30, usedBlocks: 5, startDate: "2025-04-01", active: true },
   { id: "ct3", clientId: "c3", title: "Piloto Haus Concept", totalBlocks: 10, usedBlocks: 2, startDate: "2025-06-01", active: true },
+  { id: "ct8", clientId: "c11", title: "Contrato WJ Luminárias 2025 – Linha Completa", totalBlocks: 21, usedBlocks: 13, startDate: "2025-10-01", active: true },
 ];
 
 const INITIAL_BLOCKS: SeedBlock[] = [
@@ -227,9 +229,28 @@ const INITIAL_BLOCKS: SeedBlock[] = [
   { id: "pb19", clientId: "c4", contractId: "ct4", n: 3, sku: "MINIMAL-003", csku: "CABINE-BINE-P", title: "Cabine Bine Pequena", svc: "standard", status: "awaiting_client_files", pri: "normal", created: "2025-09-01" },
   // DEXCO
   { id: "pb20", clientId: "c10", contractId: "ct7", n: 1, sku: "DEXCO-001", csku: "PROD-VALIDACAO", title: "Produto Validação Dexco", svc: "standard", status: "draft", pri: "normal", created: "2026-03-02" },
-  // WJ LUMINÁRIAS
-  { id: "pb21", clientId: "c11", contractId: "ct8", n: 1, sku: "WJ-001", csku: "UMBRA", title: "Luminária Umbra", svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-06-15", published: "2025-12-10" },
-  { id: "pb22", clientId: "c11", contractId: "ct8", n: 2, sku: "WJ-002", csku: "PENDENTE-ARCO", title: "Pendente Arco", svc: "standard", status: "blocked", pri: "high", owner: "u4", created: "2025-08-01" },
+  // WJ LUMINÁRIAS — 13 entregues + 8 pendentes
+  { id: "pb21", clientId: "c11", contractId: "ct8", n: 1,  sku: "WJ-001", csku: "CUPULO",           title: "Cúpulo",             svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb22", clientId: "c11", contractId: "ct8", n: 2,  sku: "WJ-002", csku: "BASAL",             title: "Basal",              svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb23", clientId: "c11", contractId: "ct8", n: 3,  sku: "WJ-003", csku: "CORDEL",            title: "Cordel",             svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb24", clientId: "c11", contractId: "ct8", n: 4,  sku: "WJ-004", csku: "DOCE",              title: "Doce",               svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb25", clientId: "c11", contractId: "ct8", n: 5,  sku: "WJ-005", csku: "ENIGMA",            title: "Enigma",             svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb26", clientId: "c11", contractId: "ct8", n: 6,  sku: "WJ-006", csku: "FACIA",             title: "Facia",              svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb27", clientId: "c11", contractId: "ct8", n: 7,  sku: "WJ-007", csku: "IMPERIAL",          title: "Imperial",           svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb28", clientId: "c11", contractId: "ct8", n: 8,  sku: "WJ-008", csku: "MEGA-BASE-PEDRA",   title: "Mega Base Pedra",    svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb29", clientId: "c11", contractId: "ct8", n: 9,  sku: "WJ-009", csku: "ORI",               title: "Ori",                svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb30", clientId: "c11", contractId: "ct8", n: 10, sku: "WJ-010", csku: "SAMURAI-TETO",      title: "Samurai Teto",       svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb31", clientId: "c11", contractId: "ct8", n: 11, sku: "WJ-011", csku: "SAMURAI-PISO",      title: "Samurai Piso",       svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb32", clientId: "c11", contractId: "ct8", n: 12, sku: "WJ-012", csku: "VERTICE",           title: "Vértice",            svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-01" },
+  { id: "pb33", clientId: "c11", contractId: "ct8", n: 13, sku: "WJ-013", csku: "ENIGMA-VERTICAL",   title: "Enigma Vertical",    svc: "plus", status: "published", pri: "normal", owner: "u3", created: "2025-10-01", published: "2025-12-15" },
+  { id: "pb34", clientId: "c11", contractId: "ct8", n: 14, sku: "WJ-014", csku: "CANOVA-M",          title: "Canova M",           svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb35", clientId: "c11", contractId: "ct8", n: 15, sku: "WJ-015", csku: "DUNAS-LINEAR",      title: "Dunas Linear",       svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb36", clientId: "c11", contractId: "ct8", n: 16, sku: "WJ-016", csku: "ICE",               title: "Ice",                svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb37", clientId: "c11", contractId: "ct8", n: 17, sku: "WJ-017", csku: "MIDE",              title: "Mide",               svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb38", clientId: "c11", contractId: "ct8", n: 18, sku: "WJ-018", csku: "SOLITARIO",         title: "Solitário",          svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb39", clientId: "c11", contractId: "ct8", n: 19, sku: "WJ-019", csku: "UMBRA",             title: "Umbra",              svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb40", clientId: "c11", contractId: "ct8", n: 20, sku: "WJ-020", csku: "VELA",              title: "Vela",               svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2025-12-01" },
+  { id: "pb41", clientId: "c11", contractId: "ct8", n: 21, sku: "WJ-021", csku: "ELO-TETO",          title: "Elo Teto",           svc: "standard", status: "in_modeling", pri: "normal", owner: "u4", created: "2026-04-29" },
 ];
 
 const ASSETS: SeedAsset[] = [
@@ -285,7 +306,19 @@ const PUBLICATIONS: SeedPub[] = [
   { id: "pub5", blockId: "pb10", url: "https://explorar.archtechtour.com/estudio-bola/ver-8/banco-less/index.html", embed: '<iframe src="https://explorar.archtechtour.com/estudio-bola/ver-8/banco-less/index.html" width="100%" height="600"></iframe>', env: "production", v: 8 },
   { id: "pub6", blockId: "pb15", url: "https://explorar.archtechtour.com/wentz/ver-11/wentz-cadeira-capa/index.html", embed: '<iframe src="https://explorar.archtechtour.com/wentz/ver-11/wentz-cadeira-capa/index.html" width="100%" height="600"></iframe>', env: "production", v: 11 },
   { id: "pub7", blockId: "pb17", url: "https://explorar.archtechtour.com/minimal-design/ver-3/cabine-play-xp/index.html", embed: '<iframe src="https://explorar.archtechtour.com/minimal-design/ver-3/cabine-play-xp/index.html" width="100%" height="600"></iframe>', env: "production", v: 3 },
-  { id: "pub8", blockId: "pb21", url: "https://explorar.archtechtour.com/wj/ver-5/umbra/index.html", embed: '<iframe src="https://explorar.archtechtour.com/wj/ver-5/umbra/index.html" width="100%" height="600"></iframe>', env: "production", v: 5 },
+  { id: "pub8",  blockId: "pb21", url: "https://explorar.archtechtour.com/wj/ver-1/cupulo/index.html",                    embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-1/cupulo/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                    env: "production", v: 1 },
+  { id: "pub9",  blockId: "pb22", url: "https://explorar.archtechtour.com/wj/ver-2/basal-parede/index.html",                embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/basal-parede/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                env: "production", v: 2 },
+  { id: "pub10", blockId: "pb23", url: "https://explorar.archtechtour.com/wj/ver-2/cordel-parede/index.html",               embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/cordel-parede/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',               env: "production", v: 2 },
+  { id: "pub11", blockId: "pb24", url: "https://explorar.archtechtour.com/wj/ver-2/doce-parede/index.htm",                  embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/doce-parede/index.htm" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                  env: "production", v: 2 },
+  { id: "pub12", blockId: "pb25", url: "https://explorar.archtechtour.com/wj/ver-1/enigma/index.html",                      embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-1/enigma/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                      env: "production", v: 1 },
+  { id: "pub13", blockId: "pb26", url: "https://explorar.archtechtour.com/wj/ver-2/facia-teto/index.html",                  embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/facia-teto/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                  env: "production", v: 2 },
+  { id: "pub14", blockId: "pb27", url: "https://explorar.archtechtour.com/wj/ver-2/imperial-teto/index.html",               embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/imperial-teto/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',               env: "production", v: 2 },
+  { id: "pub15", blockId: "pb28", url: "https://explorar.archtechtour.com/wj/ver-2/mega-base-pedra-parede/index.html",      embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/mega-base-pedra-parede/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',      env: "production", v: 2 },
+  { id: "pub16", blockId: "pb29", url: "https://explorar.archtechtour.com/wj/ver-2/ori-piso/index.html",                    embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/ori-piso/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                    env: "production", v: 2 },
+  { id: "pub17", blockId: "pb30", url: "https://explorar.archtechtour.com/wj/ver-2/samurai-teto/index.html",                embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/samurai-teto/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                env: "production", v: 2 },
+  { id: "pub18", blockId: "pb31", url: "https://explorar.archtechtour.com/wj/ver-2/samurai-piso/index.html",                embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/samurai-piso/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                env: "production", v: 2 },
+  { id: "pub19", blockId: "pb32", url: "https://explorar.archtechtour.com/wj/ver-2/vertice-teto/index.html",                embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/vertice-teto/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',                env: "production", v: 2 },
+  { id: "pub20", blockId: "pb33", url: "https://explorar.archtechtour.com/wj/ver-2/enigma-vertical/index.html",             embed: '<iframe width="100%" height="640px" frameborder="0" src="https://explorar.archtechtour.com/wj/ver-2/enigma-vertical/index.html" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>',             env: "production", v: 2 },
 ];
 
 let BRANDS: Brand[] = [
