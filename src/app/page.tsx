@@ -359,7 +359,7 @@ export default function LandingPage() {
             <h2 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-4xl">{t("plans.title")}</h2>
             <p className="mt-4 text-sm text-[#6B6760]">{t("plans.subtitle")}</p>
           </div>
-          <div className="grid gap-5 md:grid-cols-3">
+          <div className="grid gap-5 md:grid-cols-3 pt-4">
             {[
               {
                 name: "Starter",
