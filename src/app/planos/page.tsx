@@ -3,67 +3,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CheckCircle, ArrowRight, ArrowLeft, Star } from "lucide-react";
+import { useT } from "@/lib/i18n";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
-const LOGO_URL = "https://www.archtechtour.com/wp-content/uploads/2025/09/logo-archtechtour-oficial.svg";
-
-const PLANS = [
-  {
-    id: "starter",
-    name: "Starter",
-    price: 1990,
-    period: "mês",
-    desc: "Para marcas iniciando no digital 3D.",
-    blocks: 10,
-    sla: "10 dias úteis/bloco",
-    highlight: false,
-    features: [
-      "10 blocos 3D por período",
-      "Upload de arquivos CAD/fotos",
-      "Portal de acompanhamento",
-      "Aprovação online dos blocos",
-      "Suporte por e-mail",
-      "NF-e automática",
-    ],
-  },
-  {
-    id: "pro",
-    name: "Pro",
-    price: 4490,
-    period: "mês",
-    desc: "Catálogo médio + customizador de RA.",
-    blocks: 50,
-    sla: "7 dias úteis/bloco",
-    highlight: true,
-    features: [
-      "50 blocos 3D por período",
-      "Customizador de Realidade Aumentada",
-      "Variações interativas de acabamento",
-      "Analytics avançado de downloads",
-      "Prioridade na fila de produção",
-      "Suporte prioritário (chat + e-mail)",
-      "NF-e automática",
-    ],
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    price: 0,
-    period: "",
-    desc: "Volume ilimitado com CSM dedicado.",
-    blocks: 999,
-    sla: "SLA negociado",
-    highlight: false,
-    features: [
-      "Blocos ilimitados",
-      "CSM dedicado",
-      "SLA garantido em contrato",
-      "Integração personalizada",
-      "Relatórios executivos mensais",
-      "Reuniões de alinhamento",
-      "NF-e e Invoice internacional",
-    ],
-  },
-];
+const LOGO_URL = "/logo.svg";
 
 const CURRENCIES = [
   { code: "BRL", symbol: "R$", flag: "🇧🇷", rate: 1 },
@@ -74,6 +17,7 @@ const CURRENCIES = [
 
 export default function PlanosPage() {
   const router = useRouter();
+  const t = useT();
   const [currency, setCurrency] = useState("BRL");
   const [billing, setBilling] = useState<"monthly" | "yearly">("monthly");
 
@@ -81,10 +25,69 @@ export default function PlanosPage() {
   const discount = billing === "yearly" ? 0.85 : 1;
 
   function formatPrice(price: number) {
-    if (price === 0) return "Sob consulta";
+    if (price === 0) return t("plans.customPrice");
     const converted = Math.round(price * discount * cur.rate);
     return `${cur.symbol} ${converted.toLocaleString()}`;
   }
+
+  const PLANS = [
+    {
+      id: "starter",
+      name: "Starter",
+      price: 1990,
+      period: "mês",
+      desc: "Para marcas iniciando no digital 3D.",
+      blocks: 10,
+      sla: "10 dias úteis/bloco",
+      highlight: false,
+      features: [
+        t("plans.starter.f1"),
+        t("plans.starter.f2"),
+        t("plans.starter.f3"),
+        t("plans.starter.f4"),
+        t("plans.starter.f5"),
+        t("plans.starter.f6"),
+      ],
+    },
+    {
+      id: "pro",
+      name: "Pro",
+      price: 4490,
+      period: "mês",
+      desc: "Catálogo médio + customizador de RA.",
+      blocks: 50,
+      sla: "7 dias úteis/bloco",
+      highlight: true,
+      features: [
+        t("plans.pro.f1"),
+        t("plans.pro.f2"),
+        t("plans.pro.f3"),
+        t("plans.pro.f4"),
+        t("plans.pro.f5"),
+        t("plans.pro.f6"),
+        t("plans.starter.f6"),
+      ],
+    },
+    {
+      id: "enterprise",
+      name: "Enterprise",
+      price: 0,
+      period: "",
+      desc: "Volume ilimitado com CSM dedicado.",
+      blocks: 999,
+      sla: "SLA negociado",
+      highlight: false,
+      features: [
+        t("plans.enterprise.f1"),
+        t("plans.enterprise.f2"),
+        t("plans.enterprise.f3"),
+        t("plans.enterprise.f4"),
+        t("plans.enterprise.f5"),
+        t("plans.enterprise.f6"),
+        t("plans.enterprise.f7"),
+      ],
+    },
+  ];
 
   function handleSelect(planId: string) {
     if (planId === "enterprise") {
@@ -100,7 +103,7 @@ export default function PlanosPage() {
       <nav className="border-b border-[#ECEAE6] bg-white/95 backdrop-blur-xl sticky top-0 z-50">
         <div className="mx-auto flex max-w-7xl items-center gap-4 px-5 py-3">
           <Link href="/" className="flex items-center gap-1.5 text-sm text-[#6B6760] hover:text-[#0D0D0D] transition">
-            <ArrowLeft className="h-4 w-4" /> Voltar
+            <ArrowLeft className="h-4 w-4" /> {t("back")}
           </Link>
           <div className="flex-1 flex items-center justify-center">
             <Link href="/">
@@ -108,7 +111,8 @@ export default function PlanosPage() {
               <img src={LOGO_URL} alt="ArchTechTour" className="h-8 w-auto" />
             </Link>
           </div>
-          <Link href="/portal" className="text-sm text-[#6B6760] hover:text-[#0D0D0D] transition">Entrar</Link>
+          <LanguageSwitcher theme="light" />
+          <Link href="/portal" className="text-sm text-[#6B6760] hover:text-[#0D0D0D] transition">{t("login")}</Link>
         </div>
       </nav>
 
@@ -116,13 +120,13 @@ export default function PlanosPage() {
         {/* HEADER */}
         <div className="text-center mb-12">
           <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-[#E5E0DA] bg-white px-4 py-2 text-xs font-medium text-[#6B6760]">
-            <Star className="h-3 w-3 text-[#A09890]" /> Fase 2 · Escolha seu plano
+            <Star className="h-3 w-3 text-[#A09890]" /> {t("plans.page.badge")}
           </div>
           <h1 className="text-3xl font-semibold tracking-tight text-[#0D0D0D] md:text-5xl mb-4">
-            Simples, transparente, sem surpresas
+            {t("plans.page.title")}
           </h1>
           <p className="text-[#6B6760] max-w-xl mx-auto text-sm">
-            Sem vendedor. Escolha, pague e inicie o onboarding hoje.
+            {t("plans.page.subtitle")}
           </p>
         </div>
 
@@ -135,14 +139,14 @@ export default function PlanosPage() {
               onClick={() => setBilling("monthly")}
               className={`rounded-full px-5 py-2 text-sm font-semibold transition-all ${billing === "monthly" ? "bg-[#0D0D0D] text-white shadow-sm" : "text-[#6B6760] hover:text-[#0D0D0D]"}`}
             >
-              Mensal
+              {t("plans.monthly")}
             </button>
             <button
               type="button"
               onClick={() => setBilling("yearly")}
               className={`rounded-full px-5 py-2 text-sm font-semibold transition-all flex items-center gap-1.5 ${billing === "yearly" ? "bg-[#0D0D0D] text-white shadow-sm" : "text-[#6B6760] hover:text-[#0D0D0D]"}`}
             >
-              Anual
+              {t("plans.yearly")}
               <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${billing === "yearly" ? "bg-white/20 text-white" : "bg-[#0D0D0D]/8 text-[#0D0D0D]"}`}>
                 −15%
               </span>
@@ -177,7 +181,7 @@ export default function PlanosPage() {
             >
               {plan.highlight && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-4 py-1 text-[10px] font-bold uppercase tracking-widest text-white/70">
-                  Mais popular
+                  {t("plans.mostPopular")}
                 </div>
               )}
 
@@ -190,7 +194,7 @@ export default function PlanosPage() {
                 </div>
                 {billing === "yearly" && plan.price > 0 && (
                   <p className={`text-xs mb-1 ${plan.highlight ? "text-white/50" : "text-[#6B6760]"}`}>
-                    Economiza {formatPrice(Math.round(plan.price * 0.15))}/mês no plano anual
+                    {t("plans.saveYearly").replace("{amount}", formatPrice(Math.round(plan.price * 0.15)))}
                   </p>
                 )}
                 <p className={`text-sm mt-2 ${plan.highlight ? "text-white/50" : "text-[#6B6760]"}`}>{plan.desc}</p>
@@ -199,10 +203,10 @@ export default function PlanosPage() {
               {/* SLA + Blocks */}
               <div className={`mb-5 rounded-xl border px-4 py-3 space-y-1 ${plan.highlight ? "border-white/10 bg-white/5" : "border-[#ECEAE6] bg-[#F8F7F5]"}`}>
                 <p className={`text-xs ${plan.highlight ? "text-white/40" : "text-[#A09890]"}`}>
-                  Blocos: <span className={`font-semibold ${plan.highlight ? "text-white" : "text-[#0D0D0D]"}`}>{plan.blocks === 999 ? "Ilimitados" : plan.blocks}</span>
+                  {t("plans.blocks")}: <span className={`font-semibold ${plan.highlight ? "text-white" : "text-[#0D0D0D]"}`}>{plan.blocks === 999 ? t("plans.unlimited") : plan.blocks}</span>
                 </p>
                 <p className={`text-xs ${plan.highlight ? "text-white/40" : "text-[#A09890]"}`}>
-                  SLA: <span className={`font-semibold ${plan.highlight ? "text-white" : "text-[#0D0D0D]"}`}>{plan.sla}</span>
+                  {t("plans.sla")}: <span className={`font-semibold ${plan.highlight ? "text-white" : "text-[#0D0D0D]"}`}>{plan.sla}</span>
                 </p>
               </div>
 
@@ -225,7 +229,7 @@ export default function PlanosPage() {
                     : "border border-[#0D0D0D] text-[#0D0D0D] hover:bg-[#0D0D0D] hover:text-white"
                 }`}
               >
-                {plan.id === "enterprise" ? "Falar com a equipe" : "Escolher este plano"}
+                {plan.id === "enterprise" ? t("plans.talkTeam2") : t("plans.choosePlan")}
                 <ArrowRight className="h-4 w-4" />
               </button>
             </div>
@@ -234,13 +238,13 @@ export default function PlanosPage() {
 
         {/* COMPARISON TABLE */}
         <div className="mb-12">
-          <p className="text-center text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-6">Comparativo completo</p>
+          <p className="text-center text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-6">{t("plans.comparison")}</p>
           <div className="overflow-hidden rounded-[20px] border border-[#E5E0DA] bg-white">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-[#ECEAE6]">
-                    <th className="px-5 py-4 text-left text-xs font-semibold text-[#A09890] min-w-[160px]">Recurso</th>
+                    <th className="px-5 py-4 text-left text-xs font-semibold text-[#A09890] min-w-[160px]">{t("plans.feature.resource")}</th>
                     {PLANS.map((p) => (
                       <th key={p.id} className="px-5 py-4 text-center text-xs font-semibold text-[#3A3630]">{p.name}</th>
                     ))}
@@ -248,13 +252,13 @@ export default function PlanosPage() {
                 </thead>
                 <tbody>
                   {[
-                    ["Blocos 3D", "10", "50", "Ilimitado"],
-                    ["Customizador RA", "—", "✓", "✓"],
-                    ["Analytics", "Básico", "Avançado", "Executivo"],
-                    ["Prioridade na fila", "Normal", "Alta", "Dedicada"],
-                    ["Suporte", "E-mail", "Chat + e-mail", "CSM dedicado"],
-                    ["Reuniões de alinhamento", "—", "—", "✓"],
-                    ["NF-e / Invoice", "NF-e", "NF-e", "NF-e + Invoice"],
+                    [t("plans.feature.blocks3d"), "10", "50", t("plans.unlimited")],
+                    [t("plans.feature.arCustomizer"), "—", "✓", "✓"],
+                    [t("plans.feature.analytics"), "Básico", "Avançado", "Executivo"],
+                    [t("plans.feature.priority"), "Normal", "Alta", "Dedicada"],
+                    [t("plans.feature.support"), "E-mail", "Chat + e-mail", "CSM dedicado"],
+                    [t("plans.feature.meetings"), "—", "—", "✓"],
+                    [t("plans.feature.invoice"), "NF-e", "NF-e", "NF-e + Invoice"],
                   ].map(([feature, ...vals]) => (
                     <tr key={feature} className="border-b border-[#ECEAE6] last:border-0 hover:bg-[#F8F7F5] transition">
                       <td className="px-5 py-3.5 text-[#6B6760]">{feature}</td>
@@ -273,12 +277,12 @@ export default function PlanosPage() {
 
         {/* FAQ */}
         <div className="max-w-2xl mx-auto space-y-3">
-          <p className="text-center text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-6">Perguntas frequentes</p>
+          <p className="text-center text-[10px] font-bold uppercase tracking-[0.3em] text-[#A09890] mb-6">{t("plans.faq")}</p>
           {[
-            { q: "Posso cancelar a qualquer momento?", a: "Sim. Cancele pelo portal com 30 dias de antecedência. Sem multa." },
-            { q: "Como funciona o pagamento?", a: "Cartão de crédito, Pix ou wire transfer. Cobrança automática mensal ou anual via Stripe." },
-            { q: "A NF-e é emitida automaticamente?", a: "Sim. A NF-e é emitida automaticamente após cada cobrança confirmada e enviada por e-mail." },
-            { q: "Posso mudar de plano depois?", a: "Sim. Upgrade ou downgrade a qualquer momento pelo portal, com ajuste proporcional." },
+            { q: t("plans.faq.q1"), a: t("plans.faq.a1") },
+            { q: t("plans.faq.q2"), a: t("plans.faq.a2") },
+            { q: t("plans.faq.q3"), a: t("plans.faq.a3") },
+            { q: t("plans.faq.q4"), a: t("plans.faq.a4") },
           ].map(({ q, a }) => (
             <div key={q} className="rounded-[16px] border border-[#E5E0DA] bg-white px-5 py-4">
               <p className="text-sm font-semibold text-[#0D0D0D] mb-1">{q}</p>

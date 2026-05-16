@@ -3,8 +3,10 @@ import { useState, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle, FileText, CreditCard, Receipt, ArrowRight, Lock, AlertTriangle, Building2, User } from "lucide-react";
+import { useT } from "@/lib/i18n";
+import LanguageSwitcher from "@/components/LanguageSwitcher";
 
-const LOGO_URL = "https://www.archtechtour.com/wp-content/uploads/2025/09/logo-archtechtour-oficial.svg";
+const LOGO_URL = "/logo.svg";
 
 const PLAN_NAMES: Record<string, string> = { starter: "Starter", pro: "Pro", enterprise: "Enterprise" };
 const PLAN_PRICES: Record<string, number> = { starter: 1990, pro: 4490, enterprise: 0 };
@@ -39,6 +41,7 @@ function formatPhone(value: string) {
 
 function ContratoContent() {
   const router = useRouter();
+  const t = useT();
   const params = useSearchParams();
   const plan = params.get("plan") || "starter";
   const billing = params.get("billing") || "monthly";
@@ -68,14 +71,14 @@ function ContratoContent() {
 
   function validateCadastro(): boolean {
     const errors: Partial<CadastroForm> = {};
-    if (!cadastro.razaoSocial.trim()) errors.razaoSocial = "Campo obrigatório";
-    if (!cadastro.cnpj || cadastro.cnpj.replace(/\D/g, "").length < 14) errors.cnpj = "CNPJ inválido";
-    if (!cadastro.responsavel.trim()) errors.responsavel = "Campo obrigatório";
-    if (!cadastro.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cadastro.email)) errors.email = "E-mail inválido";
-    if (!cadastro.telefone || cadastro.telefone.replace(/\D/g, "").length < 10) errors.telefone = "Telefone inválido";
-    if (!cadastro.endereco.trim()) errors.endereco = "Campo obrigatório";
-    if (!cadastro.senha || cadastro.senha.length < 8) errors.senha = "Mínimo 8 caracteres";
-    if (cadastro.senha !== cadastro.confirmarSenha) errors.confirmarSenha = "As senhas não coincidem";
+    if (!cadastro.razaoSocial.trim()) errors.razaoSocial = t("contract.error.required");
+    if (!cadastro.cnpj || cadastro.cnpj.replace(/\D/g, "").length < 14) errors.cnpj = t("contract.error.cnpj");
+    if (!cadastro.responsavel.trim()) errors.responsavel = t("contract.error.required");
+    if (!cadastro.email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cadastro.email)) errors.email = t("contract.error.email");
+    if (!cadastro.telefone || cadastro.telefone.replace(/\D/g, "").length < 10) errors.telefone = t("contract.error.phone");
+    if (!cadastro.endereco.trim()) errors.endereco = t("contract.error.required");
+    if (!cadastro.senha || cadastro.senha.length < 8) errors.senha = t("contract.error.password");
+    if (cadastro.senha !== cadastro.confirmarSenha) errors.confirmarSenha = t("contract.error.passwordMatch");
     setCadastroErrors(errors);
     return Object.keys(errors).length === 0;
   }
@@ -93,7 +96,7 @@ function ContratoContent() {
 
   function handlePay() {
     if (payForm.method === "card" && (!payForm.name || !payForm.card || !payForm.expiry || !payForm.cvv)) {
-      setPayError("Preencha todos os campos do cartão.");
+      setPayError(t("contract.error.fillCard"));
       return;
     }
     setPayError("");
@@ -123,10 +126,10 @@ function ContratoContent() {
   }
 
   const STEPS = [
-    { id: "cadastro", label: "Cadastro", icon: User },
-    { id: "contract", label: "Contrato", icon: FileText },
-    { id: "payment", label: "Pagamento", icon: CreditCard },
-    { id: "nf", label: "NF-e / Invoice", icon: Receipt },
+    { id: "cadastro", label: t("contract.step.register"), icon: User },
+    { id: "contract", label: t("contract.step.contract"), icon: FileText },
+    { id: "payment", label: t("contract.step.payment"), icon: CreditCard },
+    { id: "nf", label: t("contract.step.invoice"), icon: Receipt },
   ];
 
   const stepIndex = STEPS.findIndex((s) => s.id === step);
@@ -141,7 +144,7 @@ function ContratoContent() {
       <nav className="border-b border-[#ECEAE6] bg-white/95 backdrop-blur-xl sticky top-0 z-50">
         <div className="mx-auto flex max-w-5xl items-center gap-4 px-5 py-3">
           <Link href="/planos" className="flex items-center gap-1.5 text-[#6B6760] hover:text-[#0D0D0D] transition text-sm">
-            <ArrowLeft className="h-4 w-4" /> Planos
+            <ArrowLeft className="h-4 w-4" /> {t("nav.plans")}
           </Link>
           <div className="flex-1 flex items-center justify-center">
             <Link href="/">
@@ -149,8 +152,9 @@ function ContratoContent() {
               <img src={LOGO_URL} alt="ArchTechTour" className="h-8 w-auto" />
             </Link>
           </div>
+          <LanguageSwitcher theme="light" />
           <div className="flex items-center gap-1.5 text-xs text-[#A09890]">
-            <Lock className="h-3.5 w-3.5" /> Conexão segura
+            <Lock className="h-3.5 w-3.5" /> {t("secure")}
           </div>
         </div>
       </nav>
@@ -159,7 +163,7 @@ function ContratoContent() {
         {/* PHASE LABEL */}
         <div className="text-center mb-8">
           <span className="inline-flex items-center gap-2 rounded-full border border-[#E5E0DA] bg-white px-4 py-2 text-xs font-medium text-[#6B6760]">
-            <Receipt className="h-3.5 w-3.5 text-[#A09890]" /> Fase 3 · Cadastro, contrato digital e pagamento
+            <Receipt className="h-3.5 w-3.5 text-[#A09890]" /> {t("contract.badge")}
           </span>
         </div>
 
@@ -185,21 +189,21 @@ function ContratoContent() {
                   <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0D0D0D]">
                     <Building2 className="h-4 w-4 text-white" />
                   </div>
-                  <h2 className="text-xl font-semibold text-[#0D0D0D]">Dados da empresa</h2>
+                  <h2 className="text-xl font-semibold text-[#0D0D0D]">{t("contract.company.title")}</h2>
                 </div>
                 <p className="text-sm text-[#6B6760] mb-7">
-                  Preencha os dados para personalizar seu contrato e criar seu acesso ao portal. O e-mail será seu login.
+                  {t("contract.company.subtitle")}
                 </p>
 
                 <div className="space-y-5">
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Razão Social *</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.company")}</label>
                       <input value={cadastro.razaoSocial} onChange={(e) => setCadastro({ ...cadastro, razaoSocial: e.target.value })} placeholder="Empresa Exemplo LTDA" className={inputClass(cadastroErrors.razaoSocial)} />
                       {cadastroErrors.razaoSocial && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.razaoSocial}</p>}
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">CNPJ *</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.cnpj")}</label>
                       <input value={cadastro.cnpj} onChange={(e) => setCadastro({ ...cadastro, cnpj: formatCNPJ(e.target.value) })} placeholder="00.000.000/0001-00" className={inputClass(cadastroErrors.cnpj) + " font-mono"} />
                       {cadastroErrors.cnpj && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.cnpj}</p>}
                     </div>
@@ -207,37 +211,37 @@ function ContratoContent() {
 
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Nome do responsável *</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.responsible")}</label>
                       <input value={cadastro.responsavel} onChange={(e) => setCadastro({ ...cadastro, responsavel: e.target.value })} placeholder="João da Silva" className={inputClass(cadastroErrors.responsavel)} />
                       {cadastroErrors.responsavel && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.responsavel}</p>}
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Telefone / WhatsApp *</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.phone")}</label>
                       <input value={cadastro.telefone} onChange={(e) => setCadastro({ ...cadastro, telefone: formatPhone(e.target.value) })} placeholder="(11) 99999-9999" className={inputClass(cadastroErrors.telefone)} />
                       {cadastroErrors.telefone && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.telefone}</p>}
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">E-mail (será seu login no portal) *</label>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.email")}</label>
                     <input type="email" value={cadastro.email} onChange={(e) => setCadastro({ ...cadastro, email: e.target.value })} placeholder="contato@suaempresa.com.br" className={inputClass(cadastroErrors.email)} />
                     {cadastroErrors.email && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.email}</p>}
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Endereço completo *</label>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.address")}</label>
                     <input value={cadastro.endereco} onChange={(e) => setCadastro({ ...cadastro, endereco: e.target.value })} placeholder="Rua Exemplo, 123 — São Paulo/SP — CEP 00000-000" className={inputClass(cadastroErrors.endereco)} />
                     {cadastroErrors.endereco && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.endereco}</p>}
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Senha do portal *</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.password")}</label>
                       <input type="password" value={cadastro.senha} onChange={(e) => setCadastro({ ...cadastro, senha: e.target.value })} placeholder="Mínimo 8 caracteres" className={inputClass(cadastroErrors.senha)} />
                       {cadastroErrors.senha && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.senha}</p>}
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Confirmar senha *</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.field.confirmPassword")}</label>
                       <input type="password" value={cadastro.confirmarSenha} onChange={(e) => setCadastro({ ...cadastro, confirmarSenha: e.target.value })} placeholder="Repita a senha" className={inputClass(cadastroErrors.confirmarSenha)} />
                       {cadastroErrors.confirmarSenha && <p className="mt-1 text-xs text-rose-500">{cadastroErrors.confirmarSenha}</p>}
                     </div>
@@ -246,7 +250,7 @@ function ContratoContent() {
 
                 <div className="flex items-start gap-2 rounded-xl border border-[#ECEAE6] bg-[#F8F7F5] px-4 py-3 mt-6">
                   <Lock className="h-3.5 w-3.5 text-[#A09890] flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-[#6B6760]">Seus dados são criptografados e nunca serão compartilhados com terceiros. O e-mail e senha informados serão usados para acessar seu portal ArchTechTour.</p>
+                  <p className="text-xs text-[#6B6760]">{t("contract.privacy")}</p>
                 </div>
 
                 <button
@@ -256,9 +260,9 @@ function ContratoContent() {
                   className="mt-6 w-full flex items-center justify-center gap-2 rounded-xl bg-[#0D0D0D] py-3.5 text-sm font-semibold text-white hover:bg-[#2A2A2A] transition disabled:opacity-50"
                 >
                   {cadastroLoading ? (
-                    <><div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> Salvando dados...</>
+                    <><div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> {t("contract.saving")}</>
                   ) : (
-                    <>Continuar para o contrato <ArrowRight className="h-4 w-4" /></>
+                    <>{t("contract.continueToContract")} <ArrowRight className="h-4 w-4" /></>
                   )}
                 </button>
               </div>
@@ -267,10 +271,10 @@ function ContratoContent() {
             {/* STEP 1 — CONTRACT */}
             {step === "contract" && (
               <div className="rounded-[24px] border border-[#E5E0DA] bg-white p-6 md:p-8">
-                <h2 className="text-xl font-semibold text-[#0D0D0D] mb-2">Assinatura digital do contrato</h2>
-                <p className="text-sm text-[#6B6760] mb-6">Leia os termos abaixo e assine digitalmente para continuar. Nenhuma intervenção humana necessária.</p>
+                <h2 className="text-xl font-semibold text-[#0D0D0D] mb-2">{t("contract.sign.title")}</h2>
+                <p className="text-sm text-[#6B6760] mb-6">{t("contract.sign.subtitle")}</p>
 
-                {/* Contract text — kept dark for readability */}
+                {/* Contract text — kept in Portuguese as legal document */}
                 <div className="rounded-2xl bg-[#0D0D0D] p-6 h-72 overflow-y-auto text-xs text-white/50 leading-6 mb-6 space-y-3">
                   <p className="font-bold text-white/80 text-sm text-center">CONTRATO DE PRESTAÇÃO DE SERVIÇOS PARA FORNECIMENTO DE PRODUTOS EM AMBIENTE VIRTUAL</p>
 
@@ -313,9 +317,9 @@ function ContratoContent() {
                 {!signed ? (
                   <button onClick={handleSign} disabled={signing} className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0D0D0D] py-3.5 text-sm font-semibold text-white hover:bg-[#2A2A2A] transition disabled:opacity-50">
                     {signing ? (
-                      <><div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> Processando assinatura...</>
+                      <><div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> {t("contract.sign.processing")}</>
                     ) : (
-                      <><FileText className="h-4 w-4" /> Assinar digitalmente com DocuSign</>
+                      <><FileText className="h-4 w-4" /> {t("contract.sign.btn")}</>
                     )}
                   </button>
                 ) : (
@@ -323,12 +327,12 @@ function ContratoContent() {
                     <div className="flex items-center gap-3 rounded-xl border border-[#C0BBB4] bg-[#F8F7F5] p-4">
                       <CheckCircle className="h-5 w-5 text-[#0D0D0D] flex-shrink-0" />
                       <div>
-                        <p className="text-sm font-semibold text-[#0D0D0D]">Contrato assinado com sucesso</p>
+                        <p className="text-sm font-semibold text-[#0D0D0D]">{t("contract.sign.done")}</p>
                         <p className="text-xs text-[#6B6760] mt-0.5">ID: {`ATT-${Date.now().toString(36).toUpperCase()}`} · {new Date().toLocaleString("pt-BR")}</p>
                       </div>
                     </div>
                     <button onClick={() => setStep("payment")} className="w-full flex items-center justify-center gap-2 rounded-xl bg-[#0D0D0D] py-3.5 text-sm font-semibold text-white hover:bg-[#2A2A2A] transition">
-                      Continuar para pagamento <ArrowRight className="h-4 w-4" />
+                      {t("contract.continueToPayment")} <ArrowRight className="h-4 w-4" />
                     </button>
                   </div>
                 )}
@@ -338,12 +342,12 @@ function ContratoContent() {
             {/* STEP 2 — PAYMENT */}
             {step === "payment" && (
               <div className="rounded-[24px] border border-[#E5E0DA] bg-white p-6 md:p-8">
-                <h2 className="text-xl font-semibold text-[#0D0D0D] mb-2">Pagamento</h2>
-                <p className="text-sm text-[#6B6760] mb-6">Escolha a forma de pagamento. Processado via Stripe — seus dados são protegidos.</p>
+                <h2 className="text-xl font-semibold text-[#0D0D0D] mb-2">{t("contract.payment.title")}</h2>
+                <p className="text-sm text-[#6B6760] mb-6">{t("contract.payment.subtitle")}</p>
 
                 <div className="flex gap-2 mb-6">
                   {[
-                    { id: "card", label: "Cartão de crédito" },
+                    { id: "card", label: t("contract.payment.card") },
                     { id: "pix", label: "PIX" },
                     { id: "wire", label: "Wire Transfer" },
                   ].map((m) => (
@@ -356,16 +360,16 @@ function ContratoContent() {
                 {payForm.method === "card" && (
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Nome no cartão</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.payment.nameOnCard")}</label>
                       <input value={payForm.name} onChange={(e) => setPayForm({ ...payForm, name: e.target.value })} placeholder="NOME SOBRENOME" className={inputClass()} />
                     </div>
                     <div>
-                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Número do cartão</label>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.payment.cardNumber")}</label>
                       <input value={payForm.card} onChange={(e) => setPayForm({ ...payForm, card: e.target.value.replace(/\D/g, "").slice(0, 16).replace(/(\d{4})/g, "$1 ").trim() })} placeholder="0000 0000 0000 0000" className={inputClass() + " font-mono"} />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">Validade</label>
+                        <label className="block text-xs font-semibold uppercase tracking-wider text-[#A09890] mb-1.5">{t("contract.payment.expiry")}</label>
                         <input value={payForm.expiry} onChange={(e) => setPayForm({ ...payForm, expiry: e.target.value })} placeholder="MM/AA" className={inputClass()} />
                       </div>
                       <div>
@@ -420,14 +424,14 @@ function ContratoContent() {
 
                 <button onClick={handlePay} disabled={paying} className="mt-6 w-full flex items-center justify-center gap-2 rounded-xl bg-[#0D0D0D] py-3.5 text-sm font-semibold text-white hover:bg-[#2A2A2A] transition disabled:opacity-50">
                   {paying ? (
-                    <><div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> Processando pagamento...</>
+                    <><div className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" /> {t("contract.payment.processing")}</>
                   ) : (
-                    <><Lock className="h-4 w-4" /> {payForm.method === "pix" ? "Confirmar pagamento PIX" : payForm.method === "wire" ? "Confirmar transferência" : "Pagar agora"}</>
+                    <><Lock className="h-4 w-4" /> {payForm.method === "pix" ? t("contract.payment.confirmPix") : payForm.method === "wire" ? t("contract.payment.confirmWire") : t("contract.payment.payNow")}</>
                   )}
                 </button>
 
                 <div className="mt-4 flex items-center justify-center gap-2 text-xs text-[#A09890]">
-                  <Lock className="h-3 w-3" /> Pagamento processado por Stripe · SSL 256-bit
+                  <Lock className="h-3 w-3" /> {t("contract.payment.stripe")}
                 </div>
               </div>
             )}
@@ -438,8 +442,8 @@ function ContratoContent() {
                 {nfStatus === "generating" ? (
                   <div className="space-y-4">
                     <div className="mx-auto h-16 w-16 rounded-full border-4 border-[#E5E0DA] border-t-[#0D0D0D] animate-spin" />
-                    <h2 className="text-xl font-semibold text-[#0D0D0D]">Emitindo NF-e...</h2>
-                    <p className="text-sm text-[#6B6760]">Seu pagamento foi confirmado. Estamos emitindo a NF-e automaticamente junto à SEFAZ e criando seu acesso ao portal.</p>
+                    <h2 className="text-xl font-semibold text-[#0D0D0D]">{t("contract.nf.generating")}</h2>
+                    <p className="text-sm text-[#6B6760]">{t("contract.nf.generatingDesc")}</p>
                   </div>
                 ) : (
                   <div className="space-y-6">
@@ -449,16 +453,16 @@ function ContratoContent() {
                       </div>
                     </div>
                     <div>
-                      <h2 className="text-2xl font-semibold text-[#0D0D0D] mb-2">Tudo pronto!</h2>
-                      <p className="text-[#6B6760] text-sm">Cadastro realizado · Contrato assinado · Pagamento confirmado · NF-e emitida</p>
+                      <h2 className="text-2xl font-semibold text-[#0D0D0D] mb-2">{t("contract.nf.done")}</h2>
+                      <p className="text-[#6B6760] text-sm">{t("contract.nf.doneDesc")}</p>
                     </div>
 
                     <div className="rounded-xl border border-[#E5E0DA] bg-[#F8F7F5] p-5 text-left space-y-2">
                       {[
-                        ["Empresa", cadastro.razaoSocial],
+                        [t("contract.summary.company"), cadastro.razaoSocial],
                         ["CNPJ", cadastro.cnpj],
-                        ["Plano contratado", planName],
-                        ["Valor", `R$ ${finalPrice.toLocaleString("pt-BR")}/${billing === "monthly" ? "mês" : "ano"}`],
+                        [t("contract.summary.plan"), planName],
+                        ["Valor", `R$ ${finalPrice.toLocaleString("pt-BR")}/${billing === "monthly" ? t("contract.summary.monthly") : t("contract.summary.yearly")}`],
                         ["NF-e", `ATT-NF-${Date.now().toString(36).toUpperCase()}`],
                         ["Próxima cobrança", new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("pt-BR")],
                       ].map(([label, value]) => (
@@ -470,17 +474,17 @@ function ContratoContent() {
                     </div>
 
                     <div className="rounded-xl border border-[#E5E0DA] bg-[#0D0D0D] p-5 text-left space-y-3">
-                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/50">Suas credenciais de acesso ao portal</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/50">{t("contract.credentials")}</p>
                       <div className="flex justify-between text-sm">
-                        <span className="text-white/40">Login (e-mail)</span>
+                        <span className="text-white/40">{t("contract.credEmail")}</span>
                         <span className="font-semibold text-white font-mono">{cadastro.email}</span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span className="text-white/40">Senha</span>
+                        <span className="text-white/40">{t("contract.credPassword")}</span>
                         <span className="font-semibold text-white font-mono">{"•".repeat(cadastro.senha.length)}</span>
                       </div>
                       <p className="text-xs text-white/30 pt-1">
-                        As credenciais e a NF-e foram enviadas para <span className="text-white/60">{cadastro.email}</span>. Guarde bem sua senha.
+                        {t("contract.credNote").replace("{email}", cadastro.email)}
                       </p>
                     </div>
 
@@ -488,7 +492,7 @@ function ContratoContent() {
                       href="/portal"
                       className="inline-flex items-center gap-2 rounded-xl bg-[#0D0D0D] px-8 py-3.5 text-sm font-semibold text-white hover:bg-[#2A2A2A] transition"
                     >
-                      Acessar o portal e iniciar onboarding <ArrowRight className="h-4 w-4" />
+                      {t("contract.goPortal")} <ArrowRight className="h-4 w-4" />
                     </Link>
                   </div>
                 )}
@@ -499,45 +503,45 @@ function ContratoContent() {
           {/* SIDEBAR — ORDER SUMMARY */}
           <div className="space-y-4">
             <div className="rounded-[20px] border border-[#E5E0DA] bg-white p-5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-4">Resumo do pedido</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-4">{t("contract.summary.title")}</p>
               <div className="space-y-3">
                 {cadastro.razaoSocial && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-[#6B6760]">Empresa</span>
+                    <span className="text-[#6B6760]">{t("contract.summary.company")}</span>
                     <span className="font-semibold text-[#0D0D0D] truncate max-w-[140px] text-right">{cadastro.razaoSocial}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-sm">
-                  <span className="text-[#6B6760]">Plano</span>
+                  <span className="text-[#6B6760]">{t("contract.summary.plan")}</span>
                   <span className="font-semibold text-[#0D0D0D]">{planName}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="text-[#6B6760]">Cobrança</span>
-                  <span className="font-semibold text-[#0D0D0D]">{billing === "monthly" ? "Mensal" : "Anual"}</span>
+                  <span className="text-[#6B6760]">{t("contract.summary.billing")}</span>
+                  <span className="font-semibold text-[#0D0D0D]">{billing === "monthly" ? t("contract.summary.monthly") : t("contract.summary.yearly")}</span>
                 </div>
                 {billing === "yearly" && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-[#6B6760]">Desconto anual</span>
+                    <span className="text-[#6B6760]">{t("contract.summary.discount")}</span>
                     <span className="font-semibold text-[#0D0D0D]">−15%</span>
                   </div>
                 )}
                 <div className="h-px bg-[#ECEAE6]" />
                 <div className="flex justify-between">
-                  <span className="text-sm font-semibold text-[#0D0D0D]">Total</span>
-                  <span className="text-lg font-semibold text-[#0D0D0D]">R$ {finalPrice.toLocaleString("pt-BR")}<span className="text-sm text-[#A09890]">/{billing === "monthly" ? "mês" : "ano"}</span></span>
+                  <span className="text-sm font-semibold text-[#0D0D0D]">{t("contract.summary.total")}</span>
+                  <span className="text-lg font-semibold text-[#0D0D0D]">R$ {finalPrice.toLocaleString("pt-BR")}<span className="text-sm text-[#A09890]">/{billing === "monthly" ? t("contract.summary.monthly") : t("contract.summary.yearly")}</span></span>
                 </div>
               </div>
             </div>
 
             <div className="rounded-[20px] border border-[#E5E0DA] bg-white p-5 space-y-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-2">Incluso no plano</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-2">{t("contract.included.title")}</p>
               {[
-                "Cadastro e contrato 100% digital",
-                "Assinatura digital via DocuSign",
-                "Pagamento por cartão, Pix ou wire",
-                "NF-e emitida automaticamente",
-                "Acesso ao portal na hora",
-                "Cancelamento a qualquer momento",
+                t("contract.included.1"),
+                t("contract.included.2"),
+                t("contract.included.3"),
+                t("contract.included.4"),
+                t("contract.included.5"),
+                t("contract.included.6"),
               ].map((item) => (
                 <div key={item} className="flex items-start gap-2 text-xs text-[#3A3630]">
                   <CheckCircle className="h-3.5 w-3.5 text-[#0D0D0D] flex-shrink-0 mt-0.5" /> {item}
@@ -546,7 +550,7 @@ function ContratoContent() {
             </div>
 
             <div className="flex items-center gap-2 text-xs text-[#A09890] px-1">
-              <Lock className="h-3.5 w-3.5" /> Dados protegidos por criptografia SSL
+              <Lock className="h-3.5 w-3.5" /> {t("contract.ssl")}
             </div>
           </div>
         </div>
