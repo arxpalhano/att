@@ -3136,7 +3136,8 @@ function PublicationsPage({ user }: { user: SeedUser }) {
     });
   };
 
-  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320, pub8: 2980 };
+  // Downloads virão do Analytics (Athena). Por enquanto zerados para não exibir dados fictícios.
+  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320 };
 
   return (
     <div className="space-y-6">
