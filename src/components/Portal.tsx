@@ -187,6 +187,9 @@ let CLIENTS: SeedClient[] = [
   { id: "c10", name: "DEXCO", code: "DEXCO", contactEmail: "contato@dexco.com.br", active: true },
   { id: "c11", name: "WJ Luminárias", code: "WJ", contactEmail: "contato@wjluminarias.com.br", active: true },
   { id: "c12", name: "Christie", code: "CHRISTIE", contactEmail: "contato@christie.com.br", active: true },
+  { id: "c13", name: "Cadeiras Rosa", code: "CADEIRASROSA", contactEmail: "contato@cadeirasrosa.com.br", active: true },
+  { id: "c14", name: "Jader Almeida", code: "JADER", contactEmail: "contato@jaderalmeida.com", active: true },
+  { id: "c15", name: "Arctefacto", code: "ARCTEFACTO", contactEmail: "contato@arctefacto.com.br", active: true },
 ];
 
 let CONTRACTS: SeedContract[] = [
