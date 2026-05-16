@@ -210,14 +210,14 @@ export default function LandingPage() {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-5">{t("transformation.youSend")}</p>
                 <div className="space-y-3">
                   {[
-                    { label: "Fotos do produto", ext: ".JPG", cls: "text-[#8B7355] bg-[#8B7355]/8 border-[#8B7355]/25" },
-                    { label: "Arquivo CAD / SketchUp", ext: ".SKP", cls: "text-[#4F7CA6] bg-[#4F7CA6]/8 border-[#4F7CA6]/25" },
-                    { label: "Caderno de acabamentos", ext: ".PDF", cls: "text-[#6E5EA6] bg-[#6E5EA6]/8 border-[#6E5EA6]/25" },
-                    { label: "Fichas técnicas", ext: ".DWG", cls: "text-[#4A7A5A] bg-[#4A7A5A]/8 border-[#4A7A5A]/25" },
+                    { key: "send.jpg", ext: ".JPG", cls: "text-[#8B7355] bg-[#8B7355]/8 border-[#8B7355]/25" },
+                    { key: "send.skp", ext: ".SKP", cls: "text-[#4F7CA6] bg-[#4F7CA6]/8 border-[#4F7CA6]/25" },
+                    { key: "send.pdf", ext: ".PDF", cls: "text-[#6E5EA6] bg-[#6E5EA6]/8 border-[#6E5EA6]/25" },
+                    { key: "send.dwg", ext: ".DWG", cls: "text-[#4A7A5A] bg-[#4A7A5A]/8 border-[#4A7A5A]/25" },
                   ].map((f) => (
-                    <div key={f.label} className="flex items-center gap-3 rounded-xl border border-[#ECEAE6] bg-[#F8F7F5] px-4 py-3">
+                    <div key={f.key} className="flex items-center gap-3 rounded-xl border border-[#ECEAE6] bg-[#F8F7F5] px-4 py-3">
                       <span className={`rounded-md border px-2 py-0.5 text-[10px] font-bold ${f.cls}`}>{f.ext}</span>
-                      <span className="text-sm text-[#3A3630]">{f.label}</span>
+                      <span className="text-sm text-[#3A3630]">{t(f.key)}</span>
                     </div>
                   ))}
                 </div>
@@ -228,17 +228,17 @@ export default function LandingPage() {
                 <p className="text-[10px] font-bold uppercase tracking-widest text-[#A09890] mb-5">{t("transformation.weDeliver")}</p>
                 <div className="space-y-3">
                   {[
-                    { icon: "🧊", label: "Modelo 3D interativo", desc: "Navegável no browser, sem app" },
-                    { icon: "🎨", label: "Customizador de acabamentos", desc: "Cores e materiais em tempo real" },
-                    { icon: "📱", label: "Realidade Aumentada", desc: "QR code → produto em escala real" },
-                    { icon: "🌍", label: "Publicação global", desc: "Visível para arquitetos em 40+ países" },
-                    { icon: "📊", label: "Analytics de uso", desc: "Veja quem especificou seu produto" },
+                    { icon: "🧊", labelKey: "deliver.model", descKey: "deliver.model.desc" },
+                    { icon: "🎨", labelKey: "deliver.customizer", descKey: "deliver.customizer.desc" },
+                    { icon: "📱", labelKey: "deliver.ar", descKey: "deliver.ar.desc" },
+                    { icon: "🌍", labelKey: "deliver.global", descKey: "deliver.global.desc" },
+                    { icon: "📊", labelKey: "deliver.analytics", descKey: "deliver.analytics.desc" },
                   ].map((item) => (
-                    <div key={item.label} className="flex items-center gap-3 rounded-xl border border-[#ECEAE6] bg-[#F8F7F5] px-4 py-3">
+                    <div key={item.labelKey} className="flex items-center gap-3 rounded-xl border border-[#ECEAE6] bg-[#F8F7F5] px-4 py-3">
                       <span className="text-lg leading-none">{item.icon}</span>
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[#0D0D0D]">{item.label}</p>
-                        <p className="text-xs text-[#A09890]">{item.desc}</p>
+                        <p className="text-sm font-semibold text-[#0D0D0D]">{t(item.labelKey)}</p>
+                        <p className="text-xs text-[#A09890]">{t(item.descKey)}</p>
                       </div>
                     </div>
                   ))}
@@ -247,7 +247,7 @@ export default function LandingPage() {
             </div>
 
             <div className="border-t border-[#E5E0DA] bg-[#F8F7F5] px-8 py-4 flex items-center justify-between flex-wrap gap-3">
-              <p className="text-xs text-[#A09890]">Do arquivo do cliente ao produto interativo em Realidade Aumentada</p>
+              <p className="text-xs text-[#A09890]">{t("transformation.footer")}</p>
               <span className="text-xs font-semibold text-[#0D0D0D]">{t("transformation.avgTime")}</span>
             </div>
           </div>
