@@ -3502,31 +3502,56 @@ export default function Portal() {
   const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
   const [hydrated, setHydrated] = useState(false);
 
-  // Load users/clients/contracts/blocks/tickets/activities from localStorage
+  // Load mutable state from DynamoDB on mount. Seed tables on first use.
   useEffect(() => {
-    try {
-      const storedUsers: SeedUser[] = JSON.parse(localStorage.getItem("att_portal_users") || "[]");
-      storedUsers.forEach((u) => { if (!USERS.find((x) => x.email === u.email)) USERS.push(u); });
-      const storedClients: SeedClient[] = JSON.parse(localStorage.getItem("att_portal_clients") || "[]");
-      storedClients.forEach((c) => { if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c); });
-      const storedContracts: SeedContract[] = JSON.parse(localStorage.getItem("att_portal_contracts") || "[]");
-      storedContracts.forEach((c) => { if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c); });
+    (async () => {
+      try {
+        // Local-only: usuários/clientes/contratos criados via /contrato (cadastro)
+        const storedUsers: SeedUser[] = JSON.parse(localStorage.getItem("att_portal_users") || "[]");
+        storedUsers.forEach((u) => { if (!USERS.find((x) => x.email === u.email)) USERS.push(u); });
+        const storedClients: SeedClient[] = JSON.parse(localStorage.getItem("att_portal_clients") || "[]");
+        storedClients.forEach((c) => { if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c); });
+        const storedContracts: SeedContract[] = JSON.parse(localStorage.getItem("att_portal_contracts") || "[]");
+        storedContracts.forEach((c) => { if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c); });
 
-      // Restore mutable state from localStorage (so admin updates persist)
-      const sb = localStorage.getItem("att_portal_blocks");
-      if (sb) setBlocks(JSON.parse(sb));
-      const st = localStorage.getItem("att_portal_tickets");
-      if (st) { const parsed = JSON.parse(st); setTickets(parsed); TICKETS = parsed; }
-      const sa = localStorage.getItem("att_portal_activities");
-      if (sa) setActivities(JSON.parse(sa));
-    } catch { /* ignore */ }
-    setHydrated(true);
+        // DynamoDB: blocks, tickets, activities (compartilhados entre admin e cliente)
+        const [bRes, tRes, aRes] = await Promise.all([
+          fetch("/api/state/blocks").then((r) => r.json()),
+          fetch("/api/state/tickets").then((r) => r.json()),
+          fetch("/api/state/activities").then((r) => r.json()),
+        ]);
+
+        // Se o DB tiver dados → usa. Senão → seed na primeira vez.
+        if (bRes.items?.length) setBlocks(bRes.items);
+        else { await fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(INITIAL_BLOCKS) }); }
+
+        if (tRes.items?.length) { setTickets(tRes.items); TICKETS = tRes.items; }
+        else { await fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(TICKETS) }); }
+
+        if (aRes.items?.length) setActivities(aRes.items);
+        else { await fetch("/api/state/activities", { method: "POST", body: JSON.stringify(ACTIVITIES) }); }
+      } catch (e) { console.error("Failed to load state:", e); }
+      setHydrated(true);
+    })();
   }, []);
 
-  // Persist mutable state after hydration
-  useEffect(() => { if (hydrated) localStorage.setItem("att_portal_blocks", JSON.stringify(blocks)); }, [blocks, hydrated]);
-  useEffect(() => { if (hydrated) { localStorage.setItem("att_portal_tickets", JSON.stringify(tickets)); TICKETS = tickets; } }, [tickets, hydrated]);
-  useEffect(() => { if (hydrated) localStorage.setItem("att_portal_activities", JSON.stringify(activities)); }, [activities, hydrated]);
+  // Persistência DynamoDB com debounce de 800ms (evita flood de writes)
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800);
+    return () => clearTimeout(t);
+  }, [blocks, hydrated]);
+  useEffect(() => {
+    if (!hydrated) return;
+    TICKETS = tickets;
+    const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800);
+    return () => clearTimeout(t);
+  }, [tickets, hydrated]);
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => { fetch("/api/state/activities", { method: "POST", body: JSON.stringify(activities) }).catch(() => {}); }, 800);
+    return () => clearTimeout(t);
+  }, [activities, hydrated]);
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
     [],
