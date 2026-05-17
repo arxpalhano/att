@@ -3018,10 +3018,116 @@ const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
   delivered: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
 };
 
+function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: ProductionTicket) => void }) {
+  const { blocks } = useContext(AppContext);
+  const [title, setTitle] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [blockId, setBlockId] = useState("");
+  const [assignedTo, setAssignedTo] = useState("");
+  const [slaDate, setSlaDate] = useState("");
+  const [priority, setPriority] = useState<Priority>("normal");
+  const [plan, setPlan] = useState<ServiceType>("standard");
+
+  const internalUsers = USERS.filter((u) => u.role !== "client" && u.active);
+  const clientBlocks = blocks.filter((b) => b.clientId === clientId);
+  const selectedBlock = blocks.find((b) => b.id === blockId);
+
+  const canSave = title.trim() && clientId && slaDate;
+
+  const handleSave = () => {
+    const t: ProductionTicket = {
+      id: `tk_${Date.now()}`,
+      clientId,
+      blockId: blockId || "",
+      title: title.trim(),
+      plan,
+      slaDate,
+      priority,
+      assignedTo: assignedTo || undefined,
+      status: "new",
+    };
+    onSave(t);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+          <p className="font-semibold text-slate-900">Novo Ticket de Produção</p>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Título *</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Cúpulo – Revisão de Programação" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Cliente *</label>
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setBlockId(""); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                <option value="">Selecionar...</option>
+                {CLIENTS.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Bloco</label>
+              <select value={blockId} onChange={(e) => setBlockId(e.target.value)} disabled={!clientId} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition disabled:opacity-50">
+                <option value="">Nenhum</option>
+                {clientBlocks.map((b) => <option key={b.id} value={b.id}>#{b.n} · {b.title}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Responsável</label>
+              <select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                <option value="">Sem responsável</option>
+                {internalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">SLA *</label>
+              <input type="date" value={slaDate} onChange={(e) => setSlaDate(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Prioridade</label>
+              <select value={priority} onChange={(e) => setPriority(e.target.value as Priority)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                <option value="normal">Normal</option>
+                <option value="high">Alta</option>
+                <option value="urgent">Urgente</option>
+                <option value="low">Baixa</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Plano</label>
+              <select value={plan} onChange={(e) => setPlan(e.target.value as ServiceType)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+                <option value="standard">Standard</option>
+                <option value="plus">Plus</option>
+                <option value="ultra">Ultra</option>
+              </select>
+            </div>
+          </div>
+          {selectedBlock && (
+            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">Bloco: {selectedBlock.sku} · {selectedBlock.csku} · Status atual: {selectedBlock.status}</p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-700 transition">Cancelar</button>
+          <button onClick={handleSave} disabled={!canSave} className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 text-sm font-semibold text-slate-900 disabled:opacity-30 hover:brightness-110 transition">Criar Ticket</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const { blocks } = useContext(AppContext);
   const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
   const [filter, setFilter] = useState<TicketStatus | "all">("all");
+  const [showNewTicket, setShowNewTicket] = useState(false);
 
   const isClient = user.role === "client";
   const visible = tickets.filter((t) => {
@@ -3029,6 +3135,12 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     if (filter !== "all" && t.status !== filter) return false;
     return true;
   });
+
+  const createTicket = (t: ProductionTicket) => {
+    const updated = [...tickets, t];
+    setTickets(updated);
+    TICKETS = updated;
+  };
 
   const updateStatus = (id: string, status: TicketStatus) => {
     const updated = tickets.map((t) => t.id === id ? { ...t, status } : t);
@@ -3048,11 +3160,21 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
 
   return (
     <div className="space-y-6">
+      {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onSave={createTicket} />}
       <SectionHeader
         eyebrow="Fase 5 · Produção"
         title="Tickets de produção"
         description="Cada ticket representa um bloco 3D em produção, com SLA, responsável e status atualizado."
-        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{counts.all} tickets</Badge>}
+        action={
+          <div className="flex items-center gap-2">
+            <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{counts.all} tickets</Badge>
+            {!isClient && (
+              <button onClick={() => setShowNewTicket(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition">
+                <Plus className="w-3.5 h-3.5" /> Novo Ticket
+              </button>
+            )}
+          </div>
+        }
       />
 
       <div className="flex flex-wrap gap-2">
