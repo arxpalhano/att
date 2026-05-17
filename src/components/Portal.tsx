@@ -386,6 +386,8 @@ interface AppState {
   setActivities: React.Dispatch<React.SetStateAction<SeedActivity[]>>;
   assets: SeedAsset[];
   setAssets: React.Dispatch<React.SetStateAction<SeedAsset[]>>;
+  tickets: ProductionTicket[];
+  setTickets: React.Dispatch<React.SetStateAction<ProductionTicket[]>>;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -1277,7 +1279,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
 // BLOCKS LIST
 // ============================================================
 function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
-  const { blocks, setBlocks, activities, setActivities } = useContext(AppContext);
+  const { blocks, setBlocks, activities, setActivities, tickets, setTickets } = useContext(AppContext);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterClient, setFilterClient] = useState("all");
@@ -1324,6 +1326,22 @@ function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; s
       at: new Date().toISOString(),
     };
     setActivities([...activities, newAct]);
+
+    // Auto-cria ticket inicial na fila — Jessica (admin) atribui responsável depois
+    const slaDate = new Date();
+    slaDate.setDate(slaDate.getDate() + 14); // SLA padrão: 14 dias
+    const newTicket: ProductionTicket = {
+      id: `tk_${Date.now()}`,
+      clientId: data.clientId,
+      blockId: newBlock.id,
+      title: `${data.title} – Modelagem`,
+      plan: data.serviceType,
+      slaDate: slaDate.toISOString().slice(0, 10),
+      priority: data.priority,
+      status: "new",
+    };
+    setTickets([...tickets, newTicket]);
+
     setShowCreateModal(false);
     setSelectedBlock(newBlock.id);
     setPage("block_detail");
@@ -3124,8 +3142,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
 }
 
 function ProductionTicketsPage({ user }: { user: SeedUser }) {
-  const { blocks } = useContext(AppContext);
-  const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
+  const { blocks, tickets, setTickets } = useContext(AppContext);
   const [filter, setFilter] = useState<TicketStatus | "all">("all");
   const [showNewTicket, setShowNewTicket] = useState(false);
 
@@ -3139,19 +3156,16 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const createTicket = (t: ProductionTicket) => {
     const updated = [...tickets, t];
     setTickets(updated);
-    TICKETS = updated;
   };
 
   const updateStatus = (id: string, status: TicketStatus) => {
     const updated = tickets.map((t) => t.id === id ? { ...t, status } : t);
     setTickets(updated);
-    TICKETS = updated;
   };
 
   const assignTicket = (id: string, userId: string) => {
     const updated = tickets.map((t) => t.id === id ? { ...t, assignedTo: userId } : t);
     setTickets(updated);
-    TICKETS = updated;
   };
 
   const internalUsers = USERS.filter((u) => u.role !== "client" && u.active);
@@ -3485,26 +3499,34 @@ export default function Portal() {
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
   const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
+  const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
+  const [hydrated, setHydrated] = useState(false);
 
-  // Load users/clients/contracts registered via /contrato flow from localStorage
+  // Load users/clients/contracts/blocks/tickets/activities from localStorage
   useEffect(() => {
     try {
       const storedUsers: SeedUser[] = JSON.parse(localStorage.getItem("att_portal_users") || "[]");
-      storedUsers.forEach((u) => {
-        if (!USERS.find((x) => x.email === u.email)) USERS.push(u);
-      });
+      storedUsers.forEach((u) => { if (!USERS.find((x) => x.email === u.email)) USERS.push(u); });
       const storedClients: SeedClient[] = JSON.parse(localStorage.getItem("att_portal_clients") || "[]");
-      storedClients.forEach((c) => {
-        if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c);
-      });
+      storedClients.forEach((c) => { if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c); });
       const storedContracts: SeedContract[] = JSON.parse(localStorage.getItem("att_portal_contracts") || "[]");
-      storedContracts.forEach((c) => {
-        if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c);
-      });
-    } catch {
-      // ignore
-    }
+      storedContracts.forEach((c) => { if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c); });
+
+      // Restore mutable state from localStorage (so admin updates persist)
+      const sb = localStorage.getItem("att_portal_blocks");
+      if (sb) setBlocks(JSON.parse(sb));
+      const st = localStorage.getItem("att_portal_tickets");
+      if (st) { const parsed = JSON.parse(st); setTickets(parsed); TICKETS = parsed; }
+      const sa = localStorage.getItem("att_portal_activities");
+      if (sa) setActivities(JSON.parse(sa));
+    } catch { /* ignore */ }
+    setHydrated(true);
   }, []);
+
+  // Persist mutable state after hydration
+  useEffect(() => { if (hydrated) localStorage.setItem("att_portal_blocks", JSON.stringify(blocks)); }, [blocks, hydrated]);
+  useEffect(() => { if (hydrated) { localStorage.setItem("att_portal_tickets", JSON.stringify(tickets)); TICKETS = tickets; } }, [tickets, hydrated]);
+  useEffect(() => { if (hydrated) localStorage.setItem("att_portal_activities", JSON.stringify(activities)); }, [activities, hydrated]);
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
     [],
@@ -3512,7 +3534,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -3543,7 +3565,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
