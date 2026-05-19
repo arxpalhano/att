@@ -12,6 +12,7 @@ const nextConfig = {
     ATHENA_DB: process.env.ATHENA_DB,
     ATHENA_WORKGROUP: process.env.ATHENA_WORKGROUP,
     ATHENA_OUTPUT: process.env.ATHENA_OUTPUT,
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   },
 };
 module.exports = nextConfig;
