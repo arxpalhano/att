@@ -1,7 +1,7 @@
 /**
- * Agente: Leslie Roadmap — Gerente de Projetos / Produto
+ * Agente: Yoda Kanban — Gerente de Projetos / Produto
  *
- * Inspirada em Leslie Knope (Parks & Rec) — a gerente de projetos
+ * Inspirada em Yoda (Parks & Rec) — a gerente de projetos
  * obsessiva por binders, cronogramas e follow-through. Combina com
  * "Roadmap" (planejamento de produto).
  *
@@ -15,7 +15,7 @@ import { ATT_CONTEXT } from "@/lib/agent-context";
 
 export const dynamic = "force-dynamic";
 
-const SYSTEM_PROMPT = `Você é **Leslie Roadmap** (referência: Leslie Knope, Parks & Recreation + roadmap de produto). Gerente de Projetos e Produto do portal ArchTechTour, parceira da Jessica Ribeiro (PM real da empresa).
+const SYSTEM_PROMPT = `Você é **Yoda Kanban** (referência: Yoda, Parks & Recreation + roadmap de produto). Gerente de Projetos e Produto do portal ArchTechTour, parceira da Jessica Ribeiro (PM real da empresa).
 
 ${ATT_CONTEXT}
 
@@ -76,7 +76,7 @@ Você **É**:
 Seja **prática**, **acionável** e **direta**. Use dados, não opiniões. Quando filtrado
 por cliente específico, faça análise PROFUNDA daquele só.`;
 
-interface LeslieRequest {
+interface YodaRequest {
   prompt?: string;
   clientId?: string; // opcional para foco em um cliente
 }
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "ANTHROPIC_API_KEY ausente" }, { status: 500 });
 
-    const body: LeslieRequest = await req.json().catch(() => ({}));
+    const body: YodaRequest = await req.json().catch(() => ({}));
 
     type Row = Record<string, unknown>;
     const [clients, contracts, blocks, publications, tickets] = await Promise.all([
@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
       return Math.floor((today.getTime() - d.getTime()) / (1000 * 60 * 60 * 24 * 30));
     };
 
-    // Snapshot por cliente: agrega tudo que a Leslie precisa para análise
+    // Snapshot por cliente: agrega tudo que a Yoda precisa para análise
     const portfolio = scoped.map((c) => {
       const cid = String(c.id);
       const cContracts = contracts.filter((x) => x.clientId === cid);
@@ -189,7 +189,7 @@ export async function POST(req: NextRequest) {
       durationMs: Date.now() - startedAt,
     });
   } catch (e) {
-    console.error("Leslie Roadmap error:", e);
+    console.error("Yoda Kanban error:", e);
     return NextResponse.json({
       error: (e as Error).message || "Erro desconhecido",
       durationMs: Date.now() - startedAt,

@@ -3625,12 +3625,12 @@ const AGENTS: AgentDef[] = [
     active: true,
   },
   {
-    id: "leslie-roadmap",
-    name: "Leslie Roadmap",
+    id: "yoda-kanban",
+    name: "Yoda Kanban",
     role: "Gerente de Projetos",
     description: "Analisa a saúde do projeto de cada cliente: progresso, riscos, oportunidades, próximas ações para a PM (Jessica). Sugere expansão, renovação, alertas de cliente parado. Pode focar em um cliente específico para análise profunda.",
-    page: "agent_leslie_roadmap",
-    color: "from-pink-400 to-rose-500",
+    page: "agent_yoda_kanban",
+    color: "from-emerald-400 to-green-600",
     active: true,
   },
 ];
@@ -3984,18 +3984,18 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
   );
 }
 
-function LeslieRoadmapPage({ setPage }: { setPage: (p: string) => void }) {
+function YodaKanbanPage({ setPage }: { setPage: (p: string) => void }) {
   const { clients } = useContext(AppContext);
   const [messages, setMessages] = useState<AgentMessage[]>(() => {
     if (typeof window === "undefined") return [];
-    try { return JSON.parse(localStorage.getItem("att_agent_leslie_roadmap_history") || "[]"); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem("att_agent_yoda_kanban_history") || "[]"); } catch { return []; }
   });
   const [prompt, setPrompt] = useState("");
   const [scopeClient, setScopeClient] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { try { localStorage.setItem("att_agent_leslie_roadmap_history", JSON.stringify(messages)); } catch { /* ignore */ } }, [messages]);
+  useEffect(() => { try { localStorage.setItem("att_agent_yoda_kanban_history", JSON.stringify(messages)); } catch { /* ignore */ } }, [messages]);
 
   const runAnalysis = async (userPrompt?: string) => {
     setLoading(true); setError("");
@@ -4008,7 +4008,7 @@ function LeslieRoadmapPage({ setPage }: { setPage: (p: string) => void }) {
     setMessages((prev) => [...prev, userMsg]);
     setPrompt("");
     try {
-      const res = await fetch("/api/agents/leslie-roadmap", {
+      const res = await fetch("/api/agents/yoda-kanban", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: userPrompt, clientId: scopeClient || undefined }),
@@ -4037,15 +4037,15 @@ function LeslieRoadmapPage({ setPage }: { setPage: (p: string) => void }) {
       <button onClick={() => setPage("agents")} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"><ArrowLeft className="w-4 h-4" /> Voltar</button>
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-pink-400 to-rose-500 flex items-center justify-center shadow-lg"><Bot className="w-6 h-6 text-white" /></div>
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-400 to-green-600 flex items-center justify-center shadow-lg"><Bot className="w-6 h-6 text-white" /></div>
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Leslie Roadmap</h1>
+            <h1 className="text-xl font-bold text-slate-800">Yoda Kanban</h1>
             <p className="text-sm text-slate-500">Gerente de Projetos · {messages.length} mensagens</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {messages.length > 0 && <button onClick={clearHistory} className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100">Limpar</button>}
-          <button onClick={() => runAnalysis()} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-pink-400 to-rose-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-50">
+          <button onClick={() => runAnalysis()} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-green-600 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-50">
             {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Analisando…</> : <><Zap className="w-3.5 h-3.5" /> Analisar projetos</>}
           </button>
         </div>
@@ -4091,12 +4091,12 @@ function LeslieRoadmapPage({ setPage }: { setPage: (p: string) => void }) {
       {messages.map((m, i) => (
         <Card key={i} className={`p-5 ${m.role === "user" ? "bg-slate-50 border-slate-200" : "bg-white"}`}>
           <div className="flex items-start gap-3">
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${m.role === "user" ? "bg-slate-200" : "bg-gradient-to-br from-pink-400 to-rose-500"}`}>
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${m.role === "user" ? "bg-slate-200" : "bg-gradient-to-br from-emerald-400 to-green-600"}`}>
               {m.role === "user" ? <UserCheck className="w-4 h-4 text-slate-600" /> : <Bot className="w-4 h-4 text-white" />}
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-500">{m.role === "user" ? "Você" : "Leslie Roadmap"}</p>
+                <p className="text-xs font-semibold text-slate-500">{m.role === "user" ? "Você" : "Yoda Kanban"}</p>
                 <p className="text-xs text-slate-400">{new Date(m.timestamp).toLocaleString("pt-BR")}{m.tokens && ` · ${m.tokens.input}+${m.tokens.output} tokens`}</p>
               </div>
               <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">{m.content}</div>
@@ -4107,7 +4107,7 @@ function LeslieRoadmapPage({ setPage }: { setPage: (p: string) => void }) {
 
       {loading && (
         <Card className="p-5">
-          <div className="flex items-center gap-3"><RefreshCw className="w-4 h-4 animate-spin text-pink-500" /><p className="text-sm text-slate-600">Leslie está revisando os projetos…</p></div>
+          <div className="flex items-center gap-3"><RefreshCw className="w-4 h-4 animate-spin text-emerald-500" /><p className="text-sm text-slate-600">Yoda está revisando os projetos…</p></div>
         </Card>
       )}
 
@@ -4116,9 +4116,9 @@ function LeslieRoadmapPage({ setPage }: { setPage: (p: string) => void }) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && prompt.trim() && !loading) runAnalysis(prompt); }}
-          placeholder="Pergunte algo à Leslie…"
+          placeholder="Pergunte algo ao Yoda…"
           disabled={loading}
-          className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-pink-400 shadow-sm"
+          className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-emerald-400 shadow-sm"
         />
         <button onClick={() => prompt.trim() && runAnalysis(prompt)} disabled={!prompt.trim() || loading} className="px-4 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-30"><Send className="w-4 h-4" /></button>
       </div>
@@ -4373,7 +4373,7 @@ export default function Portal() {
       case "agents": return <AgentsPage setPage={setPage} />;
       case "agent_sherlock_codes": return <SherlockCodesPage setPage={setPage} />;
       case "agent_monk_lighthouse": return <MonkLighthousePage setPage={setPage} />;
-      case "agent_leslie_roadmap": return <LeslieRoadmapPage setPage={setPage} />;
+      case "agent_yoda_kanban": return <YodaKanbanPage setPage={setPage} />;
       default: return <InternalDashboard setPage={setPage} />;
     }
   };
