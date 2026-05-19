@@ -3593,11 +3593,11 @@ interface AgentDef {
 
 const AGENTS: AgentDef[] = [
   {
-    id: "sergio-moro",
-    name: "Sérgio Moro",
+    id: "sherlock-codes",
+    name: "Sherlock Codes",
     role: "Auditor do Portal",
     description: "Audita todo o estado do portal (clientes, contratos, blocos, publicações, tickets) e gera relatório de inconsistências e ações sugeridas.",
-    page: "agent_sergio_moro",
+    page: "agent_sherlock_codes",
     color: "from-amber-400 to-orange-500",
     active: true,
   },
@@ -3648,11 +3648,11 @@ interface AgentMessage {
   tokens?: { input: number; output: number };
 }
 
-function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
+function SherlockCodesPage({ setPage }: { setPage: (p: string) => void }) {
   const [messages, setMessages] = useState<AgentMessage[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const stored = localStorage.getItem("att_agent_sergio_moro_history");
+      const stored = localStorage.getItem("att_agent_sherlock_codes_history");
       return stored ? JSON.parse(stored) : [];
     } catch { return []; }
   });
@@ -3661,7 +3661,7 @@ function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    try { localStorage.setItem("att_agent_sergio_moro_history", JSON.stringify(messages)); } catch { /* ignore */ }
+    try { localStorage.setItem("att_agent_sherlock_codes_history", JSON.stringify(messages)); } catch { /* ignore */ }
   }, [messages]);
 
   const runAudit = async (userPrompt?: string) => {
@@ -3674,7 +3674,7 @@ function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
     setMessages((prev) => [...prev, userMsg]);
     setPrompt("");
     try {
-      const res = await fetch("/api/agents/sergio-moro", {
+      const res = await fetch("/api/agents/sherlock-codes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: userPrompt }),
@@ -3709,7 +3709,7 @@ function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
             <Bot className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-800">Sérgio Moro</h1>
+            <h1 className="text-xl font-bold text-slate-800">Sherlock Codes</h1>
             <p className="text-sm text-slate-500">Auditor do Portal · {messages.length} mensagens</p>
           </div>
         </div>
@@ -3752,7 +3752,7 @@ function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-xs font-semibold text-slate-500">{m.role === "user" ? "Você" : "Sérgio Moro"}</p>
+                <p className="text-xs font-semibold text-slate-500">{m.role === "user" ? "Você" : "Sherlock Codes"}</p>
                 <p className="text-xs text-slate-400">{new Date(m.timestamp).toLocaleString("pt-BR")}{m.tokens && ` · ${m.tokens.input}+${m.tokens.output} tokens`}</p>
               </div>
               <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">{m.content}</div>
@@ -3763,7 +3763,7 @@ function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
 
       {loading && (
         <Card className="p-5">
-          <div className="flex items-center gap-3"><RefreshCw className="w-4 h-4 animate-spin text-amber-500" /><p className="text-sm text-slate-600">Sérgio Moro está auditando o portal…</p></div>
+          <div className="flex items-center gap-3"><RefreshCw className="w-4 h-4 animate-spin text-amber-500" /><p className="text-sm text-slate-600">Sherlock Codes está auditando o portal…</p></div>
         </Card>
       )}
 
@@ -3772,7 +3772,7 @@ function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && prompt.trim() && !loading) runAudit(prompt); }}
-          placeholder="Pergunte algo específico ao Sérgio Moro…"
+          placeholder="Pergunte algo específico ao Sherlock Codes…"
           disabled={loading}
           className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-amber-400 shadow-sm"
         />
@@ -4029,7 +4029,7 @@ export default function Portal() {
       case "activity": return <ActivityPage />;
       case "users": return <UsersPage />;
       case "agents": return <AgentsPage setPage={setPage} />;
-      case "agent_sergio_moro": return <SergioMoroPage setPage={setPage} />;
+      case "agent_sherlock_codes": return <SherlockCodesPage setPage={setPage} />;
       default: return <InternalDashboard setPage={setPage} />;
     }
   };

@@ -1,5 +1,5 @@
 /**
- * Agente: Sérgio Moro — Auditor do Portal ArchTechTour
+ * Agente: Sherlock Codes — Auditor do Portal ArchTechTour
  *
  * Carrega estado completo do DynamoDB e envia para Claude com prompt
  * de auditor sênior. Retorna um relatório estruturado de inconsistências,
@@ -12,7 +12,7 @@ import { scanAll, TABLES } from "@/lib/dynamo";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // até 60s para auditoria completa
 
-const SYSTEM_PROMPT = `Você é Sérgio Moro, auditor sênior de portais B2B. Sua especialidade é encontrar inconsistências em sistemas de gestão de produção (blocos 3D customizadores) da ArchTechTour.
+const SYSTEM_PROMPT = `Você é Sherlock Codes, auditor sênior de portais B2B. Sua especialidade é encontrar inconsistências em sistemas de gestão de produção (blocos 3D customizadores) da ArchTechTour.
 
 Sua missão:
 - Analisar dados do portal (clientes, contratos, blocos, publicações, tickets, usuários)
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       tokens: { input: msg.usage.input_tokens, output: msg.usage.output_tokens },
     });
   } catch (e) {
-    console.error("Sergio Moro audit error:", e);
+    console.error("Sherlock Codes audit error:", e);
     return NextResponse.json({
       error: (e as Error).message,
     }, { status: 500 });
