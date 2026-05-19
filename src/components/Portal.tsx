@@ -383,6 +383,20 @@ INITIAL_BLOCKS.push(...MIGRATED_BLOCKS);
 PUBLICATIONS.push(...MIGRATED_PUBLICATIONS);
 TICKETS = [...TICKETS, ...MIGRATED_TICKETS];
 
+// Recalcula usedBlocks de cada contrato com base nos blocos REAIS
+// (evita divergência entre contagem declarada e realidade do DB)
+CONTRACTS = CONTRACTS.map((c) => ({
+  ...c,
+  usedBlocks: INITIAL_BLOCKS.filter((b) => b.contractId === c.id).length,
+  totalBlocks: Math.max(c.totalBlocks, INITIAL_BLOCKS.filter((b) => b.contractId === c.id).length),
+}));
+
+// Remove publicações órfãs (referenciam blockId que não existe em INITIAL_BLOCKS)
+const _blockIdSet = new Set(INITIAL_BLOCKS.map((b) => b.id));
+const _validPubs = PUBLICATIONS.filter((p) => _blockIdSet.has(p.blockId));
+PUBLICATIONS.length = 0;
+PUBLICATIONS.push(..._validPubs);
+
 // ============================================================
 // HELPERS
 // ============================================================
