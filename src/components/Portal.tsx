@@ -3806,6 +3806,7 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
   });
   const [prompt, setPrompt] = useState("");
   const [scopeClient, setScopeClient] = useState<string>(""); // "" = todos
+  const [auditUrl, setAuditUrl] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -3813,10 +3814,13 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
 
   const runAudit = async (userPrompt?: string) => {
     setLoading(true); setError("");
-    const scopeLabel = scopeClient ? clients.find((c) => c.id === scopeClient)?.name : "todos os clientes";
+    let scopeLabel: string;
+    if (auditUrl.trim()) scopeLabel = `URL específica (${auditUrl.trim().slice(0, 60)})`;
+    else if (scopeClient) scopeLabel = clients.find((c) => c.id === scopeClient)?.name || "cliente";
+    else scopeLabel = "todos os clientes (10 produtos por rodada)";
     const userMsg: AgentMessage = {
       role: "user",
-      content: userPrompt || `Auditoria de qualidade dos customizadores — escopo: ${scopeLabel}`,
+      content: userPrompt || `Auditoria de qualidade — escopo: ${scopeLabel}`,
       timestamp: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
@@ -3825,7 +3829,11 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
       const res = await fetch("/api/agents/monk-lighthouse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userPrompt, clientId: scopeClient || undefined }),
+        body: JSON.stringify({
+          prompt: userPrompt,
+          clientId: !auditUrl.trim() && scopeClient ? scopeClient : undefined,
+          url: auditUrl.trim() || undefined,
+        }),
       });
       const raw = await res.text();
       let data: { report?: string; error?: string; timestamp?: string; tokens?: { input: number; output: number }; probes_count?: number } = {};
@@ -3858,16 +3866,37 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
           </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <select value={scopeClient} onChange={(e) => setScopeClient(e.target.value)} className="px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
-            <option value="">Todos os clientes</option>
-            {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
           {messages.length > 0 && <button onClick={clearHistory} className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100">Limpar</button>}
           <button onClick={() => runAudit()} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-teal-400 to-cyan-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-50">
             {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Auditando…</> : <><Zap className="w-3.5 h-3.5" /> Auditar qualidade</>}
           </button>
         </div>
       </div>
+
+      {/* Escopo da auditoria */}
+      <Card className="p-4">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Escopo da auditoria</p>
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <label className="text-xs font-medium text-slate-500">URL específica (opcional)</label>
+            <input
+              value={auditUrl}
+              onChange={(e) => setAuditUrl(e.target.value)}
+              placeholder="https://explorar.archtechtour.com/cliente/ver-N/produto/index.html"
+              className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono focus:outline-none focus:border-teal-400"
+            />
+            <p className="text-xs text-slate-400 mt-1">Se preenchido, Monk audita só essa URL (ignora cliente abaixo).</p>
+          </div>
+          <div>
+            <label className="text-xs font-medium text-slate-500">Cliente (default: todos)</label>
+            <select value={scopeClient} onChange={(e) => setScopeClient(e.target.value)} disabled={!!auditUrl.trim()} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white disabled:bg-slate-50 disabled:text-slate-400">
+              <option value="">Todos os clientes (10 produtos por rodada)</option>
+              {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <p className="text-xs text-slate-400 mt-1">Para um cliente: até 10 produtos. Para mais, rode novamente.</p>
+          </div>
+        </div>
+      </Card>
 
       {error && (
         <Card className="p-4 border-red-200 bg-red-50">
@@ -3886,6 +3915,7 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
               "Quais customizadores estão sem o script de analytics?",
               "Algum produto sem suporte a AR/iOS (USDZ)?",
               "Faça uma auditoria detalhada apenas dos publicados recentes.",
+              "Cole uma URL específica no campo acima para auditar só ela.",
             ].map((s) => (
               <button key={s} onClick={() => runAudit(s)} className="text-left text-sm px-4 py-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700">{s}</button>
             ))}

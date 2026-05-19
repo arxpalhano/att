@@ -55,9 +55,11 @@ interface ProbeResult {
 interface MonkRequest {
   prompt?: string;
   clientId?: string; // opcional para filtrar por 1 cliente
+  url?: string; // opcional: auditar URL específica (ignora filtros e DB)
+  urls?: string[]; // opcional: lista de URLs específicas (máx 10)
 }
 
-async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<{ status: number; text: string }> {
+async function fetchWithTimeout(url: string, timeoutMs = 4000): Promise<{ status: number; text: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -107,41 +109,50 @@ export async function POST(req: NextRequest) {
 
     const body: MonkRequest = await req.json().catch(() => ({}));
 
-    type Row = Record<string, unknown>;
-    const [clients, blocks, publications] = await Promise.all([
-      scanAll<Row>(TABLES.CLIENTS),
-      scanAll<Row>(TABLES.BLOCKS),
-      scanAll<Row>(TABLES.PUBLICATIONS),
-    ]);
+    // Modo "URL específica": pula DynamoDB e audita só o que veio
+    let sample: Array<{ blockId: string; url: string; _adhoc?: boolean }> = [];
+    let clientById: Record<string, Record<string, unknown>> = {};
+    let blockById: Record<string, Record<string, unknown>> = {};
 
-    const clientById = Object.fromEntries(clients.map((c) => [String(c.id), c]));
-    const blockById = Object.fromEntries(blocks.map((b) => [String(b.id), b]));
+    const adhocUrls = body.url ? [body.url] : (body.urls || []);
+    if (adhocUrls.length > 0) {
+      sample = adhocUrls.slice(0, 10).map((u, i) => ({ blockId: `adhoc_${i}`, url: u, _adhoc: true }));
+    } else {
+      type Row = Record<string, unknown>;
+      const [clients, blocks, publications] = await Promise.all([
+        scanAll<Row>(TABLES.CLIENTS),
+        scanAll<Row>(TABLES.BLOCKS),
+        scanAll<Row>(TABLES.PUBLICATIONS),
+      ]);
+      clientById = Object.fromEntries(clients.map((c) => [String(c.id), c]));
+      blockById = Object.fromEntries(blocks.map((b) => [String(b.id), b]));
 
-    // Filtra publicações por cliente se fornecido
-    let pubsToCheck = publications;
-    if (body.clientId) {
-      const wantedIds = new Set(blocks.filter((b) => b.clientId === body.clientId).map((b) => String(b.id)));
-      pubsToCheck = publications.filter((p) => wantedIds.has(String(p.blockId)));
+      let pubsToCheck = publications;
+      if (body.clientId) {
+        const wantedIds = new Set(blocks.filter((b) => b.clientId === body.clientId).map((b) => String(b.id)));
+        pubsToCheck = publications.filter((p) => wantedIds.has(String(p.blockId)));
+      }
+      // Limite menor (10) para caber no Lambda 30s
+      sample = pubsToCheck.slice(0, 10).map((p) => ({ blockId: String(p.blockId), url: String(p.url || "") }));
     }
-
-    // Limita a 25 customizadores por auditoria (timeout Lambda)
-    const sample = pubsToCheck.slice(0, 25);
 
     // Probe em paralelo (com timeout por URL)
     const probes: ProbeResult[] = await Promise.all(
       sample.map(async (pub) => {
-        const block = blockById[String(pub.blockId)];
+        const block = blockById[pub.blockId];
         const client = block ? clientById[String(block.clientId)] : undefined;
-        const url = String(pub.url || "");
-        const clientName = client?.name ? String(client.name) : "?";
-        const productTitle = block?.title ? String(block.title) : "?";
-        const clientCode = client?.code ? String(client.code).toLowerCase() : "";
+        const url = pub.url;
+        // Em modo ad-hoc, tenta inferir cliente/produto pela URL
+        const slugFromUrl = url.match(/explorar\.archtechtour\.com\/([^/]+)\/ver-\d+\/([^/]+)/i);
+        const clientName = client?.name ? String(client.name) : (pub._adhoc && slugFromUrl ? slugFromUrl[1] : "?");
+        const productTitle = block?.title ? String(block.title) : (pub._adhoc && slugFromUrl ? slugFromUrl[2].replace(/-/g, " ") : "?");
+        const clientCode = client?.code ? String(client.code).toLowerCase() : (pub._adhoc && slugFromUrl ? slugFromUrl[1] : "");
 
-        if (!url) return { blockId: String(pub.blockId), client: clientName, product: productTitle, url, httpStatus: 0, hasAnalytics: false, hasARButton: false, hasUsdz: false, scalingDisabled: false, downloads: [], zoomUiPresent: false, errors: ["URL ausente"] };
+        if (!url) return { blockId: pub.blockId, client: clientName, product: productTitle, url, httpStatus: 0, hasAnalytics: false, hasARButton: false, hasUsdz: false, scalingDisabled: false, downloads: [], zoomUiPresent: false, errors: ["URL ausente"] };
 
         const { status, text } = await fetchWithTimeout(url);
         if (status !== 200) {
-          return { blockId: String(pub.blockId), client: clientName, product: productTitle, url, httpStatus: status, hasAnalytics: false, hasARButton: false, hasUsdz: false, scalingDisabled: false, downloads: [], zoomUiPresent: false, errors: [`HTTP ${status}`] };
+          return { blockId: pub.blockId, client: clientName, product: productTitle, url, httpStatus: status, hasAnalytics: false, hasARButton: false, hasUsdz: false, scalingDisabled: false, downloads: [], zoomUiPresent: false, errors: [`HTTP ${status}`] };
         }
         const p = probeHtml(text);
 
@@ -172,7 +183,7 @@ export async function POST(req: NextRequest) {
         });
 
         return {
-          blockId: String(pub.blockId),
+          blockId: pub.blockId,
           client: clientName,
           product: productTitle,
           url,
