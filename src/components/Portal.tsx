@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, createContext, useContext, useCall
 import { signIn, useSession } from "next-auth/react";
 import { useT } from "@/lib/i18n";
 import LanguageSwitcher from "./LanguageSwitcher";
+import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
   Globe, Search, Bell, LogOut, Menu, X, Plus, Upload, Clock,
@@ -185,6 +186,9 @@ let USERS: SeedUser[] = [
   { id: "u20", email: "contato@cadeirasrosa.com.br",   password: "cadeirasrosa@2025",  name: "Cadeiras Rosa",   role: "client", clientId: "c13", active: true },
   { id: "u21", email: "contato@jaderalmeida.com",      password: "jader@2025",         name: "Jader Almeida",   role: "client", clientId: "c14", active: true },
   { id: "u22", email: "contato@arctefacto.com.br",     password: "arctefacto@2025",    name: "Arctefacto",      role: "client", clientId: "c15", active: true },
+  { id: "u23", email: "contato@greenhouse.com.br",      password: "greenhouse@2025",    name: "Green House",     role: "client", clientId: "c16", active: true },
+  { id: "u24", email: "contato@persol.com.br",          password: "persol@2025",        name: "Persol",          role: "client", clientId: "c17", active: true },
+  { id: "u25", email: "contato@ricco.com.br",           password: "ricco@2025",         name: "Riccó",           role: "client", clientId: "c18", active: true },
 ];
 
 let CLIENTS: SeedClient[] = [
@@ -204,6 +208,9 @@ let CLIENTS: SeedClient[] = [
   { id: "c13", name: "Cadeiras Rosa",  code: "cadeirasrosa", contactEmail: "contato@cadeirasrosa.com.br", active: true },
   { id: "c14", name: "Jader Almeida",  code: "jader",        contactEmail: "contato@jaderalmeida.com", active: true },
   { id: "c15", name: "Arctefacto",     code: "arctefacto",   contactEmail: "contato@arctefacto.com.br", active: true },
+  { id: "c16", name: "Green House",    code: "greenhouse",   contactEmail: "contato@greenhouse.com.br", active: true },
+  { id: "c17", name: "Persol",         code: "persol",       contactEmail: "contato@persol.com.br", active: true },
+  { id: "c18", name: "Riccó",          code: "ricco",        contactEmail: "contato@ricco.com.br", active: true },
 ];
 
 let CONTRACTS: SeedContract[] = [
@@ -364,6 +371,17 @@ let TICKETS: ProductionTicket[] = [
   { id: "tk6", clientId: "c2", blockId: "pb13", title: "Sofá Block – Novo Ticket", plan: "ultra", slaDate: "2026-06-01", priority: "urgent", status: "new" },
   { id: "tk7", clientId: "c4", blockId: "pb18", title: "Cabine Play Pequena – Modelagem", plan: "standard", slaDate: "2026-05-25", priority: "normal", assignedTo: "u4", status: "in_production" },
 ];
+
+// ============================================================
+// MIGRATED DATA — Notion + Excel Planner (14 clientes, exceto WJ)
+// Gerado em 2026-05-17 a partir de Notion Banco de Produtos
+// + 155 tarefas reais do Excel. Substitui Notion/Planner como
+// fonte de verdade.
+// ============================================================
+CONTRACTS = [...CONTRACTS, ...MIGRATED_CONTRACTS];
+INITIAL_BLOCKS.push(...MIGRATED_BLOCKS);
+PUBLICATIONS.push(...MIGRATED_PUBLICATIONS);
+TICKETS = [...TICKETS, ...MIGRATED_TICKETS];
 
 // ============================================================
 // HELPERS
