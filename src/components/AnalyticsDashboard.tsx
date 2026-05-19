@@ -536,9 +536,90 @@ export default function AnalyticsDashboard({
         </SectionCard>
       </div>
 
+      <AnalyticsInsights data={data} clientAlias={clientAlias} />
+
       <p className="text-xs text-slate-400 text-right">
         Última atualização: {new Date(data.gerado_em).toLocaleString("pt-BR", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })}
       </p>
+    </div>
+  );
+}
+
+// ============================================================
+// AI Insights — interpretação amigável do dashboard pro cliente
+// ============================================================
+function AnalyticsInsights({ data, clientAlias }: { data: AnalyticsData; clientAlias: string }) {
+  const cacheKey = `att_insights_${clientAlias}_${data.periodo.inicio}_${data.periodo.fim}`;
+  const [insights, setInsights] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    try { return localStorage.getItem(cacheKey); } catch { return null; }
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const generate = async () => {
+    setLoading(true); setError("");
+    try {
+      const res = await fetch(`/api/analytics/${clientAlias}/insights`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const raw = await res.text();
+      let parsed: { insights?: string; error?: string } = {};
+      try { parsed = raw ? JSON.parse(raw) : {}; } catch {
+        throw new Error("Resposta vazia (Lambda timeout)");
+      }
+      if (!res.ok) throw new Error(parsed.error || `HTTP ${res.status}`);
+      if (!parsed.insights) throw new Error("Resposta sem conteúdo");
+      setInsights(parsed.insights);
+      try { localStorage.setItem(cacheKey, parsed.insights); } catch { /* ignore */ }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-emerald-200/60 bg-gradient-to-br from-emerald-50/80 via-white to-cyan-50/80 p-5 md:p-6">
+      <div className="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-700">💡 Análise inteligente</p>
+          <h3 className="text-base font-semibold text-slate-900 mt-1">O que esses dados dizem sobre sua marca</h3>
+        </div>
+        {insights && (
+          <button onClick={generate} disabled={loading} className="text-xs text-slate-500 hover:text-slate-800 disabled:opacity-50">
+            {loading ? "Atualizando..." : "↻ Regenerar"}
+          </button>
+        )}
+      </div>
+
+      {!insights && !loading && !error && (
+        <div>
+          <p className="text-sm text-slate-600 leading-relaxed mb-4">
+            Gere uma interpretação personalizada dos seus números — destaques, tendências e oportunidades para sua marca.
+          </p>
+          <button onClick={generate} className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white text-sm font-semibold hover:brightness-110 shadow-sm">
+            ✨ Gerar análise
+          </button>
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center gap-3 text-sm text-slate-600">
+          <div className="h-4 w-4 rounded-full border-2 border-emerald-300 border-t-emerald-600 animate-spin" />
+          Analisando os números…
+        </div>
+      )}
+
+      {error && (
+        <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-3">{error}</div>
+      )}
+
+      {insights && !loading && (
+        <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">{insights}</div>
+      )}
     </div>
   );
 }
