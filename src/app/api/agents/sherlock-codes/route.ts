@@ -1,52 +1,49 @@
 /**
  * Agente: Sherlock Codes — Auditor do Portal ArchTechTour
  *
- * Carrega estado completo do DynamoDB e envia para Claude com prompt
- * de auditor sênior. Retorna um relatório estruturado de inconsistências,
- * problemas e oportunidades de correção.
+ * Carrega estado do DynamoDB e envia para Claude Haiku (rápido) com prompt
+ * de auditor sênior. Otimizado para terminar em <25s (limite Amplify SSR Lambda).
  */
 import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { scanAll, TABLES } from "@/lib/dynamo";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // até 60s para auditoria completa
 
-const SYSTEM_PROMPT = `Você é Sherlock Codes, auditor sênior de portais B2B. Sua especialidade é encontrar inconsistências em sistemas de gestão de produção (blocos 3D customizadores) da ArchTechTour.
+const SYSTEM_PROMPT = `Você é Sherlock Codes, auditor sênior de portais B2B da ArchTechTour (customizadores 3D para móveis).
 
-Sua missão:
-- Analisar dados do portal (clientes, contratos, blocos, publicações, tickets, usuários)
-- Identificar PROBLEMAS que afetam a experiência do cliente e do admin
-- Verificar integridade referencial (IDs órfãos, dados faltantes)
-- Apontar inconsistências de status (ex: bloco "published" sem publicação cadastrada)
-- Detectar clientes ativos sem dados aparentes
-- Sugerir correções concretas
+Missão: encontrar inconsistências e problemas no portal a partir do snapshot JSON.
 
-Formato do relatório (markdown):
-1. **Resumo executivo** (3-5 linhas)
-2. **Problemas críticos** (com lista numerada, cada item: descrição + impacto + correção sugerida)
-3. **Inconsistências de dados** (referências quebradas, status conflitantes)
-4. **Por cliente** (resumo curto: contratos, blocos por status, publicações, alertas)
-5. **Próximas ações recomendadas** (top 5, priorizadas)
+Verifique principalmente:
+- IDs órfãos (publicação apontando para bloco que não existe; ticket sem blockId válido; user com clientId que não existe)
+- Status conflitantes (bloco "published" sem registro em publications; bloco "in_modeling" antigo sem progresso)
+- Contadores divergentes (contract.usedBlocks != contagem real de blocos do cliente)
+- Clientes ativos sem dados (zero blocos, zero contratos)
+- Tickets vencidos sem responsável
 
-Seja DIRETO, OBJETIVO e use NÚMEROS. Não invente nada. Se faltar dado, fale "dado ausente".`;
+Formato (markdown CURTO):
+**Resumo**: 2-3 linhas
+**Problemas críticos** (max 5, numerados, formato: "[N] Problema · Impacto · Como corrigir")
+**Por cliente** (uma linha por cliente: nome → contratos/blocos/publicados/alertas)
+**Top 3 ações**
+
+Seja DIRETO. Use NÚMEROS. Não invente. Cite IDs reais quando apontar problema.`;
 
 interface AuditRequest {
-  prompt?: string; // opcional: pergunta específica do admin
+  prompt?: string;
 }
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now();
   try {
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({
-        error: "ANTHROPIC_API_KEY não configurada no Amplify. Adicione em Environment Variables.",
-      }, { status: 500 });
+      return NextResponse.json({ error: "ANTHROPIC_API_KEY ausente no runtime. Adicione em next.config.js env." }, { status: 500 });
     }
 
     const body: AuditRequest = await req.json().catch(() => ({}));
 
-    // Carrega estado completo do DynamoDB em paralelo
+    // Carrega estado em paralelo
     type Row = Record<string, unknown>;
     const [clients, contracts, blocks, publications, tickets, users] = await Promise.all([
       scanAll<Row>(TABLES.CLIENTS),
@@ -57,47 +54,65 @@ export async function POST(req: NextRequest) {
       scanAll<Row>(TABLES.USERS),
     ]);
 
-    // Snapshot resumido para reduzir tokens
+    // Pré-cálculo de métricas (faz trabalho de inferência localmente para
+    // o Claude focar em análise, não em contagem)
+    const blocksByClient: Record<string, { total: number; byStatus: Record<string, number> }> = {};
+    for (const b of blocks) {
+      const cid = String(b.clientId);
+      const status = String(b.status);
+      if (!blocksByClient[cid]) blocksByClient[cid] = { total: 0, byStatus: {} };
+      blocksByClient[cid].total++;
+      blocksByClient[cid].byStatus[status] = (blocksByClient[cid].byStatus[status] || 0) + 1;
+    }
+
+    const pubBlockIds = new Set(publications.map((p) => String(p.blockId)));
+    const blockIds = new Set(blocks.map((b) => String(b.id)));
+    const contractIds = new Set(contracts.map((c) => String(c.id)));
+    const clientIds = new Set(clients.map((c) => String(c.id)));
+
+    const orphans = {
+      publicationsWithBadBlockId: publications.filter((p) => !blockIds.has(String(p.blockId))).map((p) => p.id),
+      ticketsWithBadBlockId: tickets.filter((t) => t.blockId && !blockIds.has(String(t.blockId))).map((t) => t.id),
+      blocksWithBadContractId: blocks.filter((b) => !contractIds.has(String(b.contractId))).map((b) => b.id),
+      blocksWithBadClientId: blocks.filter((b) => !clientIds.has(String(b.clientId))).map((b) => b.id),
+      publishedBlocksWithoutPub: blocks.filter((b) => b.status === "published" && !pubBlockIds.has(String(b.id))).map((b) => b.id),
+    };
+
+    const contractMismatch = contracts.map((c) => {
+      const real = blocks.filter((b) => b.contractId === c.id).length;
+      return { id: c.id, declared: c.usedBlocks, real, diff: Number(c.usedBlocks) - real };
+    }).filter((m) => m.diff !== 0);
+
+    const overdueTickets = tickets
+      .filter((t) => t.status !== "delivered" && t.slaDate && String(t.slaDate) < new Date().toISOString().slice(0, 10))
+      .map((t) => ({ id: t.id, slaDate: t.slaDate, assigned: !!t.assignedTo, status: t.status }));
+
+    // Resumo final enviado ao modelo
     const snapshot = {
-      timestamp: new Date().toISOString(),
       counts: {
-        clients: clients.length,
-        contracts: contracts.length,
-        blocks: blocks.length,
-        publications: publications.length,
-        tickets: tickets.length,
-        users: users.length,
+        clients: clients.length, contracts: contracts.length, blocks: blocks.length,
+        publications: publications.length, tickets: tickets.length, users: users.length,
       },
-      clients,
-      contracts,
-      blocks: blocks.map((b) => ({
-        id: b.id, clientId: b.clientId, contractId: b.contractId,
-        sku: b.sku, title: b.title, status: b.status,
-        svc: b.svc, pri: b.pri, owner: b.owner,
-        created: b.created, published: b.published,
-      })),
-      publications: publications.map((p) => ({
-        id: p.id, blockId: p.blockId, url: p.url, v: p.v,
-      })),
-      tickets: tickets.map((t) => ({
-        id: t.id, clientId: t.clientId, blockId: t.blockId,
-        title: t.title, status: t.status, assignedTo: t.assignedTo,
-        slaDate: t.slaDate, priority: t.priority,
-      })),
-      users: users.map((u) => ({
-        id: u.id, email: u.email, name: u.name, role: u.role,
-        clientId: u.clientId, active: u.active,
-      })),
+      clients: clients.map((c) => ({ id: c.id, name: c.name, code: c.code, active: c.active })),
+      blocksByClient,
+      contracts: contracts.map((c) => ({ id: c.id, clientId: c.clientId, title: c.title, total: c.totalBlocks, used: c.usedBlocks, active: c.active })),
+      publications_count_by_client: Object.fromEntries(
+        clients.map((c) => [c.id, blocks.filter((b) => b.clientId === c.id && pubBlockIds.has(String(b.id))).length])
+      ),
+      tickets_by_status: tickets.reduce<Record<string, number>>((acc, t) => { const s = String(t.status); acc[s] = (acc[s] || 0) + 1; return acc; }, {}),
+      orphans,
+      contractMismatch,
+      overdueTickets: overdueTickets.slice(0, 20),
     };
 
     const userPrompt = body.prompt
-      ? `${body.prompt}\n\n---\nESTADO ATUAL DO PORTAL:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``
-      : `Faça uma auditoria completa do portal. Estado atual:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``;
+      ? `${body.prompt}\n\n---\nMÉTRICAS PRÉ-CALCULADAS:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``
+      : `Faça auditoria do portal. Métricas pré-calculadas:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``;
 
-    const client = new Anthropic({ apiKey });
-    const msg = await client.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 4096,
+    const ai = new Anthropic({ apiKey });
+    const msg = await ai.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 2048,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userPrompt }],
     });
@@ -111,13 +126,15 @@ export async function POST(req: NextRequest) {
       ok: true,
       report: text,
       snapshot: snapshot.counts,
-      timestamp: snapshot.timestamp,
+      timestamp: new Date().toISOString(),
       tokens: { input: msg.usage.input_tokens, output: msg.usage.output_tokens },
+      durationMs: Date.now() - startedAt,
     });
   } catch (e) {
     console.error("Sherlock Codes audit error:", e);
     return NextResponse.json({
-      error: (e as Error).message,
+      error: (e as Error).message || "Erro desconhecido na auditoria",
+      durationMs: Date.now() - startedAt,
     }, { status: 500 });
   }
 }

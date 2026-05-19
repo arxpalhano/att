@@ -3679,12 +3679,17 @@ function SherlockCodesPage({ setPage }: { setPage: (p: string) => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: userPrompt }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Erro desconhecido");
+      const raw = await res.text();
+      let data: { ok?: boolean; report?: string; error?: string; timestamp?: string; tokens?: { input: number; output: number } } = {};
+      try { data = raw ? JSON.parse(raw) : {}; } catch {
+        throw new Error(raw.slice(0, 200) || `HTTP ${res.status} — resposta vazia (provável timeout do Lambda)`);
+      }
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (!data.report) throw new Error("Resposta sem conteúdo");
       const assistantMsg: AgentMessage = {
         role: "assistant",
         content: data.report,
-        timestamp: data.timestamp,
+        timestamp: data.timestamp || new Date().toISOString(),
         tokens: data.tokens,
       };
       setMessages((prev) => [...prev, assistantMsg]);
