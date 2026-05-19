@@ -5,8 +5,8 @@
  * de auditor sênior. Otimizado para terminar em <25s (limite Amplify SSR Lambda).
  */
 import { NextRequest, NextResponse } from "next/server";
-import Anthropic from "@anthropic-ai/sdk";
 import { scanAll, TABLES } from "@/lib/dynamo";
+import { callClaudeWithRetry } from "@/lib/claude-retry";
 
 export const dynamic = "force-dynamic";
 
@@ -109,25 +109,19 @@ export async function POST(req: NextRequest) {
       ? `${body.prompt}\n\n---\nMÉTRICAS PRÉ-CALCULADAS:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``
       : `Faça auditoria do portal. Métricas pré-calculadas:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``;
 
-    const ai = new Anthropic({ apiKey });
-    const msg = await ai.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 2048,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userPrompt }],
+    const { text, usage, modelUsed, attempts } = await callClaudeWithRetry({
+      apiKey, primaryModel: "claude-haiku-4-5", fallbackModel: "claude-sonnet-4-5",
+      system: SYSTEM_PROMPT, userPrompt, maxTokens: 2048,
     });
-
-    const text = msg.content
-      .filter((c) => c.type === "text")
-      .map((c) => (c as { type: "text"; text: string }).text)
-      .join("\n");
 
     return NextResponse.json({
       ok: true,
       report: text,
       snapshot: snapshot.counts,
       timestamp: new Date().toISOString(),
-      tokens: { input: msg.usage.input_tokens, output: msg.usage.output_tokens },
+      tokens: { input: usage.input_tokens, output: usage.output_tokens },
+      model: modelUsed,
+      attempts,
       durationMs: Date.now() - startedAt,
     });
   } catch (e) {
