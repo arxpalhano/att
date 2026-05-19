@@ -59,4 +59,8 @@ export const TABLES = {
   BLOCKS: "att-blocks",
   TICKETS: "att-tickets",
   ACTIVITIES: "att-activities",
+  CLIENTS: "att-clients",
+  CONTRACTS: "att-contracts",
+  PUBLICATIONS: "att-publications",
+  USERS: "att-users",
 } as const;

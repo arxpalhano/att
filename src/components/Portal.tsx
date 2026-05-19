@@ -416,6 +416,14 @@ interface AppState {
   setAssets: React.Dispatch<React.SetStateAction<SeedAsset[]>>;
   tickets: ProductionTicket[];
   setTickets: React.Dispatch<React.SetStateAction<ProductionTicket[]>>;
+  clients: SeedClient[];
+  setClients: React.Dispatch<React.SetStateAction<SeedClient[]>>;
+  contracts: SeedContract[];
+  setContracts: React.Dispatch<React.SetStateAction<SeedContract[]>>;
+  publications: SeedPub[];
+  setPublications: React.Dispatch<React.SetStateAction<SeedPub[]>>;
+  users: SeedUser[];
+  setUsers: React.Dispatch<React.SetStateAction<SeedUser[]>>;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -2114,7 +2122,22 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
       <button onClick={() => setPage("blocks")} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700 transition-colors"><ArrowLeft className="w-4 h-4" /> Voltar</button>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3 flex-wrap"><h1 className="text-xl font-bold text-slate-800">{block.title}</h1><StatusBadge status={block.status} /></div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-xl font-bold text-slate-800">{block.title}</h1>
+            <StatusBadge status={block.status} />
+            {user.role === "admin" && (
+              <select
+                value={block.status}
+                onChange={(e) => handleTransition(e.target.value as BlockStatus)}
+                title="Override de status (admin)"
+                className="text-xs px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 font-medium cursor-pointer hover:bg-amber-100"
+              >
+                {(Object.keys(STATUS_LABELS) as BlockStatus[]).map((s) => (
+                  <option key={s} value={s}>↪ {STATUS_LABELS[s]}</option>
+                ))}
+              </select>
+            )}
+          </div>
           <div className="flex items-center gap-4 mt-1 text-xs text-slate-500 flex-wrap">
             <span className="font-mono">{block.sku}</span><span>SKU Cliente: {block.csku}</span><span>{getClientName(block.clientId)}</span>
           </div>
@@ -2351,28 +2374,97 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
 // ============================================================
 // REMAINING PAGES (Contracts, Clients, Approvals, Queue, Activity, Users)
 // ============================================================
+function ContractFormModal({ title, onClose, onSave, initial, clients }: {
+  title: string; onClose: () => void;
+  onSave: (d: { id?: string; clientId: string; title: string; totalBlocks: number; usedBlocks: number; startDate: string; active: boolean }) => void;
+  initial?: SeedContract; clients: SeedClient[];
+}) {
+  const [clientId, setClientId] = useState(initial?.clientId ?? clients[0]?.id ?? "");
+  const [t, setT] = useState(initial?.title ?? "");
+  const [tb, setTb] = useState(String(initial?.totalBlocks ?? 10));
+  const [ub, setUb] = useState(String(initial?.usedBlocks ?? 0));
+  const [sd, setSd] = useState(initial?.startDate ?? new Date().toISOString().slice(0, 10));
+  const [active, setActive] = useState(initial?.active ?? true);
+  const canSave = t.trim() && clientId && Number(tb) > 0;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
+          <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div><label className="text-xs font-medium text-slate-500">Cliente *</label>
+            <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
+              {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div><label className="text-xs font-medium text-slate-500">Título *</label><input value={t} onChange={(e) => setT(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Contrato 2026 – Linha Completa" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="text-xs font-medium text-slate-500">Total Blocos *</label><input type="number" value={tb} onChange={(e) => setTb(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-500">Já Utilizados</label><input type="number" value={ub} onChange={(e) => setUb(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+          </div>
+          <div><label className="text-xs font-medium text-slate-500">Data de Início</label><input type="date" value={sd} onChange={(e) => setSd(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Ativo</label>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button onClick={() => onSave({ id: initial?.id, clientId, title: t.trim(), totalBlocks: Number(tb), usedBlocks: Number(ub), startDate: sd, active })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ContractsPage({ user, setPage, setSelectedContract }: { user: SeedUser; setPage: (p: string) => void; setSelectedContract: (id: string) => void }) {
-  const ctrs = user.role === "client" ? CONTRACTS.filter((c) => c.clientId === user.clientId) : CONTRACTS;
+  const { contracts, setContracts, clients, currentUser } = useContext(AppContext);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<SeedContract | null>(null);
+  const canEdit = currentUser?.role === "admin";
+  const ctrs = user.role === "client" ? contracts.filter((c) => c.clientId === user.clientId) : contracts;
+
+  const handleSave = (d: { id?: string; clientId: string; title: string; totalBlocks: number; usedBlocks: number; startDate: string; active: boolean }) => {
+    if (d.id) {
+      setContracts(contracts.map((c) => c.id === d.id ? { ...c, ...d, id: d.id } : c));
+    } else {
+      setContracts([...contracts, { ...d, id: `ct_${Date.now()}` }]);
+    }
+    setShowAdd(false); setEditing(null);
+  };
+
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-slate-800">Contratos</h1>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div><h1 className="text-xl font-bold text-slate-800">Contratos</h1><p className="text-sm text-slate-500">{ctrs.length} contratos</p></div>
+        {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Contrato</button>}
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {ctrs.map((ct) => {
-          const cl = CLIENTS.find((c) => c.id === ct.clientId);
+          const cl = clients.find((c) => c.id === ct.clientId);
           const pct = ct.totalBlocks > 0 ? Math.round((ct.usedBlocks / ct.totalBlocks) * 100) : 0;
           return (
-            <Card key={ct.id} className="p-5" onClick={() => { setSelectedContract(ct.id); setPage("contract_detail"); }}>
+            <Card key={ct.id} className="p-5">
               <div className="flex items-start justify-between mb-3">
-                <div><p className="text-sm font-semibold text-slate-800">{ct.title}</p>{user.role !== "client" && <p className="text-xs text-slate-400 mt-0.5">{cl?.name}</p>}</div>
-                <Badge className="bg-green-50 text-green-700 border-green-200">Ativo</Badge>
+                <div onClick={() => { setSelectedContract(ct.id); setPage("contract_detail"); }} className="cursor-pointer flex-1">
+                  <p className="text-sm font-semibold text-slate-800">{ct.title}</p>
+                  {user.role !== "client" && <p className="text-xs text-slate-400 mt-0.5">{cl?.name}</p>}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Badge className={ct.active ? "bg-green-50 text-green-700 border-green-200" : "bg-slate-100 text-slate-500 border-slate-200"}>{ct.active ? "Ativo" : "Inativo"}</Badge>
+                  {canEdit && <button onClick={() => setEditing(ct)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>}
+                </div>
               </div>
-              <div className="flex items-center justify-between text-sm mb-2"><span className="text-slate-500">{ct.usedBlocks} / {ct.totalBlocks} blocos</span><span className="font-bold text-slate-700">{pct}%</span></div>
-              <ProgressBar value={pct} />
-              <p className="text-xs text-slate-400 mt-3">Início: {fmtDate(ct.startDate)}</p>
+              <div onClick={() => { setSelectedContract(ct.id); setPage("contract_detail"); }} className="cursor-pointer">
+                <div className="flex items-center justify-between text-sm mb-2"><span className="text-slate-500">{ct.usedBlocks} / {ct.totalBlocks} blocos</span><span className="font-bold text-slate-700">{pct}%</span></div>
+                <ProgressBar value={pct} />
+                <p className="text-xs text-slate-400 mt-3">Início: {fmtDate(ct.startDate)}</p>
+              </div>
             </Card>
           );
         })}
       </div>
+      {showAdd && <ContractFormModal title="Novo Contrato" onClose={() => setShowAdd(false)} onSave={handleSave} clients={clients} />}
+      {editing && <ContractFormModal title="Editar Contrato" onClose={() => setEditing(null)} onSave={handleSave} initial={editing} clients={clients} />}
     </div>
   );
 }
@@ -2406,32 +2498,92 @@ function ContractDetailPage({ contractId, user, setPage, setSelectedBlock }: { c
   );
 }
 
+function ClientFormModal({ title, onClose, onSave, initial }: {
+  title: string; onClose: () => void;
+  onSave: (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean }) => void;
+  initial?: SeedClient;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [code, setCode] = useState(initial?.code ?? "");
+  const [contactEmail, setEmail] = useState(initial?.contactEmail ?? "");
+  const [active, setActive] = useState(initial?.active ?? true);
+  const canSave = name.trim() && code.trim();
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
+          <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div><label className="text-xs font-medium text-slate-500">Nome *</label><input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Tidelli" /></div>
+          <div><label className="text-xs font-medium text-slate-500">Code (alias para analytics — lowercase) *</label><input value={code} onChange={(e) => setCode(e.target.value.toLowerCase())} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="tidelli" /></div>
+          <div><label className="text-xs font-medium text-slate-500">E-mail de contato</label><input value={contactEmail} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="contato@empresa.com.br" /></div>
+          <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Ativo</label>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button onClick={() => onSave({ id: initial?.id, name: name.trim(), code: code.trim(), contactEmail: contactEmail.trim(), active })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ClientsPage() {
+  const { clients, setClients, contracts, blocks, currentUser } = useContext(AppContext);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<SeedClient | null>(null);
+  const canEdit = currentUser?.role === "admin";
+
+  const handleSave = (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean }) => {
+    if (d.id) {
+      setClients(clients.map((c) => c.id === d.id ? { ...c, name: d.name, code: d.code, contactEmail: d.contactEmail, active: d.active } : c));
+    } else {
+      setClients([...clients, { id: `c_${Date.now()}`, name: d.name, code: d.code, contactEmail: d.contactEmail, active: d.active }]);
+    }
+    setShowAdd(false); setEditing(null);
+  };
+  const toggleActive = (id: string) => setClients(clients.map((c) => c.id === id ? { ...c, active: !c.active } : c));
+
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-slate-800">Clientes</h1>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div><h1 className="text-xl font-bold text-slate-800">Clientes</h1><p className="text-sm text-slate-500">{clients.length} clientes · {clients.filter((c) => c.active).length} ativos</p></div>
+        {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Cliente</button>}
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {CLIENTS.map((cl) => {
-          const ctrs = CONTRACTS.filter((c) => c.clientId === cl.id);
+        {clients.map((cl) => {
+          const ctrs = contracts.filter((c) => c.clientId === cl.id);
           const total = ctrs.reduce((s, c) => s + c.totalBlocks, 0);
           const used = ctrs.reduce((s, c) => s + c.usedBlocks, 0);
-          const cnt = INITIAL_BLOCKS.filter((b) => b.clientId === cl.id).length;
+          const cnt = blocks.filter((b) => b.clientId === cl.id).length;
           return (
-            <Card key={cl.id} className="p-5">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-500">{cl.code.slice(0, 2)}</div>
-                <div><p className="text-sm font-semibold text-slate-800">{cl.name}</p><p className="text-xs text-slate-400 font-mono">{cl.code}</p></div>
+            <Card key={cl.id} className={`p-5 ${!cl.active ? "opacity-50" : ""}`}>
+              <div className="flex items-start justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-500">{cl.code.slice(0, 2).toUpperCase()}</div>
+                  <div><p className="text-sm font-semibold text-slate-800">{cl.name}</p><p className="text-xs text-slate-400 font-mono">{cl.code}</p></div>
+                </div>
+                {canEdit && (
+                  <div className="flex gap-1">
+                    <button onClick={() => setEditing(cl)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>
+                    <button onClick={() => toggleActive(cl.id)} title={cl.active ? "Desativar" : "Reativar"} className="p-1.5 rounded-lg hover:bg-slate-100">{cl.active ? <X className="w-3.5 h-3.5 text-red-500" /> : <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />}</button>
+                  </div>
+                )}
               </div>
               <div className="grid grid-cols-3 gap-3 text-center">
                 <div><p className="text-lg font-bold text-slate-700">{ctrs.length}</p><p className="text-xs text-slate-400">Contratos</p></div>
                 <div><p className="text-lg font-bold text-slate-700">{cnt}</p><p className="text-xs text-slate-400">Blocos</p></div>
                 <div><p className="text-lg font-bold text-emerald-600">{total - used}</p><p className="text-xs text-slate-400">Disponíveis</p></div>
               </div>
-              <p className="text-xs text-slate-400 mt-3">{cl.contactEmail}</p>
+              <p className="text-xs text-slate-400 mt-3">{cl.contactEmail || "—"}</p>
             </Card>
           );
         })}
       </div>
+      {showAdd && <ClientFormModal title="Novo Cliente" onClose={() => setShowAdd(false)} onSave={handleSave} />}
+      {editing && <ClientFormModal title="Editar Cliente" onClose={() => setEditing(null)} onSave={handleSave} initial={editing} />}
     </div>
   );
 }
@@ -3290,57 +3442,109 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
 // ============================================================
 // FASE 7 — PUBLICAÇÕES
 // ============================================================
+function PublicationFormModal({ title, onClose, onSave, initial, blocks }: {
+  title: string; onClose: () => void;
+  onSave: (d: { id?: string; blockId: string; url: string; v: number }) => void;
+  initial?: SeedPub; blocks: SeedBlock[];
+}) {
+  const publishedBlocks = blocks.filter((b) => b.status === "published");
+  const [blockId, setBlockId] = useState(initial?.blockId ?? publishedBlocks[0]?.id ?? "");
+  const [url, setUrl] = useState(initial?.url ?? "");
+  const [v, setV] = useState(String(initial?.v ?? 1));
+  const canSave = blockId && url.trim().startsWith("http");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-800">{title}</h2>
+          <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div><label className="text-xs font-medium text-slate-500">Bloco *</label>
+            <select value={blockId} onChange={(e) => setBlockId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
+              {publishedBlocks.map((b) => <option key={b.id} value={b.id}>{b.title} ({b.sku})</option>)}
+            </select>
+          </div>
+          <div><label className="text-xs font-medium text-slate-500">URL do customizador *</label><input value={url} onChange={(e) => setUrl(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="https://explorar.archtechtour.com/cliente/ver-N/produto/index.html" /></div>
+          <div><label className="text-xs font-medium text-slate-500">Versão</label><input type="number" value={v} onChange={(e) => setV(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button onClick={() => onSave({ id: initial?.id, blockId, url: url.trim(), v: Number(v) })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PublicationsPage({ user }: { user: SeedUser }) {
-  const { blocks } = useContext(AppContext);
+  const { blocks, publications, setPublications, clients, currentUser } = useContext(AppContext);
   const [copied, setCopied] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<SeedPub | null>(null);
+  const canEdit = currentUser?.role === "admin";
 
   const isClient = user.role === "client";
-  const pubs = PUBLICATIONS.filter((p) => {
+  const pubs = publications.filter((p) => {
     if (!isClient) return true;
     const block = blocks.find((b) => b.id === p.blockId);
     return block?.clientId === user.clientId;
   });
 
   const copyToClipboard = (text: string, id: string) => {
-    navigator.clipboard.writeText(text).then(() => {
-      setCopied(id);
-      setTimeout(() => setCopied(null), 2000);
-    });
+    navigator.clipboard.writeText(text).then(() => { setCopied(id); setTimeout(() => setCopied(null), 2000); });
   };
 
-  // Downloads virão do Analytics (Athena). Por enquanto zerados para não exibir dados fictícios.
-  const downloads: Record<string, number> = { pub1: 4812, pub2: 1940, pub3: 2733, pub4: 3210, pub5: 987, pub6: 2150, pub7: 1320 };
+  const handleSave = (d: { id?: string; blockId: string; url: string; v: number }) => {
+    const embed = `<iframe width="100%" height="640px" frameborder="0" src="${d.url}" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>`;
+    if (d.id) {
+      setPublications(publications.map((p) => p.id === d.id ? { ...p, blockId: d.blockId, url: d.url, embed, v: d.v } : p));
+    } else {
+      setPublications([...publications, { id: `pub_${Date.now()}`, blockId: d.blockId, url: d.url, embed, env: "production", v: d.v }]);
+    }
+    setShowAdd(false); setEditing(null);
+  };
+  const handleDelete = (id: string) => {
+    if (!confirm("Remover esta publicação?")) return;
+    setPublications(publications.filter((p) => p.id !== id));
+  };
 
   return (
     <div className="space-y-6">
       <SectionHeader
         eyebrow="Fase 7 · Publicação"
         title="Blocos publicados"
-        description="Todos os blocos 3D disponíveis na plataforma ArchTechTour, com links de embed e métricas de uso."
-        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{pubs.length} publicados</Badge>}
+        description="Todos os blocos 3D disponíveis na plataforma ArchTechTour, com links de embed."
+        action={
+          <div className="flex items-center gap-2">
+            <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{pubs.length} publicados</Badge>
+            {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova Publicação</button>}
+          </div>
+        }
       />
 
       {pubs.length === 0 ? (
-        <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc="Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour." /></Card>
+        <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc={canEdit ? "Clique em 'Nova Publicação' para adicionar manualmente." : "Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour."} /></Card>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {pubs.map((pub) => {
             const block = blocks.find((b) => b.id === pub.blockId);
-            const client = CLIENTS.find((c) => c.id === block?.clientId);
+            const client = clients.find((c) => c.id === block?.clientId);
             return (
               <Card key={pub.id} className="p-5">
                 <div className="flex items-start justify-between gap-3 mb-4">
-                  <div>
+                  <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{client?.name} · v{pub.v}</p>
                     <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
                     <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>
                   </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-2xl font-semibold text-slate-900">{(downloads[pub.id] || 0).toLocaleString("pt-BR")}</p>
-                    <p className="text-xs text-slate-400">downloads</p>
-                  </div>
+                  {canEdit && (
+                    <div className="flex gap-1">
+                      <button onClick={() => setEditing(pub)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>
+                      <button onClick={() => handleDelete(pub.id)} title="Remover" className="p-1.5 rounded-lg hover:bg-red-50"><X className="w-3.5 h-3.5 text-red-500" /></button>
+                    </div>
+                  )}
                 </div>
-
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                     <ExternalLink className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
@@ -3367,6 +3571,8 @@ function PublicationsPage({ user }: { user: SeedUser }) {
           })}
         </div>
       )}
+      {showAdd && <PublicationFormModal title="Nova Publicação" onClose={() => setShowAdd(false)} onSave={handleSave} blocks={blocks} />}
+      {editing && <PublicationFormModal title="Editar Publicação" onClose={() => setEditing(null)} onSave={handleSave} initial={editing} blocks={blocks} />}
     </div>
   );
 }
@@ -3528,28 +3734,27 @@ export default function Portal() {
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
   const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
   const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
+  const [clients, setClients] = useState<SeedClient[]>(CLIENTS);
+  const [contracts, setContracts] = useState<SeedContract[]>(CONTRACTS);
+  const [publications, setPublications] = useState<SeedPub[]>(PUBLICATIONS);
+  const [users, setUsers] = useState<SeedUser[]>(USERS);
   const [hydrated, setHydrated] = useState(false);
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
   useEffect(() => {
     (async () => {
       try {
-        // Local-only: usuários/clientes/contratos criados via /contrato (cadastro)
-        const storedUsers: SeedUser[] = JSON.parse(localStorage.getItem("att_portal_users") || "[]");
-        storedUsers.forEach((u) => { if (!USERS.find((x) => x.email === u.email)) USERS.push(u); });
-        const storedClients: SeedClient[] = JSON.parse(localStorage.getItem("att_portal_clients") || "[]");
-        storedClients.forEach((c) => { if (!CLIENTS.find((x) => x.id === c.id)) CLIENTS.push(c); });
-        const storedContracts: SeedContract[] = JSON.parse(localStorage.getItem("att_portal_contracts") || "[]");
-        storedContracts.forEach((c) => { if (!CONTRACTS.find((x) => x.id === c.id)) CONTRACTS.push(c); });
-
-        // DynamoDB: blocks, tickets, activities (compartilhados entre admin e cliente)
-        const [bRes, tRes, aRes] = await Promise.all([
+        const [bRes, tRes, aRes, cRes, ctrRes, pubRes, uRes] = await Promise.all([
           fetch("/api/state/blocks").then((r) => r.json()),
           fetch("/api/state/tickets").then((r) => r.json()),
           fetch("/api/state/activities").then((r) => r.json()),
+          fetch("/api/state/clients").then((r) => r.json()),
+          fetch("/api/state/contracts").then((r) => r.json()),
+          fetch("/api/state/publications").then((r) => r.json()),
+          fetch("/api/state/users").then((r) => r.json()),
         ]);
 
-        // Se o DB tiver dados → usa. Senão → seed na primeira vez.
+        // Se DB tem dados → usa. Senão → seed inicial.
         if (bRes.items?.length) setBlocks(bRes.items);
         else { await fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(INITIAL_BLOCKS) }); }
 
@@ -3558,28 +3763,31 @@ export default function Portal() {
 
         if (aRes.items?.length) setActivities(aRes.items);
         else { await fetch("/api/state/activities", { method: "POST", body: JSON.stringify(ACTIVITIES) }); }
+
+        if (cRes.items?.length) { setClients(cRes.items); CLIENTS = cRes.items; }
+        else { await fetch("/api/state/clients", { method: "POST", body: JSON.stringify(CLIENTS) }); }
+
+        if (ctrRes.items?.length) { setContracts(ctrRes.items); CONTRACTS = ctrRes.items; }
+        else { await fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(CONTRACTS) }); }
+
+        if (pubRes.items?.length) setPublications(pubRes.items);
+        else { await fetch("/api/state/publications", { method: "POST", body: JSON.stringify(PUBLICATIONS) }); }
+
+        if (uRes.items?.length) { setUsers(uRes.items); USERS.length = 0; USERS.push(...uRes.items); }
+        else { await fetch("/api/state/users", { method: "POST", body: JSON.stringify(USERS) }); }
       } catch (e) { console.error("Failed to load state:", e); }
       setHydrated(true);
     })();
   }, []);
 
-  // Persistência DynamoDB com debounce de 800ms (evita flood de writes)
-  useEffect(() => {
-    if (!hydrated) return;
-    const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800);
-    return () => clearTimeout(t);
-  }, [blocks, hydrated]);
-  useEffect(() => {
-    if (!hydrated) return;
-    TICKETS = tickets;
-    const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800);
-    return () => clearTimeout(t);
-  }, [tickets, hydrated]);
-  useEffect(() => {
-    if (!hydrated) return;
-    const t = setTimeout(() => { fetch("/api/state/activities", { method: "POST", body: JSON.stringify(activities) }).catch(() => {}); }, 800);
-    return () => clearTimeout(t);
-  }, [activities, hydrated]);
+  // Persistência DynamoDB com debounce 800ms (anti-flood)
+  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [blocks, hydrated]);
+  useEffect(() => { if (!hydrated) return; TICKETS = tickets; const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [tickets, hydrated]);
+  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/activities", { method: "POST", body: JSON.stringify(activities) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [activities, hydrated]);
+  useEffect(() => { if (!hydrated) return; CLIENTS = clients; const t = setTimeout(() => { fetch("/api/state/clients", { method: "POST", body: JSON.stringify(clients) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [clients, hydrated]);
+  useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
+  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
+  useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
     [],
@@ -3587,7 +3795,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -3618,7 +3826,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
