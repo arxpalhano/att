@@ -13,6 +13,7 @@ import { NextResponse } from "next/server";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, ScanCommand, BatchWriteCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
+import { WJ_BLOCKS, WJ_PUBS } from "@/data/wj-seed";
 
 export const dynamic = "force-dynamic";
 
@@ -60,11 +61,9 @@ export async function POST() {
   try {
     const doc = getClient();
 
-    // 1. Construir dataset consolidado
-    const allBlocks = [...MIGRATED_BLOCKS]; // 107 blocos do Notion + Excel
-    // (não temos os originais aqui — Portal.tsx é client; assume-se que MIGRATED cobre tudo
-    //  exceto WJ que já está em MIGRATED via integração anterior. Para garantir, recalculamos
-    //  usedBlocks dinamicamente.)
+    // 1. Construir dataset consolidado: WJ (21 blocos do Portal.tsx) + 107 migrados Notion/Excel
+    const allBlocks = [...WJ_BLOCKS, ...MIGRATED_BLOCKS]; // 128 blocos no total
+    const allPubs = [...WJ_PUBS, ...MIGRATED_PUBLICATIONS]; // 20 WJ + 46 = 66 pubs
 
     const allContracts = [...ORIGINAL_CONTRACTS, ...MIGRATED_CONTRACTS];
     // Recalcula usedBlocks de cada contrato com base nos blocos reais
@@ -75,7 +74,7 @@ export async function POST() {
 
     // Filtra publicações órfãs
     const blockIdSet = new Set(allBlocks.map((b) => b.id));
-    const validPubs = MIGRATED_PUBLICATIONS.filter((p) => blockIdSet.has(p.blockId));
+    const validPubs = allPubs.filter((p) => blockIdSet.has(p.blockId));
 
     // 2. Limpar tabelas
     const cleared = {
@@ -98,7 +97,7 @@ export async function POST() {
       seeded: {
         blocks: allBlocks.length,
         publications: validPubs.length,
-        publications_orphans_dropped: MIGRATED_PUBLICATIONS.length - validPubs.length,
+        publications_orphans_dropped: allPubs.length - validPubs.length,
         contracts: reconciledContracts.length,
         tickets: MIGRATED_TICKETS.length,
         activities: 0,
