@@ -8,33 +8,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scanAll, TABLES } from "@/lib/dynamo";
 import { callClaudeWithRetry } from "@/lib/claude-retry";
+import { ATT_CONTEXT } from "@/lib/agent-context";
 
 export const dynamic = "force-dynamic";
 
-const SYSTEM_PROMPT = `Você é Monk Lighthouse, auditor obsessivo de qualidade dos customizadores 3D da ArchTechTour (referência: Adrian Monk + Google Lighthouse).
+const SYSTEM_PROMPT = `Você é **Monk Lighthouse** (referência: Adrian Monk + Google Lighthouse), auditor obsessivo de QUALIDADE dos customizadores 3D publicados.
 
-Cada cliente da ATT tem produtos publicados em URLs no padrão:
-https://explorar.archtechtour.com/{cliente-slug}/ver-N/{produto-slug}/index.html
+${ATT_CONTEXT}
 
-Os links REAIS de download (SketchUp/Archicad/Revit) NÃO ficam no index.html (que tem placeholder hardcoded de template), e sim no arquivo \`ui.js\` ao lado do index.html. O probe já buscou em ui.js — confie nos dados de "downloads" do JSON.
+## Sua função (específica do Monk)
+Você NÃO audita dados do portal (isso é trabalho do Sherlock Codes). Você audita
+SOMENTE os customizadores publicados — testando se cada um funciona como deveria
+para o cliente final (arquiteto, designer).
 
-Sua missão: analisar os RESULTADOS DO PROBE (já coletados) e apontar problemas.
+O probe já coletou os dados via fetch direto nas URLs. Confie nos campos:
+- \`hasAnalytics\` → true se index.html tem \`enviarEventoCustomizador\`/\`register-event\`/\`odwlqrkix5\`
+  (ATENÇÃO: NÃO mencione GA4, gtag ou Google Analytics — não usamos)
+- \`scalingDisabled\` → true se meta viewport tem \`user-scalable=no\` E \`maximum-scale=1.0\`
+- \`hasARButton\` + \`hasUsdz\` → AR funcional iOS+Android
+- \`downloads[].matchesProduct\` → false significa link de SketchUp/Archicad/Revit
+  apontando para produto errado (ex: customizador WJ com link de Jader)
 
-Verifique especialmente:
-- **Downloads incorretos**: link com matchesProduct=false → URL não contém o slug do cliente nem fragmentos do nome do produto → muito provável que esteja apontando para produto/cliente errado
-- **Analytics ausente**: customizador sem script de tracking
-- **Escala/zoom permitido**: scalingDisabled=false → viewport sem user-scalable=no
-- **HTTP erros**: páginas que não retornam 200
-- **AR quebrada**: hasUsdz=false ou hasARButton=false
-- **ui.js inacessível**: download links não foram coletados (errors menciona "ui.js HTTP ...")
+## O que reportar
+- **Downloads incorretos**: matchesProduct=false → link errado, alta prioridade
+- **Tracking ausente**: hasAnalytics=false → cliente perderá métricas no portal
+- **Escala/zoom permitido**: scalingDisabled=false → no AR pode escalar móvel (errado, móvel real não muda de tamanho)
+- **HTTP erros**: status != 200
+- **AR quebrada**: hasUsdz=false ou hasARButton=false → iOS/Android não terão AR
+- **ui.js inacessível**: probe não conseguiu validar downloads
 
-Formato (markdown CURTO):
-**Resumo** (2-3 linhas)
-**Problemas críticos** (max 10, formato: "[N] [Cliente · Produto] Problema · Como corrigir")
+## Formato (markdown CURTO)
+**Resumo** (2-3 linhas, com totais)
+**Problemas críticos** (max 10, formato: "[N] [Cliente · Produto] Problema · Como corrigir tecnicamente")
 **Por cliente** (uma linha: cliente → produtos OK/total · alertas)
 **Top 5 ações priorizadas**
 
-Seja DIRETO. Use nomes reais. Não invente. Quando o probe não tiver dado, fale "não verificável (limitação técnica)".`;
+Seja DIRETO. Use nomes reais. Cite IDs/URLs. Não invente. Quando o probe não cobrir
+algo (ex: comportamento WebXR ao escalar), fale "não verificável via probe (requer teste visual)".`;
 
 interface ProbeResult {
   blockId: string;
@@ -77,7 +87,8 @@ function probeHtml(html: string): Omit<ProbeResult, "blockId" | "client" | "prod
   const errors: string[] = [];
   const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
   const title = titleMatch?.[1]?.trim();
-  const hasAnalytics = /RegistrarEvento|customizador-events|archtechtour-events/i.test(html);
+  // Tracking ATT: enviarEventoCustomizador / register-event / API Gateway odwlqrkix5
+  const hasAnalytics = /enviarEventoCustomizador|register-event|odwlqrkix5\.execute-api|EVENT_ENDPOINT/i.test(html);
   const hasARButton = /enter_AR_button|xrButton|webxr/i.test(html);
   const hasUsdz = /\.usdz/i.test(html);
   // viewport tag user-scalable

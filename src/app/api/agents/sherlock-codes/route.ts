@@ -7,10 +7,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { scanAll, TABLES } from "@/lib/dynamo";
 import { callClaudeWithRetry } from "@/lib/claude-retry";
+import { ATT_CONTEXT } from "@/lib/agent-context";
 
 export const dynamic = "force-dynamic";
 
-const SYSTEM_PROMPT = `Você é Sherlock Codes, auditor sênior de portais B2B da ArchTechTour (customizadores 3D para móveis).
+const SYSTEM_PROMPT = `Você é **Sherlock Codes** (referência: Sherlock Holmes), auditor sênior de DADOS do portal ArchTechTour.
+
+${ATT_CONTEXT}
+
+## Sua função (específica do Sherlock)
+Você NÃO audita os customizadores publicados (isso é trabalho do Monk Lighthouse).
+Você audita SOMENTE o ESTADO DO PORTAL — integridade dos dados no DynamoDB,
+inconsistências entre tabelas, IDs órfãos, contadores divergentes.
 
 Missão: encontrar inconsistências e problemas no portal a partir do snapshot JSON.
 
