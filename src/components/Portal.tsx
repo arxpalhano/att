@@ -42,7 +42,7 @@ interface CatalogProduct {
   id: string; clientId: string; name: string; sku: string;
   category: ProductCategory; priority: number; variations: ProductVariation[];
 }
-interface ProductionTicket {
+export interface ProductionTicket {
   id: string; clientId: string; blockId: string; title: string;
   plan: ServiceType; slaDate: string; priority: Priority;
   assignedTo?: string; status: TicketStatus;
@@ -53,11 +53,11 @@ interface SeedUser {
   clientId?: string; active: boolean;
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
-interface SeedContract {
+export interface SeedContract {
   id: string; clientId: string; title: string;
   totalBlocks: number; usedBlocks: number; startDate: string; active: boolean;
 }
-interface SeedBlock {
+export interface SeedBlock {
   id: string; clientId: string; contractId: string; n: number;
   sku: string; csku: string; title: string; desc?: string;
   svc: ServiceType; status: BlockStatus; pri: Priority;
@@ -79,7 +79,7 @@ interface SeedActivity {
   id: string; blockId: string; userId: string;
   type: string; desc: string; at: string;
 }
-interface SeedPub {
+export interface SeedPub {
   id: string; blockId: string; url: string;
   embed: string; env: string; v: number;
 }
