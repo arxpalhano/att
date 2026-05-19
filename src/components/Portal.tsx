@@ -10,7 +10,7 @@ import {
   AlertTriangle, Eye, ChevronDown, ArrowLeft, Copy, Check, Layers,
   Settings, UserCheck, Clipboard, Box, FileUp, ExternalLink, Zap,
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
-  BarChart3, ChevronRight, Filter, MessageSquare
+  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw
 } from "lucide-react";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
@@ -768,6 +768,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "activity", icon: Activity, label: "Atividade" },
         { id: "users", icon: Settings, label: "Usuários" },
+        ...(user.role === "admin" ? [{ id: "agents", icon: Sparkles, label: "Agentes AI" }] : []),
       ];
 
   const workspaceLabel = isClient ? getClientName(user.clientId!) : "Operação Interna";
@@ -3578,6 +3579,212 @@ function PublicationsPage({ user }: { user: SeedUser }) {
 }
 
 // ============================================================
+// AGENTES AI (admin only)
+// ============================================================
+interface AgentDef {
+  id: string;
+  name: string;
+  role: string;
+  description: string;
+  page: string;
+  color: string;
+  active: boolean;
+}
+
+const AGENTS: AgentDef[] = [
+  {
+    id: "sergio-moro",
+    name: "Sérgio Moro",
+    role: "Auditor do Portal",
+    description: "Audita todo o estado do portal (clientes, contratos, blocos, publicações, tickets) e gera relatório de inconsistências e ações sugeridas.",
+    page: "agent_sergio_moro",
+    color: "from-amber-400 to-orange-500",
+    active: true,
+  },
+];
+
+function AgentsPage({ setPage }: { setPage: (p: string) => void }) {
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Operação interna · IA"
+        title="Agentes AI"
+        description="Agentes inteligentes para auditoria, análise e automação operacional. Cada agente tem seu próprio contexto e missão."
+      />
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {AGENTS.map((a) => (
+          <Card key={a.id} className="p-5 hover:shadow-lg transition cursor-pointer" onClick={() => a.active && setPage(a.page)}>
+            <div className="flex items-start gap-3 mb-4">
+              <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br ${a.color} flex items-center justify-center shadow-lg`}>
+                <Bot className="w-6 h-6 text-white" />
+              </div>
+              <div className="flex-1">
+                <p className="text-base font-semibold text-slate-900">{a.name}</p>
+                <p className="text-xs text-slate-500">{a.role}</p>
+              </div>
+              {a.active ? (
+                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-xs">Ativo</Badge>
+              ) : (
+                <Badge className="bg-slate-100 text-slate-500 border-slate-200 text-xs">Em breve</Badge>
+              )}
+            </div>
+            <p className="text-sm text-slate-600 leading-relaxed">{a.description}</p>
+            {a.active && (
+              <button className="mt-4 flex items-center gap-1.5 text-xs font-semibold text-slate-900 hover:text-slate-700">
+                Abrir agente <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface AgentMessage {
+  role: "user" | "assistant";
+  content: string;
+  timestamp: string;
+  tokens?: { input: number; output: number };
+}
+
+function SergioMoroPage({ setPage }: { setPage: (p: string) => void }) {
+  const [messages, setMessages] = useState<AgentMessage[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const stored = localStorage.getItem("att_agent_sergio_moro_history");
+      return stored ? JSON.parse(stored) : [];
+    } catch { return []; }
+  });
+  const [prompt, setPrompt] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    try { localStorage.setItem("att_agent_sergio_moro_history", JSON.stringify(messages)); } catch { /* ignore */ }
+  }, [messages]);
+
+  const runAudit = async (userPrompt?: string) => {
+    setLoading(true); setError("");
+    const userMsg: AgentMessage = {
+      role: "user",
+      content: userPrompt || "Faça uma auditoria completa do portal.",
+      timestamp: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    setPrompt("");
+    try {
+      const res = await fetch("/api/agents/sergio-moro", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: userPrompt }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro desconhecido");
+      const assistantMsg: AgentMessage = {
+        role: "assistant",
+        content: data.report,
+        timestamp: data.timestamp,
+        tokens: data.tokens,
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const clearHistory = () => {
+    if (!confirm("Limpar histórico de auditorias?")) return;
+    setMessages([]);
+  };
+
+  return (
+    <div className="space-y-4">
+      <button onClick={() => setPage("agents")} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"><ArrowLeft className="w-4 h-4" /> Voltar</button>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center shadow-lg">
+            <Bot className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-800">Sérgio Moro</h1>
+            <p className="text-sm text-slate-500">Auditor do Portal · {messages.length} mensagens</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          {messages.length > 0 && <button onClick={clearHistory} className="px-3 py-2 text-xs text-slate-500 hover:text-slate-700 rounded-lg hover:bg-slate-100">Limpar</button>}
+          <button onClick={() => runAudit()} disabled={loading} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-50">
+            {loading ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Auditando…</> : <><Zap className="w-3.5 h-3.5" /> Auditoria completa</>}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <Card className="p-4 border-red-200 bg-red-50">
+          <div className="flex items-start gap-3"><AlertTriangle className="w-4 h-4 text-red-500 mt-0.5" /><div><p className="text-sm font-semibold text-red-700">Erro</p><p className="text-xs text-red-600 mt-1">{error}</p></div></div>
+        </Card>
+      )}
+
+      {messages.length === 0 && !loading && (
+        <Card className="p-8">
+          <EmptyState icon={Bot} title="Pronto para auditar" desc="Clique em 'Auditoria completa' ou faça uma pergunta específica abaixo." />
+          <div className="mt-4 grid gap-2 max-w-2xl mx-auto">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 text-center">Sugestões</p>
+            {[
+              "Por que o painel da RS Design está vazio para o cliente?",
+              "Quais clientes têm blocos publicados sem URL de publicação cadastrada?",
+              "Liste tickets com SLA vencido e sem responsável.",
+              "Quais contratos têm usedBlocks diferente da contagem real de blocos?",
+            ].map((s) => (
+              <button key={s} onClick={() => runAudit(s)} className="text-left text-sm px-4 py-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700">{s}</button>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {messages.map((m, i) => (
+        <Card key={i} className={`p-5 ${m.role === "user" ? "bg-slate-50 border-slate-200" : "bg-white"}`}>
+          <div className="flex items-start gap-3">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${m.role === "user" ? "bg-slate-200" : "bg-gradient-to-br from-amber-400 to-orange-500"}`}>
+              {m.role === "user" ? <UserCheck className="w-4 h-4 text-slate-600" /> : <Bot className="w-4 h-4 text-white" />}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs font-semibold text-slate-500">{m.role === "user" ? "Você" : "Sérgio Moro"}</p>
+                <p className="text-xs text-slate-400">{new Date(m.timestamp).toLocaleString("pt-BR")}{m.tokens && ` · ${m.tokens.input}+${m.tokens.output} tokens`}</p>
+              </div>
+              <div className="prose prose-sm max-w-none text-slate-700 whitespace-pre-wrap leading-relaxed">{m.content}</div>
+            </div>
+          </div>
+        </Card>
+      ))}
+
+      {loading && (
+        <Card className="p-5">
+          <div className="flex items-center gap-3"><RefreshCw className="w-4 h-4 animate-spin text-amber-500" /><p className="text-sm text-slate-600">Sérgio Moro está auditando o portal…</p></div>
+        </Card>
+      )}
+
+      <div className="flex gap-2 sticky bottom-4">
+        <input
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && prompt.trim() && !loading) runAudit(prompt); }}
+          placeholder="Pergunte algo específico ao Sérgio Moro…"
+          disabled={loading}
+          className="flex-1 px-4 py-3 rounded-xl border border-slate-200 bg-white text-sm focus:outline-none focus:border-amber-400 shadow-sm"
+        />
+        <button onClick={() => prompt.trim() && runAudit(prompt)} disabled={!prompt.trim() || loading} className="px-4 py-3 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-30">
+          <Send className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // FASE 8 — ANALYTICS
 // ============================================================
 function AnalyticsPage({ user }: { user: SeedUser }) {
@@ -3821,6 +4028,8 @@ export default function Portal() {
       case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage />;
       case "users": return <UsersPage />;
+      case "agents": return <AgentsPage setPage={setPage} />;
+      case "agent_sergio_moro": return <SergioMoroPage setPage={setPage} />;
       default: return <InternalDashboard setPage={setPage} />;
     }
   };
