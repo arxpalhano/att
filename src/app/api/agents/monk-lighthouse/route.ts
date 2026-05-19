@@ -16,15 +16,17 @@ const SYSTEM_PROMPT = `Você é Monk Lighthouse, auditor obsessivo de qualidade 
 Cada cliente da ATT tem produtos publicados em URLs no padrão:
 https://explorar.archtechtour.com/{cliente-slug}/ver-N/{produto-slug}/index.html
 
+Os links REAIS de download (SketchUp/Archicad/Revit) NÃO ficam no index.html (que tem placeholder hardcoded de template), e sim no arquivo \`ui.js\` ao lado do index.html. O probe já buscou em ui.js — confie nos dados de "downloads" do JSON.
+
 Sua missão: analisar os RESULTADOS DO PROBE (já coletados) e apontar problemas.
 
 Verifique especialmente:
-- **Downloads incorretos**: link de SketchUp/Revit/Archicad apontando para produto de OUTRO cliente (ex: customizador WJ com download de Jader)
-- **Analytics ausente**: customizador sem script de tracking (RegistrarEvento/customizador-events)
-- **Escala/zoom permitido**: viewport sem user-scalable=no OU presença de controles de zoom no AR/WebXR
+- **Downloads incorretos**: link com matchesProduct=false → URL não contém o slug do cliente nem fragmentos do nome do produto → muito provável que esteja apontando para produto/cliente errado
+- **Analytics ausente**: customizador sem script de tracking
+- **Escala/zoom permitido**: scalingDisabled=false → viewport sem user-scalable=no
 - **HTTP erros**: páginas que não retornam 200
-- **AR quebrada**: faltam links USDZ ou enter_AR_button
-- **Inconsistências**: nome no <title> diferente do produto esperado
+- **AR quebrada**: hasUsdz=false ou hasARButton=false
+- **ui.js inacessível**: download links não foram coletados (errors menciona "ui.js HTTP ...")
 
 Formato (markdown CURTO):
 **Resumo** (2-3 linhas)
@@ -69,7 +71,7 @@ async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<{ status
   }
 }
 
-function probe(html: string): Omit<ProbeResult, "blockId" | "client" | "product" | "url" | "httpStatus" | "downloads"> & { downloadHrefs: string[] } {
+function probeHtml(html: string): Omit<ProbeResult, "blockId" | "client" | "product" | "url" | "httpStatus" | "downloads"> {
   const errors: string[] = [];
   const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
   const title = titleMatch?.[1]?.trim();
@@ -80,19 +82,21 @@ function probe(html: string): Omit<ProbeResult, "blockId" | "client" | "product"
   const viewportMatch = html.match(/<meta[^>]*name=["']viewport["'][^>]*>/i);
   const viewport = viewportMatch?.[0] || "";
   const scalingDisabled = /user-scalable\s*=\s*no/i.test(viewport) && /maximum-scale\s*=\s*1/i.test(viewport);
-  // UI zoom button (Verge3D template includes it by default — flag para revisar)
+  // UI zoom button (Verge3D template — flag para revisar visualmente)
   const zoomUiPresent = /Zoom In\/Out|zoom\.png|enableZoom/i.test(html);
-  // Extract download links
-  const downloadHrefs: string[] = [];
-  const regex = /<a[^>]*\bid=["'](sketchup-model|archicad-model|revit-model)["'][^>]*\bhref=["']([^"']+)["']/gi;
-  let m: RegExpExecArray | null;
-  while ((m = regex.exec(html)) !== null) { downloadHrefs.push(`${m[1]}::${m[2]}`); }
-  // Also catch download="" href="..." with .zip extension
-  if (downloadHrefs.length === 0) {
-    const altRegex = /href=["']([^"']*\.(zip|usdz|skp|rvt|gsm))["']/gi;
-    while ((m = altRegex.exec(html)) !== null) downloadHrefs.push(`other::${m[1]}`);
-  }
-  return { title, hasAnalytics, hasARButton, hasUsdz, scalingDisabled, zoomUiPresent, errors, downloadHrefs };
+  return { title, hasAnalytics, hasARButton, hasUsdz, scalingDisabled, zoomUiPresent, errors };
+}
+
+/** Lê o ui.js (fonte real dos downloads) e extrai os 3 links. */
+function probeUiJs(js: string): { sketchup?: string; archicad?: string; revit?: string } {
+  const out: { sketchup?: string; archicad?: string; revit?: string } = {};
+  const sk = js.match(/['"]sketchup['"]\s*:\s*['"]([^'"]+)['"]/i);
+  if (sk) out.sketchup = sk[1];
+  const ar = js.match(/['"]archicad['"]\s*:\s*['"]([^'"]+)['"]/i);
+  if (ar) out.archicad = ar[1];
+  const rv = js.match(/['"]revit['"]\s*:\s*['"]([^'"]+)['"]/i);
+  if (rv) out.revit = rv[1];
+  return out;
 }
 
 export async function POST(req: NextRequest) {
@@ -139,14 +143,34 @@ export async function POST(req: NextRequest) {
         if (status !== 200) {
           return { blockId: String(pub.blockId), client: clientName, product: productTitle, url, httpStatus: status, hasAnalytics: false, hasARButton: false, hasUsdz: false, scalingDisabled: false, downloads: [], zoomUiPresent: false, errors: [`HTTP ${status}`] };
         }
-        const p = probe(text);
-        // Verifica se cada download URL contém o slug do cliente (heurística simples)
-        const downloads = p.downloadHrefs.map((entry) => {
-          const [type, dl] = entry.split("::");
+        const p = probeHtml(text);
+
+        // Busca o ui.js (fonte real dos links de download)
+        const uiUrl = url.replace(/index\.html?$/i, "ui.js");
+        const { status: uiStatus, text: uiText } = await fetchWithTimeout(uiUrl);
+        const dlObj = uiStatus === 200 ? probeUiJs(uiText) : {};
+        const errors = [...p.errors];
+        if (uiStatus !== 200) errors.push(`ui.js HTTP ${uiStatus} — não foi possível verificar downloads reais`);
+
+        // Heurística: a URL de download deve conter parte do nome do produto (slug do title)
+        const productSlugFragments = productTitle
+          .toLowerCase()
+          .normalize("NFD").replace(/[̀-ͯ]/g, "")
+          .replace(/[^a-z0-9]+/g, " ")
+          .trim()
+          .split(/\s+/)
+          .filter((w) => w.length >= 3);
+
+        const downloads = (["sketchup", "archicad", "revit"] as const).flatMap((type) => {
+          const dl = dlObj[type];
+          if (!dl) return [];
           const dlLower = dl.toLowerCase();
-          const matchesProduct = clientCode ? dlLower.includes(clientCode) || dlLower.includes(clientCode.replace(/-/g, "")) : false;
-          return { type, url: dl, matchesProduct };
+          // matchesProduct: tem que ter ao menos um fragmento do título do produto OU o code do cliente
+          const matchesByProduct = productSlugFragments.some((f) => dlLower.includes(f));
+          const matchesByClient = clientCode ? dlLower.includes(clientCode) || dlLower.includes(clientCode.replace(/-/g, "")) : false;
+          return [{ type, url: dl, matchesProduct: matchesByProduct || matchesByClient }];
         });
+
         return {
           blockId: String(pub.blockId),
           client: clientName,
@@ -160,7 +184,7 @@ export async function POST(req: NextRequest) {
           scalingDisabled: p.scalingDisabled,
           downloads,
           zoomUiPresent: p.zoomUiPresent,
-          errors: p.errors,
+          errors,
         };
       })
     );

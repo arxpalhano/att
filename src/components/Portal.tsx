@@ -3605,7 +3605,7 @@ const AGENTS: AgentDef[] = [
     id: "monk-lighthouse",
     name: "Monk Lighthouse",
     role: "QA dos Customizadores",
-    description: "Audita cada customizador 3D publicado: HTTP, script de analytics, links de download corretos, zoom/escala desabilitados, AR. Detecta o tipo de bug do Jader Almeida automaticamente.",
+    description: "Audita cada customizador 3D publicado: HTTP, script de analytics, links de download corretos, zoom/escala desabilitados, AR funcionando. Pode rodar em todos os clientes ou em um específico.",
     page: "agent_monk_lighthouse",
     color: "from-teal-400 to-cyan-500",
     active: true,
@@ -3885,7 +3885,7 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
               "Liste produtos publicados que estão permitindo zoom/escala — esses não devem permitir.",
               "Quais customizadores estão sem o script de analytics?",
               "Algum produto sem suporte a AR/iOS (USDZ)?",
-              "Verifique especificamente os produtos do Jader Almeida.",
+              "Faça uma auditoria detalhada apenas dos publicados recentes.",
             ].map((s) => (
               <button key={s} onClick={() => runAudit(s)} className="text-left text-sm px-4 py-3 rounded-xl border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700">{s}</button>
             ))}
