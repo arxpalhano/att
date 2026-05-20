@@ -126,15 +126,18 @@ export async function POST() {
       results.push({ client: clientId, blocksPublished, pubsCreated, unmatchedSlugs: unmatched });
     }
 
-    // 3. Aplica updates no DynamoDB (em batches)
-    for (let i = 0; i < updatedBlocks.length; i += 25) {
-      const chunk = updatedBlocks.slice(i, i + 25);
+    // 3. Dedup antes de escrever (mesma id pode aparecer 2x se 2 slugs S3 matchearem o mesmo bloco)
+    const uniqueBlocks = Array.from(new Map(updatedBlocks.map((b) => [String(b.id), b])).values());
+    const uniquePubs = Array.from(new Map(newPubs.map((p) => [String(p.id), p])).values());
+
+    for (let i = 0; i < uniqueBlocks.length; i += 25) {
+      const chunk = uniqueBlocks.slice(i, i + 25);
       await doc.send(new BatchWriteCommand({
         RequestItems: { "att-blocks": chunk.map((b) => ({ PutRequest: { Item: b } })) },
       }));
     }
-    for (let i = 0; i < newPubs.length; i += 25) {
-      const chunk = newPubs.slice(i, i + 25);
+    for (let i = 0; i < uniquePubs.length; i += 25) {
+      const chunk = uniquePubs.slice(i, i + 25);
       await doc.send(new BatchWriteCommand({
         RequestItems: { "att-publications": chunk.map((p) => ({ PutRequest: { Item: p } })) },
       }));
@@ -157,8 +160,8 @@ export async function POST() {
     }
 
     const totals = {
-      blocksUpdated: updatedBlocks.length,
-      publicationsCreated: newPubs.length,
+      blocksUpdated: uniqueBlocks.length,
+      publicationsCreated: uniquePubs.length,
       unmatchedTotal: results.reduce((s, r) => s + r.unmatchedSlugs.length, 0),
     };
 
