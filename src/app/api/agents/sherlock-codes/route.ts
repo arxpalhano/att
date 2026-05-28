@@ -35,25 +35,35 @@ Para CADA problema, dê:
 - IDs afetados
 - Correção técnica (DELETE, UPDATE, etc — não "fale com fulano")
 
-Verifique apenas problemas técnicos:
-- IDs órfãos (publicação apontando para bloco que não existe; ticket sem blockId válido; user com clientId inexistente)
-- Status de DADO conflitantes (bloco "published" sem registro em publications)
-- Contadores divergentes (contract.usedBlocks != COUNT real)
-- Duplicatas (mesmo email, mesmo SKU)
-- Dados malformados (campos obrigatórios vazios, datas inválidas)
+## ⚠️ REGRA ABSOLUTA: NÃO FAÇA CONTAS
+Todos os números já vêm PRÉ-CALCULADOS no objeto \`integrity_checks\`. Você está
+PROIBIDO de somar, contar ou recalcular qualquer coisa — LLMs erram aritmética.
+Use EXATAMENTE os valores do JSON. Se \`orphan_publications_count: 0\`, então há
+ZERO órfãs — não invente "14 órfãs". Confie nos booleanos e contadores.
 
-**NÃO mencione**:
-- "Cliente parado", "sem atividade" — Leslie Roadmap faz isso
-- "URL quebrada", "customizador falhou" — Monk Lighthouse faz isso
-- Sugestões de processo, comunicação, escalação — fora do seu escopo
+## Como ler integrity_checks
+- \`published_vs_publications_match: true\` → blocos publicados batem com publicações. SEM bug.
+- \`orphan_publications_count\` → nº exato de publicações órfãs (se 0, está OK)
+- \`published_without_publication_count\` → blocos published sem publicação
+- \`tickets_bad_blockid_count\`, \`blocks_bad_contractid_count\`, \`blocks_bad_clientid_count\` → referências quebradas
+- \`contract_count_mismatches\` → array já com {id, declared, real, diff}. Vazio = sem divergência.
+- \`duplicate_emails\`, \`duplicate_skus\` → arrays de duplicatas (vazio = sem duplicata)
+- \`overdue_tickets_unassigned\` → tickets vencidos sem responsável (apenas REPORTE, não é bug de DADO)
+
+## O que é bug (reporte) vs o que NÃO é
+BUG: órfãos > 0, mismatch != 0, duplicatas, referências quebradas, published≠publications.
+NÃO é bug: contrato com folga (total > used é normal); cliente sem blocos (é gestão, não bug);
+ticket vencido (é operação — só mencione de passagem).
+
+**NÃO mencione**: "cliente parado" (Yoda Kanban faz), "URL quebrada" (Monk Lighthouse faz).
 
 Formato (markdown CURTO):
-**Resumo**: 2-3 linhas com TOTAIS DE BUGS encontrados
-**Bugs críticos** (numerados): "[N] Bug · IDs afetados · Como corrigir (SQL/DELETE/UPDATE)"
-**Bugs menores** (se houver, mesmo formato)
-**Métricas de integridade**: % de registros consistentes
+**Resumo**: 1-2 linhas. Diga o veredito direto (ex: "Integridade OK — 0 bugs" ou "2 bugs encontrados").
+**Bugs** (só os que têm contador > 0 ou array não-vazio): "[N] Bug · IDs exatos do JSON · Correção (SQL)"
+**Observações operacionais** (opcional, 1 linha): tickets vencidos, se houver.
 
-Se NÃO houver bugs, diga claramente "Nenhum bug detectado — integridade OK". Seja honesto.`;
+Se TODOS os checks estão limpos (counts 0, arrays vazios, match true), diga claramente:
+"✅ Nenhum bug de integridade detectado. Portal consistente." e PARE. Não invente problemas.`;
 
 interface AuditRequest {
   prompt?: string;
@@ -80,17 +90,7 @@ export async function POST(req: NextRequest) {
       scanAll<Row>(TABLES.USERS),
     ]);
 
-    // Pré-cálculo de métricas (faz trabalho de inferência localmente para
-    // o Claude focar em análise, não em contagem)
-    const blocksByClient: Record<string, { total: number; byStatus: Record<string, number> }> = {};
-    for (const b of blocks) {
-      const cid = String(b.clientId);
-      const status = String(b.status);
-      if (!blocksByClient[cid]) blocksByClient[cid] = { total: 0, byStatus: {} };
-      blocksByClient[cid].total++;
-      blocksByClient[cid].byStatus[status] = (blocksByClient[cid].byStatus[status] || 0) + 1;
-    }
-
+    // Pré-cálculo de métricas (o backend faz TODA a contagem; o modelo só interpreta)
     const pubBlockIds = new Set(publications.map((p) => String(p.blockId)));
     const blockIds = new Set(blocks.map((b) => String(b.id)));
     const contractIds = new Set(contracts.map((c) => String(c.id)));
@@ -113,27 +113,49 @@ export async function POST(req: NextRequest) {
       .filter((t) => t.status !== "delivered" && t.slaDate && String(t.slaDate) < new Date().toISOString().slice(0, 10))
       .map((t) => ({ id: t.id, slaDate: t.slaDate, assigned: !!t.assignedTo, status: t.status }));
 
+    // Duplicatas (e-mail repetido em users; SKU repetido em blocks)
+    const emailCount: Record<string, number> = {};
+    for (const u of users) { const e = String(u.email || "").toLowerCase(); if (e) emailCount[e] = (emailCount[e] || 0) + 1; }
+    const dupEmails = Object.entries(emailCount).filter(([, n]) => n > 1).map(([e]) => e);
+    const skuCount: Record<string, number> = {};
+    for (const b of blocks) { const s = String(b.sku || ""); if (s) skuCount[s] = (skuCount[s] || 0) + 1; }
+    const dupSkus = Object.entries(skuCount).filter(([, n]) => n > 1).map(([s]) => s);
+
+    const publishedCount = blocks.filter((b) => b.status === "published").length;
+
+    // VEREDITO PRÉ-CALCULADO — o modelo NÃO precisa (nem deve) recontar nada.
+    // Cada item já vem com o número final e um booleano de "tem problema".
+    const integrity_checks = {
+      total_blocks: blocks.length,
+      total_published_blocks: publishedCount,
+      total_publications: publications.length,
+      published_vs_publications_match: publishedCount === publications.length,
+      orphan_publications_count: orphans.publicationsWithBadBlockId.length,
+      orphan_publications_ids: orphans.publicationsWithBadBlockId,
+      published_without_publication_count: orphans.publishedBlocksWithoutPub.length,
+      published_without_publication_ids: orphans.publishedBlocksWithoutPub,
+      tickets_bad_blockid_count: orphans.ticketsWithBadBlockId.length,
+      blocks_bad_contractid_count: orphans.blocksWithBadContractId.length,
+      blocks_bad_clientid_count: orphans.blocksWithBadClientId.length,
+      contract_count_mismatches: contractMismatch, // já com diff calculado
+      duplicate_emails: dupEmails,
+      duplicate_skus: dupSkus,
+      overdue_tickets_unassigned: overdueTickets.filter((t) => !t.assigned).map((t) => t.id),
+    };
+
     // Resumo final enviado ao modelo
     const snapshot = {
+      integrity_checks, // ← USE ESTES NÚMEROS. NÃO RECALCULE.
       counts: {
         clients: clients.length, contracts: contracts.length, blocks: blocks.length,
         publications: publications.length, tickets: tickets.length, users: users.length,
       },
-      clients: clients.map((c) => ({ id: c.id, name: c.name, code: c.code, active: c.active })),
-      blocksByClient,
-      contracts: contracts.map((c) => ({ id: c.id, clientId: c.clientId, title: c.title, total: c.totalBlocks, used: c.usedBlocks, active: c.active })),
-      publications_count_by_client: Object.fromEntries(
-        clients.map((c) => [c.id, blocks.filter((b) => b.clientId === c.id && pubBlockIds.has(String(b.id))).length])
-      ),
       tickets_by_status: tickets.reduce<Record<string, number>>((acc, t) => { const s = String(t.status); acc[s] = (acc[s] || 0) + 1; return acc; }, {}),
-      orphans,
-      contractMismatch,
-      overdueTickets: overdueTickets.slice(0, 20),
     };
 
     const userPrompt = body.prompt
-      ? `${body.prompt}\n\n---\nMÉTRICAS PRÉ-CALCULADAS:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``
-      : `Faça auditoria do portal. Métricas pré-calculadas:\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``;
+      ? `${body.prompt}\n\n---\nVEREDITO PRÉ-CALCULADO (NÃO recalcule, use estes valores):\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``
+      : `Interprete o veredito de integridade abaixo. NÃO faça contas — os números já estão prontos. Reporte apenas checks com problema (contador > 0 ou array não-vazio):\n\`\`\`json\n${JSON.stringify(snapshot, null, 2)}\n\`\`\``;
 
     const { text, usage, modelUsed, attempts } = await callClaudeWithRetry({
       apiKey, primaryModel: "claude-haiku-4-5", fallbackModel: "claude-sonnet-4-5",
