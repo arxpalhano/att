@@ -48,6 +48,23 @@ function produtoDisplay(slug: string): string {
   return slug;
 }
 
+// Filtro de tráfego não-humano: exclui bots/crawlers conhecidos e tráfego interno.
+// COALESCE garante que linhas com user_agent/referrer NULL NÃO sejam descartadas.
+// _e = versão com alias "e." para queries com JOIN.
+const BOT_FILTER = `
+  AND NOT (
+    lower(COALESCE(user_agent,'')) LIKE '%bot%' OR lower(COALESCE(user_agent,'')) LIKE '%crawl%'
+    OR lower(COALESCE(user_agent,'')) LIKE '%spider%' OR lower(COALESCE(user_agent,'')) LIKE '%headless%'
+    OR lower(COALESCE(user_agent,'')) LIKE '%lighthouse%' OR lower(COALESCE(user_agent,'')) LIKE '%pagespeed%'
+    OR lower(COALESCE(user_agent,'')) LIKE '%nexus 5x build/mmb29p%' OR lower(COALESCE(user_agent,'')) LIKE '%meta-externalads%'
+    OR lower(COALESCE(user_agent,'')) LIKE '%facebookexternalhit%' OR lower(COALESCE(user_agent,'')) LIKE '%bingpreview%'
+    OR lower(COALESCE(user_agent,'')) LIKE '%preview%' OR lower(COALESCE(user_agent,'')) LIKE '%monitor%'
+  )
+  AND COALESCE(referrer,'') NOT LIKE '%localhost%'
+  AND COALESCE(referrer,'') NOT LIKE '%explorar.archtechtour.com%'
+`;
+const BOT_FILTER_E = BOT_FILTER.replace(/user_agent/g, "e.user_agent").replace(/referrer/g, "e.referrer");
+
 export async function buildAnalytics(opts: {
   cliente: string;
   alias: string;
@@ -78,14 +95,14 @@ export async function buildAnalytics(opts: {
         COUNT(*)                   AS total_eventos
       FROM ${DB}.vw_eventos_base_com_cliente
       WHERE cliente = '${cli}'
-        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
     `),
     // 2. Total de downloads
     runAthenaQuery(`
       SELECT COUNT(*) AS total
       FROM ${DB}.vw_eventos_base_com_cliente
       WHERE cliente = '${cli}'
-        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
         AND (evento LIKE 'download%' OR evento = 'download_modelo')
     `),
     // 3. Tempo médio — v2 (com fallback abaixo)
@@ -101,7 +118,7 @@ export async function buildAnalytics(opts: {
                (MAX(CAST(timestamp AS bigint)) - MIN(CAST(timestamp AS bigint))) AS dur
         FROM ${DB}.vw_eventos_base_com_cliente
         WHERE cliente = '${cli}'
-          AND data_evento BETWEEN '${inicio}' AND '${fim}'
+          AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
         GROUP BY produto, session_id
       )
       SELECT
@@ -112,7 +129,7 @@ export async function buildAnalytics(opts: {
       FROM ${DB}.vw_eventos_base_com_cliente e
       LEFT JOIN sess_dur s ON e.session_id = s.session_id AND e.produto = s.produto
       WHERE e.cliente = '${cli}'
-        AND e.data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND e.data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER_E}
       GROUP BY e.produto
       ORDER BY total_eventos DESC
       LIMIT 50
@@ -122,7 +139,7 @@ export async function buildAnalytics(opts: {
       SELECT rotulo, COUNT(*) AS total
       FROM ${DB}.vw_eventos_base_com_cliente
       WHERE cliente = '${cli}'
-        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
         AND rotulo IS NOT NULL AND rotulo <> ''
         AND LOWER(rotulo) NOT IN ('abertura', 'fechamento', 'abertura_sessao', 'fechamento_sessao')
       GROUP BY rotulo
@@ -134,7 +151,7 @@ export async function buildAnalytics(opts: {
       SELECT data_evento AS data, COUNT(DISTINCT session_id) AS sessoes
       FROM ${DB}.vw_eventos_base_com_cliente
       WHERE cliente = '${cli}'
-        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
       GROUP BY data_evento
       ORDER BY data_evento
     `),
@@ -148,7 +165,7 @@ export async function buildAnalytics(opts: {
         COUNT(*) AS total
       FROM ${DB}.vw_eventos_base_com_cliente
       WHERE cliente = '${cli}'
-        AND data_evento BETWEEN '${inicio}' AND '${fim}'
+        AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
         AND evento = 'session_start'
       GROUP BY 1
       ORDER BY total DESC
@@ -188,7 +205,7 @@ export async function buildAnalytics(opts: {
                  (MAX(CAST(timestamp AS bigint)) - MIN(CAST(timestamp AS bigint))) AS dur
           FROM ${DB}.vw_eventos_base_com_cliente
           WHERE cliente = '${cli}'
-            AND data_evento BETWEEN '${inicio}' AND '${fim}'
+            AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
           GROUP BY session_id
         )
         SELECT AVG(dur) AS media_seg FROM sessoes WHERE dur > 0 AND dur < 1800
