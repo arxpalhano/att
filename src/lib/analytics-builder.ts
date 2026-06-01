@@ -18,6 +18,7 @@ export interface AnalyticsJSON {
     total_downloads: number;
     tempo_medio_min: number;
     total_eventos: number;
+    engajamento_real?: number;
   };
   engajamento_por_produto: Array<{
     produto: string;
@@ -92,7 +93,9 @@ export async function buildAnalytics(opts: {
       SELECT
         COUNT(DISTINCT user_id)   AS usuarios_unicos,
         COUNT(DISTINCT session_id) AS sessoes_unicas,
-        COUNT(*)                   AS total_eventos
+        COUNT(*)                   AS total_eventos,
+        COUNT(CASE WHEN evento IN ('abrir_ar','abrir_ar_ios','download_modelo','clique_whatsapp')
+                    OR evento LIKE 'download%' THEN 1 END) AS engajamento_real
       FROM ${DB}.vw_eventos_base_com_cliente
       WHERE cliente = '${cli}'
         AND data_evento BETWEEN '${inicio}' AND '${fim}'${BOT_FILTER}
@@ -187,6 +190,7 @@ export async function buildAnalytics(opts: {
   const usuarios_unicos = inum(kpi.usuarios_unicos);
   const sessoes_unicas = inum(kpi.sessoes_unicas);
   const total_eventos = inum(kpi.total_eventos);
+  const engajamento_real = inum(kpi.engajamento_real);
   const media_sessoes = usuarios_unicos > 0
     ? Math.round((sessoes_unicas / usuarios_unicos) * 100) / 100
     : 0;
@@ -282,7 +286,7 @@ export async function buildAnalytics(opts: {
     alias: opts.alias,
     periodo: { inicio: opts.inicio, fim: opts.fim, label: `${opts.inicio} a ${opts.fim}` },
     gerado_em: new Date().toISOString(),
-    kpis: { usuarios_unicos, sessoes_unicas, media_sessoes, total_downloads, tempo_medio_min, total_eventos },
+    kpis: { usuarios_unicos, sessoes_unicas, media_sessoes, total_downloads, tempo_medio_min, total_eventos, engajamento_real },
     engajamento_por_produto,
     eventos_por_tipo,
     sessoes_por_dia,

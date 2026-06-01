@@ -25,6 +25,7 @@ export interface AnalyticsData {
     total_downloads: number;
     tempo_medio_min: number;
     total_eventos: number;
+    engajamento_real?: number;
   };
   engajamento_por_produto: Array<{
     produto: string;
@@ -105,18 +106,19 @@ function getPreset(key: string): DateRange {
 // SMALL COMPONENTS
 // ============================================================
 function KPICard({
-  label, value, icon: Icon, sub,
-}: { label: string; value: string | number; icon: React.ElementType; sub?: string }) {
+  label, value, icon: Icon, sub, hint, highlight,
+}: { label: string; value: string | number; icon: React.ElementType; sub?: string; hint?: string; highlight?: boolean }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-sm">
+    <div className={`group relative rounded-2xl border p-5 shadow-sm ${highlight ? "border-emerald-300 bg-gradient-to-br from-emerald-50 to-white" : "border-slate-200/80 bg-white"}`}>
       <div className="flex items-start justify-between mb-3">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 leading-4">{label}</p>
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-slate-950">
+        <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${highlight ? "bg-emerald-500" : "bg-slate-950"}`}>
           <Icon className="h-4 w-4 text-white" />
         </div>
       </div>
       <p className="text-[2rem] font-bold tracking-tight text-slate-900 leading-none">{value}</p>
       {sub && <p className="mt-1.5 text-xs text-slate-400">{sub}</p>}
+      {hint && <p className="mt-2 text-[11px] leading-snug text-slate-400">{hint}</p>}
     </div>
   );
 }
@@ -398,10 +400,10 @@ export default function AnalyticsDashboard({
       </div>
 
       <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
-        <KPICard label="Usuários Únicos" value={kpis.usuarios_unicos.toLocaleString("pt-BR")} icon={Users} />
-        <KPICard label="Sessões Únicas" value={kpis.sessoes_unicas.toLocaleString("pt-BR")} icon={Activity} />
-        <KPICard label="Média de Sessões" value={kpis.media_sessoes.toFixed(2).replace(".", ",")} icon={TrendingUp} />
-        <KPICard label="Total de Downloads" value={kpis.total_downloads.toLocaleString("pt-BR")} icon={Download} />
+        <KPICard label="Visitantes Únicos" value={kpis.usuarios_unicos.toLocaleString("pt-BR")} icon={Users} hint="Pessoas distintas que carregaram o customizador (sem bots)" />
+        <KPICard label="Carregamentos" value={kpis.sessoes_unicas.toLocaleString("pt-BR")} icon={Activity} hint="Vezes que o customizador foi exibido nas páginas (impressões)" />
+        <KPICard label="Engajamento Real" value={(kpis.engajamento_real ?? 0).toLocaleString("pt-BR")} icon={TrendingUp} hint="Interações ativas: abrir AR, baixar bloco, clicar no WhatsApp" highlight />
+        <KPICard label="Downloads de Blocos" value={kpis.total_downloads.toLocaleString("pt-BR")} icon={Download} hint="SketchUp + Revit + ArchiCAD baixados" />
         <KPICard label="Tempo Médio (min)" value={formatMinutesToMinSec(kpis.tempo_medio_min)} icon={Clock} />
         <KPICard label="Total de Eventos" value={kpis.total_eventos.toLocaleString("pt-BR")} icon={BarChart3} />
       </div>
