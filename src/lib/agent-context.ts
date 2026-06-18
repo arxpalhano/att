@@ -5,10 +5,65 @@
  */
 
 export const ATT_CONTEXT = `
-# Arquitetura ArchTechTour (conhecimento compartilhado entre os agentes)
+# O QUE É A ARCHTECHTOUR (conhecimento de negócio — base de todos os agentes)
 
-A ArchTechTour cria customizadores 3D interativos (Verge3D/Blender) para indústria
-de móveis e design. Os produtos são publicados em URLs no padrão:
+## A empresa
+A ArchTechTour (ATT) é uma plataforma de tecnologia 3D que transforma catálogos de
+marcas de móveis, luminárias, revestimentos e design de interiores em **experiências
+digitais imersivas**: customizadores 3D interativos com Realidade Aumentada (RA/AR),
+publicados na web sem necessidade de app.
+
+Tagline: "Pensam além das paredes." Somos o **braço de tecnologia** das marcas de design —
+ajudamos a digitalizar produtos e conectá-las a arquitetos.
+
+## O que entregamos para a marca (cliente B2B)
+1. **Customizador 3D interativo**: o produto da marca vira um modelo 3D navegável no browser,
+   onde o usuário troca cor, acabamento, material e tamanho em tempo real.
+2. **Realidade Aumentada (RA)**: via QR code, o arquiteto/cliente final posiciona o móvel
+   em escala real no ambiente, pelo celular, sem instalar app.
+3. **Blocos CAD para download**: SketchUp, Revit e ArchiCAD — para o arquiteto inserir o
+   produto direto no projeto de obra.
+4. **Vitrine na plataforma ArchTechTour**: visibilidade para arquitetos especificadores
+   em mais de 40 países.
+5. **Dashboard de analytics**: métricas reais de engajamento dos arquitetos com os produtos.
+
+## Para quem (o público-alvo)
+O usuário final dos customizadores são **ARQUITETOS e designers de interiores** que
+ESPECIFICAM produtos em projetos. Não é varejo/consumidor comum — é um público B2B
+qualificado que decide quais móveis/luminárias entram numa obra. Por isso cada
+engajamento vale muito: um arquiteto que baixa o bloco CAD está colocando o produto
+da marca num projeto real.
+
+## Modelo de negócio
+- Clientes = **marcas** de móveis/design (Escal, Tidelli, WJ Luminárias, Estúdio Bola,
+  Riccó, Minimal, DEXCO, etc.). Elas pagam assinatura mensal/anual.
+- Planos: Starter (~R$ 1.990/mês, 10 blocos), Pro (~R$ 4.490/mês, 50 blocos + customizador RA),
+  Enterprise (sob consulta, ilimitado + gerente dedicado). Pagamento online, NF-e automática,
+  sem fidelidade.
+- A ATT NÃO vende os móveis. A ATT vende a **tecnologia de digitalização + a vitrine +
+  os dados**. A venda do móvel é da marca — a ATT gera a INTENÇÃO de especificação.
+
+## Como funciona o processo (fluxo de produção)
+1. Cliente envia arquivos (fotos, CAD, fichas técnicas, caderno de acabamentos) pelo portal.
+2. Equipe ATT modela, texturiza e configura cada produto (Blender + Verge3D). Prazo ~7 dias úteis/bloco.
+3. Validação de um produto-modelo (~10%) com o cliente antes de escalar.
+4. Publicação na plataforma com embed (iframe) para o site da marca + QR code para RA.
+5. Arquitetos engajam → eventos são coletados → dashboard mensal mostra o desempenho.
+
+## Números institucionais (marketing)
+40+ países alcançados · 500+ marcas na plataforma · 20K+ downloads/mês · entrega em ~7 dias úteis.
+
+## Posicionamento (o que somos e o que NÃO somos)
+- SOMOS: curadoria e tecnologia de digitalização 3D para marcas de design; uma ponte
+  para arquitetos especificarem produtos.
+- NÃO SOMOS: um depósito de blocos genérico, nem uma agência de marketing. As campanhas
+  internas existem só para lançar a marca na nossa base de arquitetos.
+
+---
+
+# Arquitetura ArchTechTour (conhecimento técnico)
+
+Os customizadores 3D são feitos em Verge3D/Blender e publicados em URLs no padrão:
 https://explorar.archtechtour.com/{cliente-slug}/ver-N/{produto-slug}/index.html
 
 ## Estrutura de um customizador
