@@ -6,58 +6,58 @@
 
 export const ATT_CONTEXT = `
 # O QUE É A ARCHTECHTOUR (conhecimento de negócio — base de todos os agentes)
+# Fonte de verdade: site institucional archtechtour.com
 
-## A empresa
-A ArchTechTour (ATT) é uma plataforma de tecnologia 3D que transforma catálogos de
-marcas de móveis, luminárias, revestimentos e design de interiores em **experiências
-digitais imersivas**: customizadores 3D interativos com Realidade Aumentada (RA/AR),
-publicados na web sem necessidade de app.
+## ⚠️ REGRA: nunca invente números ou preços
+NÃO cite estatísticas institucionais específicas (ex: "X países", "Y marcas",
+"Z downloads/mês") nem valores de planos/mensalidades — esses dados NÃO estão
+confirmados publicamente. Use apenas os números REAIS que vierem nos dados do
+dashboard/dossiê de cada cliente. Se perguntarem preço, diga que é tratado
+comercialmente, sem inventar valor.
 
-Tagline: "Pensam além das paredes." Somos o **braço de tecnologia** das marcas de design —
-ajudamos a digitalizar produtos e conectá-las a arquitetos.
+## A empresa (verdade do site)
+A ArchTechTour (ATT) desenvolve **modelos 3D customizáveis em tempo real**, com
+catálogo de acabamentos, **visualização em realidade aumentada (RA)** e **registro de
+interações** (analytics). Transforma catálogos de marcas de móveis, luminárias,
+revestimentos e design de interiores em experiências digitais 3D interativas na web.
 
-## O que entregamos para a marca (cliente B2B)
-1. **Customizador 3D interativo**: o produto da marca vira um modelo 3D navegável no browser,
-   onde o usuário troca cor, acabamento, material e tamanho em tempo real.
-2. **Realidade Aumentada (RA)**: via QR code, o arquiteto/cliente final posiciona o móvel
-   em escala real no ambiente, pelo celular, sem instalar app.
-3. **Blocos CAD para download**: SketchUp, Revit e ArchiCAD — para o arquiteto inserir o
-   produto direto no projeto de obra.
-4. **Vitrine na plataforma ArchTechTour**: visibilidade para arquitetos especificadores
-   em mais de 40 países.
-5. **Dashboard de analytics**: métricas reais de engajamento dos arquitetos com os produtos.
+## O que oferece (verdade do site)
+- **Modelos customizáveis em tempo real**: troca de cor, acabamento, material no 3D.
+- **Catálogo de acabamentos** dentro do customizador.
+- **Realidade Aumentada**: visualizar o produto no ambiente real (via celular/QR, sem app).
+- **Blocos para download** nos formatos **SketchUp, Revit e ArchiCAD** — para o arquiteto
+  inserir o produto direto no projeto.
+- **Catálogo virtual** de produtos 3D na plataforma archtechtour.com.
+- **Registro de interações** (dashboard de analytics) — o engajamento dos arquitetos.
+- Iniciativas de curadoria como a **"Mostra ArchTechTour"** (ambientes curados por arquitetos).
 
-## Para quem (o público-alvo)
-O usuário final dos customizadores são **ARQUITETOS e designers de interiores** que
-ESPECIFICAM produtos em projetos. Não é varejo/consumidor comum — é um público B2B
-qualificado que decide quais móveis/luminárias entram numa obra. Por isso cada
-engajamento vale muito: um arquiteto que baixa o bloco CAD está colocando o produto
-da marca num projeto real.
+## Para quem (dois públicos)
+1. **Marcas / fabricantes** (clientes B2B que pagam): móveis, luminárias, design, materiais.
+2. **Arquitetos e designers** (usuários finais): especificam produtos em projetos, baixam
+   blocos CAD, usam o customizador e a RA.
+O usuário do customizador é o ARQUITETO ESPECIFICADOR — público qualificado que decide
+o que entra numa obra. Por isso cada engajamento (download CAD, AR, contato) vale muito:
+é intenção real de colocar o produto da marca num projeto.
 
-## Modelo de negócio
-- Clientes = **marcas** de móveis/design (Escal, Tidelli, WJ Luminárias, Estúdio Bola,
-  Riccó, Minimal, DEXCO, etc.). Elas pagam assinatura mensal/anual.
-- Planos: Starter (~R$ 1.990/mês, 10 blocos), Pro (~R$ 4.490/mês, 50 blocos + customizador RA),
-  Enterprise (sob consulta, ilimitado + gerente dedicado). Pagamento online, NF-e automática,
-  sem fidelidade.
-- A ATT NÃO vende os móveis. A ATT vende a **tecnologia de digitalização + a vitrine +
-  os dados**. A venda do móvel é da marca — a ATT gera a INTENÇÃO de especificação.
+## Modelo de negócio (essência)
+- Clientes = **marcas** de móveis/design/materiais. Marcas parceiras reais incluem
+  Escal, Estúdio Bola, Minimal Design, RS Design, Pedro Franco, Jader Almeida, Christie,
+  Green House, Brum Design, Saccaro, Breton, Du Design, Patrícia Vieira, entre outras;
+  e marcas de acabamento como Portobello, Cosentino, Corian, Indusparquet.
+- A ATT **NÃO vende os móveis**. A ATT vende a **tecnologia de digitalização 3D + a vitrine
+  + os dados de interação**. A venda do produto é da marca — a ATT gera a INTENÇÃO de
+  especificação (arquiteto baixando bloco, abrindo AR, pedindo contato).
 
 ## Como funciona o processo (fluxo de produção)
 1. Cliente envia arquivos (fotos, CAD, fichas técnicas, caderno de acabamentos) pelo portal.
-2. Equipe ATT modela, texturiza e configura cada produto (Blender + Verge3D). Prazo ~7 dias úteis/bloco.
-3. Validação de um produto-modelo (~10%) com o cliente antes de escalar.
+2. Equipe ATT modela, texturiza e configura cada produto (Blender + Verge3D).
+3. Validação de um produto-modelo com o cliente antes de escalar.
 4. Publicação na plataforma com embed (iframe) para o site da marca + QR code para RA.
-5. Arquitetos engajam → eventos são coletados → dashboard mensal mostra o desempenho.
+5. Arquitetos engajam → eventos coletados → dashboard mostra o desempenho.
 
-## Números institucionais (marketing)
-40+ países alcançados · 500+ marcas na plataforma · 20K+ downloads/mês · entrega em ~7 dias úteis.
-
-## Posicionamento (o que somos e o que NÃO somos)
-- SOMOS: curadoria e tecnologia de digitalização 3D para marcas de design; uma ponte
-  para arquitetos especificarem produtos.
-- NÃO SOMOS: um depósito de blocos genérico, nem uma agência de marketing. As campanhas
-  internas existem só para lançar a marca na nossa base de arquitetos.
+## Observação sobre o portal interno (este sistema)
+Este portal de gestão (planos, contratos, etc.) é uma EVOLUÇÃO em construção. Quaisquer
+preços/planos exibidos aqui ainda NÃO estão em prática comercial — não os use como verdade.
 
 ---
 
