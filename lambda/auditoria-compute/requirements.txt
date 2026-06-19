@@ -1,0 +1,2 @@
+# Lambda Python 3.12 já vem com boto3 — não precisa instalar nada.
+# Mantido vazio só pra documentar.

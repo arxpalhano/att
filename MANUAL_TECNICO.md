@@ -45,7 +45,7 @@ Portal web da ArchTechTour que serve dois públicos:
 │   • API routes: /api/analytics/* /api/upload /api/analyze                │
 │                                                                          │
 │   IAM Role: amplify-archtechtour-portal-ssr                              │
-│   Domínio: https://main.d20t94dp8646px.amplifyapp.com                    │
+│   Domínio: https://app.archtechtour.com                    │
 └──────┬──────────────────────────────────────────┬────────────────────────┘
        │ queries Athena                            │ read/write S3
        │ (cross-region us-east-1)                  │
@@ -268,7 +268,7 @@ Mapeamento de aliases → nomes de clientes. Atualmente ~7 registros.
 ### 4.1 Cliente acessa seu dashboard
 
 ```
-1. Cliente abre https://main.d20t94dp8646px.amplifyapp.com
+1. Cliente abre https://app.archtechtour.com
 2. Login (email + senha) → carrega user.role = "client"
 3. Redirecionado para o portal do cliente
 4. Sidebar → clica em "Analytics"
@@ -355,7 +355,7 @@ VALUES ('novocli', 'Novo Cliente Ltda');
 
 **Via curl direto** (útil pra debug):
 ```bash
-curl -X POST https://main.d20t94dp8646px.amplifyapp.com/api/analytics/rsdesign/refresh \
+curl -X POST https://app.archtechtour.com/api/analytics/rsdesign/refresh \
   -H "Content-Type: application/json" \
   -d '{"inicio":"2026-04-01","fim":"2026-04-30"}'
 ```
@@ -664,7 +664,7 @@ Tempo estimado de DR completo: 4-6 horas.
 
 | Recurso | URL |
 |---|---|
-| Portal produção | https://main.d20t94dp8646px.amplifyapp.com |
+| Portal produção | https://app.archtechtour.com |
 | GitHub repo | https://github.com/arxpalhano/att |
 | AWS Console | https://console.aws.amazon.com/ (conta 891377125620) |
 | Amplify Console | https://console.aws.amazon.com/amplify/home?region=sa-east-1 |
@@ -740,8 +740,8 @@ cat /tmp/out.json
 Cole no terminal pra ver tudo em 30s:
 
 ```bash
-echo "=== Portal up?" && curl -sS -o /dev/null -w "%{http_code}\n" https://main.d20t94dp8646px.amplifyapp.com/
-echo "=== /api/analytics/clients?" && curl -sS https://main.d20t94dp8646px.amplifyapp.com/api/analytics/clients | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  {len(d.get(\"clients\",[]))} clientes')"
+echo "=== Portal up?" && curl -sS -o /dev/null -w "%{http_code}\n" https://app.archtechtour.com/
+echo "=== /api/analytics/clients?" && curl -sS https://app.archtechtour.com/api/analytics/clients | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'  {len(d.get(\"clients\",[]))} clientes')"
 echo "=== Parquet atualizado?"
 QID=$(aws athena start-query-execution --query-string "SELECT MAX(dt) FROM customizador_events.eventos_parquet" --query-execution-context Database=customizador_events --result-configuration OutputLocation=s3://explorar.archtechtour.com/athena-tmp/ --region us-east-1 --query QueryExecutionId --output text)
 sleep 4

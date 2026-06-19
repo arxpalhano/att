@@ -17,3 +17,15 @@ lambda/parquet-monthly-etl/function.zip
 lambda/analytics-compute/node_modules
 lambda/analytics-compute/dist
 lambda/analytics-compute/function.zip
+
+# OS junk
+.DS_Store
+**/.DS_Store
+
+# Lambda build artifacts (analytics-compute)
+lambda/analytics-compute/package-lock.json
+lambda/analytics-compute/tsconfig.json
+lambda/auditoria-compute/__pycache__
+
+# Audit output (gerado pela lambda auditoria-compute, fica no S3)
+public/auditoria-data/
