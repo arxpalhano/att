@@ -4337,6 +4337,23 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
   // Admin: lista clientes do dim_client_alias (Athena) — fonte de verdade do alias
   const [dimClients, setDimClients] = useState<Array<{ alias: string; cliente: string }>>([]);
   const [selectedAlias, setSelectedAlias] = useState<string>("");
+  const [refreshAllMsg, setRefreshAllMsg] = useState<string>("");
+  const [refreshAllLoading, setRefreshAllLoading] = useState(false);
+
+  const handleRefreshAll = async () => {
+    if (!confirm("Atualizar os dados de TODOS os clientes (últimos 30 dias)? Roda em background, leva ~1-2 min.")) return;
+    setRefreshAllLoading(true); setRefreshAllMsg("");
+    try {
+      const res = await fetch("/api/analytics/refresh-all", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Erro");
+      setRefreshAllMsg(data.message || "Atualização disparada.");
+    } catch (e) {
+      setRefreshAllMsg("Erro: " + (e as Error).message);
+    } finally {
+      setRefreshAllLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (isClient) return;
@@ -4413,6 +4430,14 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
               </select>
             </div>
             <button
+              onClick={handleRefreshAll}
+              disabled={refreshAllLoading}
+              className="flex items-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800 shadow-sm transition disabled:opacity-50"
+              title="Roda o refresh de todos os clientes na hora (sem esperar o cron do dia 10)"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshAllLoading ? "animate-spin" : ""}`} /> Atualizar todos
+            </button>
+            <button
               onClick={() => setTab("manage")}
               className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition"
               title="Listar/adicionar clientes na dim_client_alias do Athena"
@@ -4422,6 +4447,12 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
           </div>
         )}
       </div>
+
+      {refreshAllMsg && !isClient && (
+        <div className="rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-2.5 text-sm text-cyan-800 flex items-center gap-2">
+          <Activity className="w-4 h-4 flex-shrink-0" /> {refreshAllMsg}
+        </div>
+      )}
 
       {clientAlias ? (
         <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />

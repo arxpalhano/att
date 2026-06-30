@@ -82,11 +82,14 @@ async function refreshClient(alias: string, inicio: string, fim: string): Promis
   }
 }
 
-export const handler = async () => {
+export const handler = async (event?: { inicio?: string; fim?: string }) => {
   if (!API_URL) throw new Error("ANALYTICS_API_URL não configurado");
 
-  const { inicio, fim } = getPeriodoUltimos30Dias();
-  console.log(`Refresh (últimos 30d): ${inicio} → ${fim}`);
+  // Período: usa o do payload (disparo manual) ou janela móvel de 30 dias (cron).
+  const { inicio, fim } = (event?.inicio && event?.fim)
+    ? { inicio: event.inicio, fim: event.fim }
+    : getPeriodoUltimos30Dias();
+  console.log(`Refresh: ${inicio} → ${fim}`);
 
   const clientes = await listClients();
   console.log(`Clientes encontrados: ${clientes.length}`);

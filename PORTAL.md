@@ -175,7 +175,9 @@ dashboard/dossiê. Fonte de verdade institucional = archtechtour.com.
 - `POST /api/state/import-orphans` — cria blocos para customizadores S3 sem bloco (última versão de cada)
 
 **Analytics:** `GET /api/analytics/{client}`, `POST /api/analytics/{client}/refresh`,
-`POST /api/analytics/{client}/insights`, `GET /api/analytics/clients` (lista do dim).
+`POST /api/analytics/{client}/insights`, `GET /api/analytics/clients` (lista do dim),
+`POST /api/analytics/refresh-all` (botão "Atualizar todos" — invoca o Lambda
+analytics-compute async; body opcional `{inicio,fim}` ou janela móvel 30d).
 
 **Agentes:** `POST /api/agents/{sherlock-codes,monk-lighthouse,yoda-kanban,harvey-closer}`.
 
