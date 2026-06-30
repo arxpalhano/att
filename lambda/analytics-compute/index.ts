@@ -55,11 +55,14 @@ async function listClients(): Promise<Array<{ alias: string; cliente: string }>>
   })).filter((c) => c.alias && c.cliente);
 }
 
-function getPeriodoMesAnterior(): { inicio: string; fim: string } {
-  const hoje = new Date();
-  const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
-  const inicio = new Date(fim.getFullYear(), fim.getMonth(), 1);
+// Janela móvel de 30 dias (até ontem). Evita dashboard zerado no início
+// do mês — sempre captura o tráfego mais recente, independente do calendário.
+function getPeriodoUltimos30Dias(): { inicio: string; fim: string } {
   const fmt = (d: Date) => d.toISOString().split("T")[0];
+  const fim = new Date();
+  fim.setDate(fim.getDate() - 1); // até ontem (dia corrente pode estar incompleto)
+  const inicio = new Date(fim);
+  inicio.setDate(inicio.getDate() - 29); // 30 dias no total
   return { inicio: fmt(inicio), fim: fmt(fim) };
 }
 
@@ -82,8 +85,8 @@ async function refreshClient(alias: string, inicio: string, fim: string): Promis
 export const handler = async () => {
   if (!API_URL) throw new Error("ANALYTICS_API_URL não configurado");
 
-  const { inicio, fim } = getPeriodoMesAnterior();
-  console.log(`Refresh mensal: ${inicio} → ${fim}`);
+  const { inicio, fim } = getPeriodoUltimos30Dias();
+  console.log(`Refresh (últimos 30d): ${inicio} → ${fim}`);
 
   const clientes = await listClients();
   console.log(`Clientes encontrados: ${clientes.length}`);

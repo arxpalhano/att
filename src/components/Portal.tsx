@@ -2062,6 +2062,35 @@ function AssetRow({ asset }: { asset: SeedAsset }) {
 
 // BLOCK DETAIL
 // ============================================================
+function BlockEditModal({ initial, onClose, onSave }: {
+  initial: SeedBlock; onClose: () => void;
+  onSave: (d: { title: string; sku: string; csku: string }) => void;
+}) {
+  const [title, setTitle] = useState(initial.title);
+  const [sku, setSku] = useState(initial.sku);
+  const [csku, setCsku] = useState(initial.csku);
+  const canSave = title.trim().length > 0;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-800">Editar bloco</h2>
+          <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="space-y-3">
+          <div><label className="text-xs font-medium text-slate-500">Nome do produto *</label><input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Sofá Caraíva" /></div>
+          <div><label className="text-xs font-medium text-slate-500">SKU interno</label><input value={sku} onChange={(e) => setSku(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="2024-TIDELLI-01" /></div>
+          <div><label className="text-xs font-medium text-slate-500">SKU do cliente</label><input value={csku} onChange={(e) => setCsku(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="Código da marca" /></div>
+        </div>
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button onClick={() => onSave({ title: title.trim(), sku: sku.trim(), csku: csku.trim() })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
   const { blocks, setBlocks, activities, setActivities, assets, setAssets } = useContext(AppContext);
   const block = blocks.find((b) => b.id === blockId);
@@ -2094,6 +2123,13 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const validNext = VALID_TRANSITIONS[block.status] || [];
   const isClient = user.role === "client";
   const [confirmTransition, setConfirmTransition] = useState<BlockStatus | null>(null);
+  const [showEdit, setShowEdit] = useState(false);
+
+  const handleEditSave = (d: { title: string; sku: string; csku: string }) => {
+    setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku } : b));
+    setActivities([...activities, { id: `al_${Date.now()}`, blockId: block.id, userId: user.id, type: "block_edited", desc: `Dados do bloco editados`, at: new Date().toISOString() }]);
+    setShowEdit(false);
+  };
 
   const MAX_REVISIONS = 3;
   const revisions = block.clientRevisions ?? 0;
@@ -2151,6 +2187,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                   <option key={s} value={s}>↪ {STATUS_LABELS[s]}</option>
                 ))}
               </select>
+            )}
+            {user.role === "admin" && (
+              <button onClick={() => setShowEdit(true)} title="Editar dados do bloco" className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800">
+                <Settings className="w-3 h-3" /> Editar
+              </button>
             )}
           </div>
           <div className="flex items-center gap-4 mt-1 text-xs text-slate-500 flex-wrap">
@@ -2289,6 +2330,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
         </Card>
       )}
 
+      {showEdit && <BlockEditModal initial={block} onClose={() => setShowEdit(false)} onSave={handleEditSave} />}
       {showUpload && (
         <UploadModal
           blockId={block.id}
@@ -3498,13 +3540,17 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SeedPub | null>(null);
   const canEdit = currentUser?.role === "admin";
+  const [filterClient, setFilterClient] = useState<string>("");
 
   const isClient = user.role === "client";
   const pubs = publications.filter((p) => {
-    if (!isClient) return true;
     const block = blocks.find((b) => b.id === p.blockId);
-    return block?.clientId === user.clientId;
+    if (isClient) return block?.clientId === user.clientId;
+    if (filterClient) return block?.clientId === filterClient;
+    return true;
   });
+  // Marcas que têm publicação (para o seletor)
+  const marcasComPub = clients.filter((c) => publications.some((p) => blocks.find((b) => b.id === p.blockId)?.clientId === c.id));
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text).then(() => { setCopied(id); setTimeout(() => setCopied(null), 2000); });
@@ -3531,7 +3577,13 @@ function PublicationsPage({ user }: { user: SeedUser }) {
         title="Blocos publicados"
         description="Todos os blocos 3D disponíveis na plataforma ArchTechTour, com links de embed."
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isClient && (
+              <select value={filterClient} onChange={(e) => setFilterClient(e.target.value)} className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600">
+                <option value="">Todas as marcas</option>
+                {marcasComPub.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
             <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{pubs.length} publicados</Badge>
             {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova Publicação</button>}
           </div>
