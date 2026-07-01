@@ -2092,7 +2092,7 @@ function BlockEditModal({ initial, onClose, onSave }: {
 }
 
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
-  const { blocks, setBlocks, activities, setActivities, assets, setAssets } = useContext(AppContext);
+  const { blocks, setBlocks, activities, setActivities, assets, setAssets, publications, setPublications, tickets, setTickets } = useContext(AppContext);
   const block = blocks.find((b) => b.id === blockId);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -2129,6 +2129,17 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku } : b));
     setActivities([...activities, { id: `al_${Date.now()}`, blockId: block.id, userId: user.id, type: "block_edited", desc: `Dados do bloco editados`, at: new Date().toISOString() }]);
     setShowEdit(false);
+  };
+
+  const handleDelete = () => {
+    const pubCount = publications.filter((p) => p.blockId === block.id).length;
+    const tkCount = tickets.filter((t) => t.blockId === block.id).length;
+    if (!confirm(`Excluir o bloco "${block.title}"?\n\nIsso remove também: ${pubCount} publicação(ões) e ${tkCount} ticket(s) vinculados. Ação irreversível.`)) return;
+    setPublications(publications.filter((p) => p.blockId !== block.id));
+    setTickets(tickets.filter((t) => t.blockId !== block.id));
+    setBlocks(blocks.filter((b) => b.id !== block.id));
+    setActivities([...activities, { id: `al_${Date.now()}`, blockId: block.id, userId: user.id, type: "block_deleted", desc: `Bloco excluído: ${block.title}`, at: new Date().toISOString() }]);
+    setPage("blocks");
   };
 
   const MAX_REVISIONS = 3;
@@ -2191,6 +2202,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
             {user.role === "admin" && (
               <button onClick={() => setShowEdit(true)} title="Editar dados do bloco" className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800">
                 <Settings className="w-3 h-3" /> Editar
+              </button>
+            )}
+            {user.role === "admin" && (
+              <button onClick={handleDelete} title="Excluir bloco" className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
+                <X className="w-3 h-3" /> Excluir
               </button>
             )}
           </div>
