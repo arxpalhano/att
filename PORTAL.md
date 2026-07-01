@@ -176,8 +176,9 @@ dashboard/dossiê. Fonte de verdade institucional = archtechtour.com.
 
 **Analytics:** `GET /api/analytics/{client}`, `POST /api/analytics/{client}/refresh`,
 `POST /api/analytics/{client}/insights`, `GET /api/analytics/clients` (lista do dim),
-`POST /api/analytics/refresh-all` (botão "Atualizar todos" — invoca o Lambda
-analytics-compute async; body opcional `{inicio,fim}` ou janela móvel 30d).
+`POST /api/analytics/refresh-all` (só via API — invoca o Lambda analytics-compute
+async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-dia
+é feito pelo botão "Atualizar" dentro do dashboard, por cliente).
 
 **Agentes:** `POST /api/agents/{sherlock-codes,monk-lighthouse,yoda-kanban,harvey-closer}`.
 
@@ -190,7 +191,7 @@ analytics-compute async; body opcional `{inicio,fim}` ou janela móvel 30d).
 | Lambda | Cron | Função |
 |--------|------|--------|
 | `parquet-monthly-etl` | dia 5, 03h UTC | Converte JSON de eventos → Parquet particionado |
-| `analytics-compute` | dia 10, 04h UTC | Chama `/api/analytics/{alias}/refresh` de cada cliente |
+| `analytics-compute` | dia 1º, 04h UTC | Chama `/api/analytics/{alias}/refresh` de cada cliente (janela móvel 30d, ou período do payload) |
 | `auditoria-compute` | domingo, 03h UTC | Valida todos os customizadores publicados (12 checks/produto) → `s3://.../\_auditoria/` |
 
 Código em `lambda/`. Deploy via AWS CLI (profile `att-admin`) ou `deploy.sh`.
