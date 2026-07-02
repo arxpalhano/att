@@ -112,12 +112,17 @@ status atualizado → cliente vê em tempo real.
 ```
 Customizador → enviarEventoCustomizador()
   → POST odwlqrkix5.execute-api.us-east-1/register-event (API Gateway)
-  → Lambda RegistrarEventoCustomizador → S3 customizador-events/
-  → Lambda parquet-monthly-etl (cron dia 5) → Athena eventos_parquet
-  → Lambda analytics-compute (cron dia 10) → /api/analytics/{alias}/refresh
+  → Lambda RegistrarEventoCustomizador → tabela raw eventos_customizador
+  → Lambda parquet-monthly-etl (DIÁRIO) → Athena eventos_parquet (mês corrente+anterior)
+  → Lambda analytics-compute (dia 1º) → /api/analytics/{alias}/refresh
   → cache S3 archtechtour-assets/analytics-cache/{alias}/latest.json
   → Portal lê via /api/analytics/{alias}
 ```
+> ⚠️ As views/dashboard consultam `eventos_parquet` (particionado, rápido). Os
+> eventos crus chegam em `eventos_customizador` e só entram no Parquet quando o
+> parquet-monthly-etl roda. Por isso ele agora roda DIÁRIO — se o dashboard de um
+> mês aparecer zerado, quase sempre é o ETL que ainda não processou aquele período
+> (rode o Lambda com `{"targetMonth":"YYYY-MM"}`).
 
 **Builder (`src/lib/analytics-builder.ts`):** 8 queries paralelas no Athena
 (view `vw_eventos_base_com_cliente`, que mapeia alias→cliente via `dim_client_alias`).
@@ -190,7 +195,7 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 
 | Lambda | Cron | Função |
 |--------|------|--------|
-| `parquet-monthly-etl` | dia 5, 03h UTC | Converte JSON de eventos → Parquet particionado |
+| `parquet-monthly-etl` | **diário, 02h UTC** | Converte raw → Parquet (mês corrente + anterior). Mantém o Parquet sempre atualizado — sem esperar virar o mês. Aceita `{targetMonth}` no payload para reprocessar um mês específico |
 | `analytics-compute` | dia 1º, 04h UTC | Chama `/api/analytics/{alias}/refresh` de cada cliente (janela móvel 30d, ou período do payload) |
 | `auditoria-compute` | domingo, 03h UTC | Valida todos os customizadores publicados (12 checks/produto) → `s3://.../\_auditoria/` |
 

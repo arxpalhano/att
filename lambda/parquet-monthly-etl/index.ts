@@ -43,6 +43,12 @@ function previousMonth(): string {
   return `${ano}-${String(mes).padStart(2, "0")}`;
 }
 
+/** Mês corrente no formato YYYY-MM */
+function currentMonth(): string {
+  const hoje = new Date();
+  return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+}
+
 /** Calcula o primeiro dia do mês e do próximo (intervalo half-open) */
 function monthRange(yyyymm: string): { start: string; nextStart: string } {
   const [y, m] = yyyymm.split("-").map(Number);
@@ -84,47 +90,52 @@ async function runAthena(sql: string, label: string): Promise<void> {
   throw new Error(`Athena ${label} timeout (14min)`);
 }
 
-export const handler = async () => {
-  const targetMonth = process.env.TARGET_MONTH || previousMonth();
+/** Processa 1 mês: dropa as partições (idempotência) e re-insere do raw. */
+async function processMonth(targetMonth: string): Promise<void> {
   const { start, nextStart } = monthRange(targetMonth);
+  console.log(`--- Mês ${targetMonth}: ${start} → ${nextStart} ---`);
 
-  console.log(`============================================`);
-  console.log(`Parquet ETL — mês alvo: ${targetMonth}`);
-  console.log(`Range: ${start} (inclusivo) → ${nextStart} (exclusivo)`);
-  console.log(`============================================`);
-
-  // 1. Apaga partições do mês alvo (idempotência) — usa ALTER TABLE DROP PARTITION via Athena
-  //    Caso falhe (partição não existe), ignora.
+  // 1. Dropa partições do mês (idempotência)
   try {
-    // Constrói lista de partições do mês pra dropar
     const [y, m] = targetMonth.split("-").map(Number);
     const daysInMonth = new Date(y, m, 0).getDate();
     const partitionSpecs: string[] = [];
     for (let d = 1; d <= daysInMonth; d++) {
-      const dt = `${targetMonth}-${String(d).padStart(2, "0")}`;
-      partitionSpecs.push(`PARTITION (dt='${dt}')`);
+      partitionSpecs.push(`PARTITION (dt='${targetMonth}-${String(d).padStart(2, "0")}')`);
     }
-    const dropSql = `ALTER TABLE ${DB}.eventos_parquet DROP IF EXISTS ${partitionSpecs.join(", ")}`;
-    await runAthena(dropSql, "drop-partitions");
+    await runAthena(`ALTER TABLE ${DB}.eventos_parquet DROP IF EXISTS ${partitionSpecs.join(", ")}`, `drop-${targetMonth}`);
   } catch (err) {
-    console.warn("Drop partition falhou (provável: partições não existem ainda):", (err as Error).message);
+    console.warn(`Drop ${targetMonth} falhou (provável: sem partições):`, (err as Error).message);
   }
 
-  // 2. INSERT INTO mês alvo
+  // 2. INSERT do raw (CAST timestamp — coluna pode ser string)
   const insertSql = `
     INSERT INTO ${DB}.eventos_parquet
     SELECT evento, produto, categoria, rotulo, user_id, session_id, user_agent, referrer,
            "timestamp" AS ts, pais, estado, cidade, latitude, longitude, timezone, origem_trafego,
-           date_format(from_unixtime("timestamp"), '%Y-%m-%d') AS dt
+           date_format(from_unixtime(CAST("timestamp" AS bigint)), '%Y-%m-%d') AS dt
     FROM ${DB}.eventos_customizador
-    WHERE from_unixtime("timestamp") >= TIMESTAMP '${start} 00:00:00'
-      AND from_unixtime("timestamp") <  TIMESTAMP '${nextStart} 00:00:00'
+    WHERE from_unixtime(CAST("timestamp" AS bigint)) >= TIMESTAMP '${start} 00:00:00'
+      AND from_unixtime(CAST("timestamp" AS bigint)) <  TIMESTAMP '${nextStart} 00:00:00'
   `;
-  await runAthena(insertSql, "insert-month");
+  await runAthena(insertSql, `insert-${targetMonth}`);
+}
+
+export const handler = async (event?: { targetMonth?: string }) => {
+  // Manual: TARGET_MONTH ou event.targetMonth. Cron diário: mês corrente + anterior
+  // (mantém o Parquet atualizado com dados frescos, sem esperar virada de mês).
+  const meses = event?.targetMonth || process.env.TARGET_MONTH
+    ? [event?.targetMonth || process.env.TARGET_MONTH!]
+    : [previousMonth(), currentMonth()];
 
   console.log(`============================================`);
-  console.log(`ETL concluído com sucesso pra ${targetMonth}`);
+  console.log(`Parquet ETL — processando: ${meses.join(", ")}`);
   console.log(`============================================`);
 
-  return { statusCode: 200, body: JSON.stringify({ targetMonth, start, nextStart }) };
+  for (const mes of meses) {
+    await processMonth(mes);
+  }
+
+  console.log(`ETL concluído: ${meses.join(", ")}`);
+  return { statusCode: 200, body: JSON.stringify({ processed: meses }) };
 };
