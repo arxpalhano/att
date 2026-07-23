@@ -23,6 +23,7 @@ declare global {
 
 interface Resultado {
   status: string;
+  erro?: string;
   slug: string;
   produto?: string;
   marca?: string;
@@ -114,6 +115,38 @@ export default function InstantResultado({ id }: { id: string }) {
         <Link href="/experimentar" className="text-sm font-semibold text-[#0D0D0D] underline">
           Fazer um novo teste
         </Link>
+      </div>
+    );
+  }
+
+  // Falha no processamento: dizer com clareza, nunca deixar o cliente esperando
+  if (dados?.status === "erro") {
+    return (
+      <div className="mx-auto max-w-lg px-5 py-24 text-center">
+        <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-full border border-[#A32F26]/25 bg-[#A32F26]/8">
+          <AlertTriangle className="h-6 w-6 text-[#A32F26]" />
+        </div>
+        <h2 className="mb-3 text-xl font-semibold text-[#0D0D0D]">
+          Não conseguimos gerar seu modelo
+        </h2>
+        <p className="mb-8 text-sm leading-relaxed text-[#6B6760]">
+          {dados.erro ||
+            "Houve uma falha interna do serviço durante a geração. Nossa equipe já foi avisada — tente novamente em alguns minutos."}
+        </p>
+        <div className="flex flex-wrap justify-center gap-3">
+          <Link
+            href="/experimentar"
+            className="inline-flex items-center gap-2 rounded-xl bg-[#0D0D0D] px-5 py-3 text-sm font-semibold text-white transition hover:bg-[#262626]"
+          >
+            Tentar novamente
+          </Link>
+          <Link
+            href="/planos"
+            className="inline-flex items-center gap-2 rounded-xl border border-[#E5E0DA] bg-white px-5 py-3 text-sm font-semibold text-[#6B6760] transition hover:text-[#0D0D0D]"
+          >
+            Ver planos
+          </Link>
+        </div>
       </div>
     );
   }

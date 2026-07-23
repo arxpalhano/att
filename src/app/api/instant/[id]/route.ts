@@ -38,10 +38,13 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ erro: "Teste não encontrado." }, { status: 404 });
   }
 
+  // a causa técnica (erro_interno) é do painel interno — nunca vai pro cliente
+  const { erro_interno: _interno, ...jobPublico } = job;
+
   const resultado = await lerJson(`${base}/resultado.json`);
   if (!resultado) {
     return NextResponse.json(
-      { ...job, status: job.status || "fila" },
+      { ...jobPublico, status: job.status || "fila" },
       { headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -49,7 +52,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   // URLs públicas do que o cliente pode ver (o arquivo em si só sai com contrato)
   return NextResponse.json(
     {
-      ...job,
+      ...jobPublico,
       ...resultado,
       status: "pronto",
       glb_url: `${CDN}/${base}/saida/${job.slug}.glb`,
