@@ -53,6 +53,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Trava do teste grátis: o 1º vai sem cadastro; do 2º em diante pede e-mail.
+    // E-mails @archtechtour.com (equipe) passam sempre e não contam no limite.
+    const email = String(form.get("email") || "").trim().toLowerCase();
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return NextResponse.json({ erro: "E-mail inválido." }, { status: 400 });
+    }
+    const interno = email.endsWith("@archtechtour.com");
+    const usos = Number(request.cookies.get("att_instant_usos")?.value || "0") || 0;
+    if (!interno && usos >= 1 && !email) {
+      return NextResponse.json(
+        {
+          erro: "O primeiro teste é livre. Para gerar mais, informe seu e-mail corporativo.",
+          precisa_email: true,
+        },
+        { status: 422 },
+      );
+    }
+
     const fotos = form.getAll("fotos").filter((f): f is File => f instanceof File);
     if (fotos.length === 0) {
       return NextResponse.json({ erro: "Envie pelo menos uma foto." }, { status: 400 });
@@ -94,6 +112,7 @@ export async function POST(request: NextRequest) {
       id,
       slug,
       status: "fila",
+      email: email || null,
       criado_em: new Date().toISOString(),
       categoria: categoria.id,
       categoria_rotulo: categoria.rotulo,
@@ -117,7 +136,16 @@ export async function POST(request: NextRequest) {
       }),
     );
 
-    return NextResponse.json({ id, status: "fila" }, { status: 202 });
+    const res = NextResponse.json({ id, status: "fila" }, { status: 202 });
+    if (!interno) {
+      res.cookies.set("att_instant_usos", String(usos + 1), {
+        maxAge: 60 * 60 * 24 * 365,
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+      });
+    }
+    return res;
   } catch (e) {
     console.error("[instant/gerar]", e);
     return NextResponse.json(

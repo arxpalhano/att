@@ -30,6 +30,8 @@ export default function InstantWizard() {
   const [dims, setDims] = useState({ altura: "", largura: "", profundidade: "" });
   const [produto, setProduto] = useState("");
   const [marca, setMarca] = useState("");
+  const [email, setEmail] = useState("");
+  const [pedirEmail, setPedirEmail] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -55,6 +57,7 @@ export default function InstantWizard() {
       fd.append("categoria", categoria.id);
       fd.append("produto", produto || "produto");
       fd.append("marca", marca);
+      fd.append("email", email);
       fd.append("altura", dims.altura);
       fd.append("largura", dims.largura);
       fd.append("profundidade", dims.profundidade);
@@ -62,7 +65,10 @@ export default function InstantWizard() {
 
       const res = await fetch("/api/instant/gerar", { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.erro || "Falha ao enviar");
+      if (!res.ok) {
+        if (data.precisa_email) setPedirEmail(true);
+        throw new Error(data.erro || "Falha ao enviar");
+      }
       router.push(`/experimentar/${data.id}`);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Erro inesperado");
@@ -298,6 +304,24 @@ export default function InstantWizard() {
               />
             </label>
           </div>
+
+          <label className="mt-4 block">
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-[#A09890]">
+              E-mail corporativo {pedirEmail ? "· obrigatório" : "· opcional no 1º teste"}
+            </span>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="voce@suamarca.com.br"
+              className={`w-full rounded-xl border bg-white px-4 py-3 text-sm text-[#0D0D0D] outline-none transition focus:border-[#0D0D0D] ${
+                pedirEmail ? "border-[#A32F26]" : "border-[#E5E0DA]"
+              }`}
+            />
+            <span className="mt-1.5 block text-xs text-[#A09890]">
+              O primeiro teste é livre. Dos próximos em diante, pedimos seu e-mail.
+            </span>
+          </label>
 
           <div className="mt-4 grid gap-4 sm:grid-cols-3">
             {([
