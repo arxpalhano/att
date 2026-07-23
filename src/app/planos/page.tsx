@@ -32,6 +32,25 @@ export default function PlanosPage() {
 
   const PLANS = [
     {
+      id: "instant",
+      name: "Instant",
+      price: 490,
+      period: "mês",
+      desc: "Catálogo no ar rápido, com geração automática.",
+      blocks: 30,
+      sla: "minutos por produto",
+      highlight: false,
+      automatico: true,
+      features: [
+        t("plans.instant.f1"),
+        t("plans.instant.f2"),
+        t("plans.instant.f3"),
+        t("plans.instant.f4"),
+        t("plans.instant.f5"),
+        t("plans.instant.f6"),
+      ],
+    },
+    {
       id: "starter",
       name: "Starter",
       price: 1990,
@@ -169,7 +188,7 @@ export default function PlanosPage() {
         </div>
 
         {/* PLAN CARDS */}
-        <div className="grid gap-5 md:grid-cols-3 mb-16">
+        <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-4 mb-16">
           {PLANS.map((plan) => (
             <div
               key={plan.id}
@@ -182,6 +201,11 @@ export default function PlanosPage() {
               {plan.highlight && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-4 py-1 text-[10px] font-bold uppercase tracking-widest text-white/70">
                   {t("plans.mostPopular")}
+                </div>
+              )}
+              {plan.automatico && (
+                <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#E5E0DA] bg-[#F8F7F5] px-4 py-1 text-[10px] font-bold uppercase tracking-widest text-[#6B6760]">
+                  {t("plans.instant.how")}
                 </div>
               )}
 
@@ -232,6 +256,15 @@ export default function PlanosPage() {
                 {plan.id === "enterprise" ? t("plans.talkTeam2") : t("plans.choosePlan")}
                 <ArrowRight className="h-4 w-4" />
               </button>
+
+              {plan.automatico && (
+                <Link
+                  href="/experimentar"
+                  className="mt-2 text-center text-xs font-semibold text-[#6B6760] underline underline-offset-2 transition hover:text-[#0D0D0D]"
+                >
+                  {t("plans.instant.try")}
+                </Link>
+              )}
             </div>
           ))}
         </div>
@@ -252,13 +285,16 @@ export default function PlanosPage() {
                 </thead>
                 <tbody>
                   {[
-                    [t("plans.feature.blocks3d"), "10", "50", t("plans.unlimited")],
-                    [t("plans.feature.arCustomizer"), "—", "✓", "✓"],
-                    [t("plans.feature.analytics"), "Básico", "Avançado", "Executivo"],
-                    [t("plans.feature.priority"), "Normal", "Alta", "Dedicada"],
-                    [t("plans.feature.support"), "E-mail", "Chat + e-mail", "CSM dedicado"],
-                    [t("plans.feature.meetings"), "—", "—", "✓"],
-                    [t("plans.feature.invoice"), "NF-e", "NF-e", "NF-e + Invoice"],
+                    [t("plans.feature.modelagem"), t("plans.instant.how"), t("plans.artisan.how"), t("plans.artisan.how"), t("plans.artisan.how")],
+                    [t("plans.feature.blocks3d"), "30", "10", "50", t("plans.unlimited")],
+                    [t("plans.feature.bim"), "—", "✓", "✓", "✓"],
+                    [t("plans.feature.revisao"), "—", "✓", "✓", "✓"],
+                    [t("plans.feature.arCustomizer"), "—", "—", "✓", "✓"],
+                    [t("plans.feature.analytics"), "Básico", "Básico", "Avançado", "Executivo"],
+                    [t("plans.feature.priority"), "Automática", "Normal", "Alta", "Dedicada"],
+                    [t("plans.feature.support"), "E-mail", "E-mail", "Chat + e-mail", "CSM dedicado"],
+                    [t("plans.feature.meetings"), "—", "—", "—", "✓"],
+                    [t("plans.feature.invoice"), "NF-e", "NF-e", "NF-e", "NF-e + Invoice"],
                   ].map(([feature, ...vals]) => (
                     <tr key={feature} className="border-b border-[#ECEAE6] last:border-0 hover:bg-[#F8F7F5] transition">
                       <td className="px-5 py-3.5 text-[#6B6760]">{feature}</td>
