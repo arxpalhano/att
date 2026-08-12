@@ -129,6 +129,19 @@ Customizador → enviarEventoCustomizador()
 > mês aparecer zerado, quase sempre é o ETL que ainda não processou aquele período
 > (rode o Lambda com `{"targetMonth":"YYYY-MM"}`).
 
+> 🔴 **Idempotência do ETL (bug corrigido em 2026-08-12).** `ALTER TABLE ... DROP
+> PARTITION` remove SÓ o metadado no Glue — os arquivos `.parquet` continuam em
+> `s3://archtechtour-assets/eventos-parquet/dt=YYYY-MM-DD/`. Como o `INSERT INTO`
+> recria a partição no mesmo prefixo, os arquivos antigos voltavam a ser lidos
+> junto com os novos: **cada execução diária somava uma cópia inteira do mês**
+> (jun/2026 chegou a 35x, jul/2026 a 27x). Inflava tudo que usa `COUNT(*)` — Total
+> de Eventos, Engajamento Real, Downloads, tempo total, eventos por produto.
+> Visitantes Únicos e Carregamentos não foram afetados (`COUNT DISTINCT`).
+> O `deleteMonthPrefixes()` da Lambda apaga os objetos S3 antes do drop/insert e
+> **não pode ser removido**. Abril–agosto/2026 já reprocessados (todos em 1,0x).
+> Para auditar: comparar `COUNT(*)` do `eventos_parquet` com o `eventos_customizador`
+> no mesmo mês — têm que bater.
+
 **Builder (`src/lib/analytics-builder.ts`):** 8 queries paralelas no Athena
 (view `vw_eventos_base_com_cliente`, que mapeia alias→cliente via `dim_client_alias`).
 
@@ -200,7 +213,7 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 
 | Lambda | Cron | Função |
 |--------|------|--------|
-| `parquet-monthly-etl` | **diário, 02h UTC** | Converte raw → Parquet (mês corrente + anterior). Mantém o Parquet sempre atualizado — sem esperar virar o mês. Aceita `{targetMonth}` no payload para reprocessar um mês específico |
+| `parquet-monthly-etl` | **diário, 02h UTC** | Converte raw → Parquet (mês corrente + anterior). Apaga os objetos S3 da partição antes de reinserir (idempotência — ver ⚠️ em §7). Mantém o Parquet sempre atualizado, sem esperar virar o mês. Aceita `{targetMonth}` ou `{targetMonths:[...]}` no payload para reprocessar meses específicos. Timeout 900s / 1024MB |
 | `analytics-compute` | dia 1º, 04h UTC | Chama `/api/analytics/{alias}/refresh` de cada cliente (janela móvel 30d, ou período do payload) |
 | `auditoria-compute` | domingo, 03h UTC | Valida todos os customizadores publicados (12 checks/produto) → `s3://.../\_auditoria/` |
 
@@ -244,3 +257,18 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
   só contar sessão com interação (melhora qualidade da métrica na origem)
 - 🟡 Planos/preços do portal ainda NÃO estão em prática comercial (são placeholder)
 - 🟢 Migração Notion/Planner → portal: concluída (blocos/tickets/publicações migrados)
+
+### Reportado pela Jessica (PM) em 2026-08-11 — correção por etapas
+
+1. ✅ **Números inflados** (WJ 234.685 eventos, Riccó acima dos outros meses) —
+   era a duplicação do ETL. Corrigido e reprocessado em 2026-08-12 (ver §7).
+2. 🔴 **"Erro desconhecido"** ao selecionar período de 30 dias no dashboard.
+3. 🔴 **Vazamento entre clientes:** dashboard da Tidelli mostra `persolpersianas.com.br`
+   em Origem de Acessos. Suspeita relacionada: a coluna `cliente` da
+   `vw_eventos_base_com_cliente` tem valores-lixo (`mesa`, `cadeira`, `aparador`,
+   `poltrona`, `persiana`, `dengo`, `<!`) — aliases que não existem no
+   `dim_client_alias`, então esses eventos somem do dashboard do cliente certo.
+4. 🔴 **Contratos não editáveis** na UI — precisa alterar quantidade de produtos e
+   conferir disponível/concluída.
+5. 🔴 **Usuários criados somem** (Jessica criou usuários e eles desapareceram no dia
+   seguinte) — suspeita de sobrescrita no persist com debounce / replaceAll.
