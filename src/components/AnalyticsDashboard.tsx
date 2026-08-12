@@ -293,7 +293,14 @@ export default function AnalyticsDashboard({
         body: JSON.stringify({ inicio: r.inicio, fim: r.fim }),
       });
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Erro desconhecido" }));
+        // Timeout do gateway devolve página HTML, não JSON — por isso o fallback.
+        // Não usar "Erro desconhecido": não diz à PM o que fazer a seguir.
+        const err = await res.json().catch(() => ({
+          error:
+            res.status === 504 || res.status === 502
+              ? "O relatório demorou demais para ser gerado. Tente um período menor."
+              : `Falha ao gerar o relatório (HTTP ${res.status}). Tente de novo em instantes.`,
+        }));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       const fresh = await res.json();
