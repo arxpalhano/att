@@ -2843,8 +2843,10 @@ function UserFormModal({
 }
 
 function UsersPage() {
-  const { currentUser } = useContext(AppContext);
-  const [users, setUsers] = useState<SeedUser[]>([...USERS]);
+  // Usa o estado do AppContext — NÃO criar estado local aqui. Só o `users` do
+  // contexto dispara o efeito que espelha o array de módulo USERS e persiste no
+  // DynamoDB; um useState local fica só na tela e o usuário some no reload.
+  const { currentUser, users, setUsers } = useContext(AppContext);
   const [showAdd, setShowAdd] = useState(false);
   const [editingUser, setEditingUser] = useState<SeedUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -2855,30 +2857,21 @@ function UsersPage() {
       role: data.role, active: true, ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
     };
     setUsers([...users, u]);
-    USERS.push(u);
     setShowAdd(false);
   };
 
   const handleEdit = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
     if (!editingUser) return;
-    const updated = users.map((u) =>
+    setUsers(users.map((u) =>
       u.id === editingUser.id
         ? { ...u, name: data.name, email: data.email, role: data.role, password: data.password, clientId: data.role === "client" && data.clientId ? data.clientId : undefined }
         : u
-    );
-    setUsers(updated);
-    const idx = USERS.findIndex((u) => u.id === editingUser.id);
-    if (idx >= 0) {
-      USERS[idx] = { ...USERS[idx], name: data.name, email: data.email, role: data.role, password: data.password,
-        clientId: data.role === "client" && data.clientId ? data.clientId : undefined };
-    }
+    ));
     setEditingUser(null);
   };
 
   const handleDelete = (id: string) => {
     setUsers(users.filter((u) => u.id !== id));
-    const idx = USERS.findIndex((u) => u.id === id);
-    if (idx >= 0) USERS.splice(idx, 1);
     setConfirmDelete(null);
   };
 
