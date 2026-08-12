@@ -18,6 +18,11 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 **Repositório:** github.com/arxpalhano/att
 **Branches:** `develop` (trabalho) → `main` (produção, Amplify auto-deploy).
 
+> Além do portal, o mesmo app hospeda o **ATT Instant** — funil público em
+> `/experimentar` de geração 3D por IA (foto → modelo, self-service) + plano
+> "Instant" em `/planos`. Arquivos: `src/app/experimentar/*`, `src/app/api/instant/*`,
+> `src/components/Instant*.tsx`, `src/lib/instant-categorias.ts`.
+
 ---
 
 ## 2. Stack & Infraestrutura
