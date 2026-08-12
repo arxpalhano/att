@@ -109,6 +109,33 @@ Publicações, Analytics, Clientes, Contratos, Atividade, Usuários, **Agentes A
 SLA +14d, sem responsável) → Jessica (PM) atribui → modelador/dev trabalha →
 status atualizado → cliente vê em tempo real.
 
+### Permissão de telas por cliente (modo validação — desde 2026-08-12)
+
+Enquanto o portal está sendo validado, **cliente entra vendo só o Analytics**.
+Equipe interna não é afetada: qualquer papel diferente de `client` acessa tudo.
+
+Como funciona (`Portal.tsx`, seção "PERMISSÕES DE PÁGINA"):
+
+- `SeedUser.allowedPages?: string[]` — telas liberadas para aquele usuário.
+  `["all"]` libera tudo. **Ausente ou vazio cai no padrão.**
+- `PAGINAS_PADRAO_CLIENTE = ["analytics"]` — o padrão. É de propósito que o
+  padrão seja restritivo: um cliente cadastrado hoje **já nasce restrito**, sem
+  depender de alguém lembrar de marcar as telas. **Para liberar todo mundo
+  depois da validação, troque essa constante para `["all"]`** — uma linha.
+- A marcação no usuário vence o padrão (exceções caso a caso).
+- A Jessica configura pela UI: **Usuários → Editar → "Telas liberadas"**, com
+  um checkbox "Acesso total" e a lista de telas. A coluna *Acesso* na tabela
+  mostra o que cada um enxerga, marcando quem está no `(padrão)`.
+
+⚠️ **A trava fica no `renderPage`, não no menu.** Esconder o item do menu não
+basta: o dashboard do cliente tem botões que chamam `setPage("blocks")` e
+`setPage("contracts")` direto ([Portal.tsx:1165](src/components/Portal.tsx#L1165)
+e outros), então o cliente chegaria na tela por dentro. O menu é filtrado só
+pelo efeito visual. Telas de detalhe (`block_detail`, `contract_detail`) herdam
+a permissão da listagem via `PAGINA_PAI`, e página desconhecida **falha
+fechada**. Ao logar, o usuário cai na primeira tela permitida — senão um cliente
+restrito abriria direto numa tela bloqueada, já que o padrão é `dashboard`.
+
 ### Cadastrar um cliente novo ponta a ponta (tudo pela UI, sem AWS CLI)
 
 A PM faz sozinha — se algum passo exigir intervenção técnica, isso é bug de

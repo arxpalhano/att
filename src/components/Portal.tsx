@@ -52,6 +52,12 @@ export interface ProductionTicket {
 interface SeedUser {
   id: string; email: string; password: string; name: string; role: UserRole;
   clientId?: string; active: boolean;
+  /**
+   * Páginas que este usuário pode abrir. Só vale para `role: "client"` — equipe
+   * interna acessa tudo. `["all"]` libera tudo. Ausente ou vazio cai no
+   * PAGINAS_PADRAO_CLIENTE.
+   */
+  allowedPages?: string[];
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
 export interface SeedContract {
@@ -511,6 +517,65 @@ function ProgressBar({ value, className = "" }: { value: number; className?: str
   );
 }
 
+// ============================================================
+// PERMISSÕES DE PÁGINA (só para clientes)
+// ============================================================
+
+/**
+ * Padrão de acesso do cliente enquanto o portal está em validação: só Analytics.
+ *
+ * É o PADRÃO, aplicado a quem não tem `allowedPages` — assim um cliente
+ * cadastrado hoje já nasce restrito, sem depender de alguém lembrar de marcar
+ * as páginas. Para liberar todo mundo depois da validação, troque esta linha
+ * por `["all"]`. Para exceções, marque as páginas no próprio usuário (a
+ * marcação do usuário vence este padrão).
+ */
+const PAGINAS_PADRAO_CLIENTE = ["analytics"];
+
+/** Páginas liberáveis para cliente, na ordem do menu. */
+const PAGINAS_CLIENTE: Array<{ id: string; label: string }> = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "onboarding", label: "Onboarding" },
+  { id: "blocks", label: "Meus Blocos" },
+  { id: "approvals", label: "Aprovações" },
+  { id: "publications", label: "Publicações" },
+  { id: "analytics", label: "Analytics" },
+  { id: "contracts", label: "Contratos" },
+];
+
+/** Telas de detalhe herdam a permissão da listagem que as abre. */
+const PAGINA_PAI: Record<string, string> = {
+  block_detail: "blocks",
+  contract_detail: "contracts",
+};
+
+/** Páginas liberadas para o usuário. `"all"` = sem restrição. */
+function paginasPermitidas(user: SeedUser): string[] | "all" {
+  if (user.role !== "client") return "all";
+  const cfg = user.allowedPages;
+  if (cfg?.includes("all")) return "all";
+  if (cfg && cfg.length > 0) return cfg;
+  return PAGINAS_PADRAO_CLIENTE;
+}
+
+/**
+ * Trava de navegação. Tem que ser checada no renderPage, não só no menu: o
+ * dashboard do cliente tem botões que chamam setPage("blocks"/"contracts")
+ * direto, então esconder o item do menu não impediria de chegar na tela.
+ */
+function podeAcessar(user: SeedUser, page: string): boolean {
+  const permitidas = paginasPermitidas(user);
+  if (permitidas === "all") return true;
+  return permitidas.includes(PAGINA_PAI[page] ?? page);
+}
+
+/** Primeira página que o usuário pode abrir — é onde ele cai ao logar. */
+function primeiraPaginaPermitida(user: SeedUser): string {
+  const permitidas = paginasPermitidas(user);
+  if (permitidas === "all") return "dashboard";
+  return PAGINAS_CLIENTE.find((p) => permitidas.includes(p.id))?.id ?? "analytics";
+}
+
 function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
   return (
     <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
@@ -762,7 +827,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
     return relatedBlock?.clientId === user.clientId;
   }).length;
 
-  const navItems = isClient
+  const todosItens = isClient
     ? [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
         { id: "onboarding", icon: Clipboard, label: "Onboarding" },
@@ -786,6 +851,10 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "users", icon: Settings, label: "Usuários" },
         ...(user.role === "admin" ? [{ id: "agents", icon: Sparkles, label: "Agentes AI" }] : []),
       ];
+
+  // Esconder o item aqui é só o efeito visual — quem realmente barra o acesso é
+  // o podeAcessar() no renderPage.
+  const navItems = todosItens.filter((item) => podeAcessar(user, item.id));
 
   const workspaceLabel = isClient ? getClientName(user.clientId!) : "Operação Interna";
 
@@ -2760,7 +2829,7 @@ function UserFormModal({
 }: {
   title: string;
   onClose: () => void;
-  onSave: (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => void;
+  onSave: (data: { name: string; email: string; role: UserRole; clientId: string; password: string; allowedPages?: string[] }) => void;
   initial?: SeedUser;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
@@ -2769,6 +2838,12 @@ function UserFormModal({
   const [clientId, setClientId] = useState(initial?.clientId ?? "");
   const [password, setPassword] = useState(initial?.password ?? "");
   const [showPw, setShowPw] = useState(false);
+  const [acessoTotal, setAcessoTotal] = useState(initial?.allowedPages?.includes("all") ?? false);
+  const [paginas, setPaginas] = useState<string[]>(
+    initial?.allowedPages?.filter((p) => p !== "all") ?? PAGINAS_PADRAO_CLIENTE
+  );
+  const alternarPagina = (id: string) =>
+    setPaginas((atual) => (atual.includes(id) ? atual.filter((p) => p !== id) : [...atual, id]));
 
   const isEdit = !!initial;
   const canSave = name.trim() && email.trim() && (!isEdit || password.trim());
@@ -2821,19 +2896,47 @@ function UserFormModal({
             </select>
           </div>
           {role === "client" && (
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
-              <select value={clientId} onChange={(e) => setClientId(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-                <option value="">Selecione...</option>
-                {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Cliente</label>
+                <select value={clientId} onChange={(e) => setClientId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+                  <option value="">Selecione...</option>
+                  {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="rounded-xl border border-slate-200 p-3">
+                <label className="block text-xs font-medium text-slate-500 mb-2">Telas liberadas</label>
+                <label className="flex items-center gap-2 text-sm text-slate-700 mb-2">
+                  <input type="checkbox" checked={acessoTotal} onChange={(e) => setAcessoTotal(e.target.checked)} />
+                  <span className="font-medium">Acesso total</span>
+                  <span className="text-xs text-slate-400">(todas as telas do portal)</span>
+                </label>
+                {!acessoTotal && (
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 pl-1">
+                    {PAGINAS_CLIENTE.map((p) => (
+                      <label key={p.id} className="flex items-center gap-2 text-sm text-slate-600">
+                        <input type="checkbox" checked={paginas.includes(p.id)} onChange={() => alternarPagina(p.id)} />
+                        {p.label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                {!acessoTotal && paginas.length === 0 && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    Nada marcado — o usuário vai cair no padrão ({PAGINAS_PADRAO_CLIENTE.join(", ")}).
+                  </p>
+                )}
+              </div>
+            </>
           )}
         </div>
         <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
-          <button onClick={() => onSave({ name: name.trim(), email: email.trim(), role, clientId, password })}
+          <button onClick={() => onSave({
+            name: name.trim(), email: email.trim(), role, clientId, password,
+            allowedPages: role === "client" ? (acessoTotal ? ["all"] : paginas) : undefined,
+          })}
             disabled={!canSave}
             className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">
             {isEdit ? "Salvar Alterações" : "Criar Usuário"}
@@ -2853,20 +2956,26 @@ function UsersPage() {
   const [editingUser, setEditingUser] = useState<SeedUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
-  const handleAdd = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
+  const handleAdd = (data: { name: string; email: string; role: UserRole; clientId: string; password: string; allowedPages?: string[] }) => {
     const u: SeedUser = {
       id: `u_${Date.now()}`, name: data.name, email: data.email, password: data.password,
       role: data.role, active: true, ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
+      ...(data.allowedPages?.length ? { allowedPages: data.allowedPages } : {}),
     };
     setUsers([...users, u]);
     setShowAdd(false);
   };
 
-  const handleEdit = (data: { name: string; email: string; role: UserRole; clientId: string; password: string }) => {
+  const handleEdit = (data: { name: string; email: string; role: UserRole; clientId: string; password: string; allowedPages?: string[] }) => {
     if (!editingUser) return;
     setUsers(users.map((u) =>
       u.id === editingUser.id
-        ? { ...u, name: data.name, email: data.email, role: data.role, password: data.password, clientId: data.role === "client" && data.clientId ? data.clientId : undefined }
+        ? {
+            ...u, name: data.name, email: data.email, role: data.role, password: data.password,
+            clientId: data.role === "client" && data.clientId ? data.clientId : undefined,
+            // Vazio = volta ao padrão (PAGINAS_PADRAO_CLIENTE); undefined em não-cliente.
+            allowedPages: data.allowedPages?.length ? data.allowedPages : undefined,
+          }
         : u
     ));
     setEditingUser(null);
@@ -2889,6 +2998,19 @@ function UsersPage() {
           { label: "Email", render: (r: SeedUser) => <span className="text-sm text-slate-500">{r.email}</span> },
           { label: "Perfil", render: (r: SeedUser) => <Badge className={r.role === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : r.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"}>{ROLE_LABELS[r.role]}</Badge> },
           { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "\u2014" },
+          { label: "Acesso", render: (r: SeedUser) => {
+            const p = paginasPermitidas(r);
+            if (p === "all") {
+              return <span className="text-xs text-slate-400">{r.role === "client" ? "Total" : "Interno"}</span>;
+            }
+            const rotulos = p.map((id) => PAGINAS_CLIENTE.find((x) => x.id === id)?.label || id);
+            return (
+              <span className="text-xs text-slate-600">
+                {rotulos.join(", ")}
+                {!r.allowedPages?.length && <span className="ml-1 text-slate-400">(padrão)</span>}
+              </span>
+            );
+          } },
           { label: "Ações", render: (r: SeedUser) => confirmDelete === r.id ? (
             <div className="flex gap-1">
               <button onClick={() => handleDelete(r.id)} className="px-2 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700">Confirmar</button>
@@ -4548,6 +4670,14 @@ export default function Portal() {
   useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
   useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
   useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
+
+  // Ao logar, cai na primeira página permitida. Sem isso um cliente restrito a
+  // Analytics entraria direto na tela bloqueada, já que o padrão é "dashboard".
+  useEffect(() => {
+    if (!currentUser) return;
+    setPage((atual) => (podeAcessar(currentUser, atual) ? atual : primeiraPaginaPermitida(currentUser)));
+  }, [currentUser]);
+
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
     [],
@@ -4566,6 +4696,17 @@ export default function Portal() {
   const workspaceTitle = isClient ? getClientName(currentUser.clientId!) : "Pipeline ArchTechTour";
 
   const renderPage = () => {
+    // Trava de acesso — vale para QUALQUER caminho até a página, inclusive os
+    // botões dentro do dashboard do cliente que chamam setPage() direto.
+    if (!podeAcessar(currentUser, page)) {
+      return (
+        <EmptyState
+          icon={Lock}
+          title="Área ainda não liberada"
+          desc="Esta seção do portal está em validação e ainda não foi liberada para o seu acesso. Fale com a equipe ArchTechTour se precisar dela."
+        />
+      );
+    }
     switch (page) {
       case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} />;
       case "onboarding": return <OnboardingWizardPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
