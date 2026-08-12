@@ -169,6 +169,12 @@ linha aqui (CSV com header, `skip.header.line.count=1`). ⚠️ Cada arquivo no 
 precisa do seu próprio header, e **um alias não pode aparecer duas vezes** — o
 LEFT JOIN da view duplicaria os eventos.
 
+Um mesmo cliente PODE ter vários aliases (`jader` e `jaderalmeida` são ambos
+Jader Almeida), porque os customizadores nomeiam o produto de formas diferentes.
+Os dois geram números idênticos — o refresh filtra por `cliente`, não por alias —
+então `/api/analytics/clients` deduplica por nome de cliente antes de listar,
+senão a PM veria o mesmo cliente duas vezes.
+
 **`dim_produto_cliente`** (S3 `explorar.archtechtour.com/dim/dim_produto_cliente/`):
 mapa **produto→cliente**, criado em 2026-08-12. Existe porque o campo `produto` vem
 de um atributo no HTML de cada customizador, preenchido à mão, e muitos não têm o
@@ -297,10 +303,16 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
    `explorar.archtechtour.com/tidelli/ver-5/cadeira-com-braco-caraiva/`. Embed
    errado no site da Persol (16 eventos desde junho). **Correção é no site da
    Persol**, não no nosso código.
+   O link errado não é um iframe: fica na caixa **"Instaladores"**, no link
+   **"Manual de instação Rolô"** (typo do site deles) — visualmente é só mais um
+   link de download, só dá pra notar clicando. Na mesma página o link
+   `Bloco3D → v3d.net/1f6g` está correto, então foi erro de cópia só nesse.
+
    Junto veio o problema maior dos produtos sem prefixo, resolvido pelo
-   `dim_produto_cliente` (ver §7). **Ainda sem dono** (precisam de resposta da
-   Jessica): `dengo` (2.315 ev — a Dengo não é cliente do portal), `<!` (562 ev —
-   embed quebrado em `estudiobola.com` + tráfego interno de
+   `dim_produto_cliente` (ver §7). **Dengo Petlovers** era cliente de verdade sem
+   alias no dim — adicionado (`dengo`), recuperando 3.931 eventos / 3.051 sessões
+   desde ago/2025. **Ainda sem dono** (precisam de resposta da Jessica): `<!`
+   (562 ev — embed quebrado em `estudiobola.com` + tráfego interno de
    `marketing.archtechtour.com` e do editor do RD Station), `persiana` (100 ev —
    Persol ou Hunter Douglas?), `naiade` (40), `inkasa` (33), e produtos que não
    estão em `att-publications` (`cadeira` 194, `mesa` 175, `puff` 150, `estante` 54,

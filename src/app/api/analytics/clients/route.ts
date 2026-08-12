@@ -89,7 +89,22 @@ export async function GET() {
       const meta = await getAnalyticsMeta(c.alias);
       return { ...c, ...meta };
     }));
-    return NextResponse.json({ clients });
+
+    // Um cliente pode ter mais de um alias no dim — ex: "jader" e "jaderalmeida",
+    // porque os customizadores nomeiam o produto das duas formas e precisamos dos
+    // dois para atribuir os eventos. Os dois produzem os MESMOS números (o refresh
+    // filtra por `cliente`, não por alias), então listar ambos só duplicaria o
+    // cliente na tela da PM. Fica o alias canônico: o que tem dados e, entre
+    // esses, o mais curto.
+    const canonico = new Map<string, (typeof clients)[number]>();
+    for (const c of clients) {
+      const atual = canonico.get(c.cliente);
+      const melhor = !atual
+        || (c.has_data && !atual.has_data)
+        || (c.has_data === atual.has_data && c.alias.length < atual.alias.length);
+      if (melhor) canonico.set(c.cliente, c);
+    }
+    return NextResponse.json({ clients: Array.from(canonico.values()) });
   } catch (err) {
     const e = err as Error;
     // Debug: chamar listener Amplify direto
