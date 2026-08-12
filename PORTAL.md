@@ -287,7 +287,11 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
 
 1. ✅ **Números inflados** (WJ 234.685 eventos, Riccó acima dos outros meses) —
    era a duplicação do ETL. Corrigido e reprocessado em 2026-08-12 (ver §7).
-2. 🔴 **"Erro desconhecido"** ao selecionar período de 30 dias no dashboard.
+2. ✅ **"Erro desconhecido"** ao trocar o período — era o fallback de resposta
+   não-JSON (timeout do gateway devolvendo HTML), causado pela duplicação do
+   Parquet: as 8 queries varriam ~27x mais dados. Com o item 1 corrigido, o
+   refresh de 30 dias da Riccó leva 6s e o de 1 ano da WJ leva 8s. A mensagem
+   agora distingue 502/504 e sugere um período menor.
 3. ✅ **Vazamento Persol↔Tidelli** — causa raiz achada: a página
    `persolpersianas.com.br/produtos/cortinas/cortina-rolo` embeda o customizador
    `explorar.archtechtour.com/tidelli/ver-5/cadeira-com-braco-caraiva/`. Embed
@@ -301,7 +305,20 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
    Persol ou Hunter Douglas?), `naiade` (40), `inkasa` (33), e produtos que não
    estão em `att-publications` (`cadeira` 194, `mesa` 175, `puff` 150, `estante` 54,
    `banqueta` 35, `banco` 7).
-4. 🔴 **Contratos não editáveis** na UI — precisa alterar quantidade de produtos e
-   conferir disponível/concluída.
-5. 🔴 **Usuários criados somem** (Jessica criou usuários e eles desapareceram no dia
-   seguinte) — suspeita de sobrescrita no persist com debounce / replaceAll.
+4. 🟡 **Contratos não editáveis** — não é bug, é permissão. `canEdit` em
+   Contratos, Clientes e Publicações é `role === "admin"`, e a Jessica é
+   `internal_ops` no seed (`u6`, info@archtechtour.com), então o botão de editar
+   nem é renderizado. O login SSO só promove a admin quem **não** está no seed
+   (`Portal.tsx`, LoginPage) — quem está, herda o papel do seed. Os contadores
+   `usedBlocks` foram auditados e batem com a contagem real de blocos nos 18
+   contratos; o que ela precisa é aumentar `totalBlocks`, porque vários contratos
+   estão em capacidade máxima (Estúdio Bola 107/107, Cadeiras Rosa 11/11,
+   Riccó 38/38). **Falta decidir**: promover a Jessica a admin ou liberar
+   `internal_ops` para editar contratos.
+5. ✅ **Usuários criados somem** — `UsersPage` usava `useState` local em vez do
+   estado do `AppContext`, então o efeito de persistência nunca disparava e nada
+   chegava ao DynamoDB (confirmado: `att-users` tinha só os 25 do seed).
+   Corrigido; a página passa a consumir `users/setUsers` do contexto.
+   ⚠️ Risco conhecido que continua de pé: o persist manda o array inteiro
+   (`replaceAll`), então duas abas/admins editando ao mesmo tempo = o último
+   sobrescreve o outro.
