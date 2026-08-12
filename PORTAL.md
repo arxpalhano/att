@@ -305,16 +305,17 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
    Persol ou Hunter Douglas?), `naiade` (40), `inkasa` (33), e produtos que não
    estão em `att-publications` (`cadeira` 194, `mesa` 175, `puff` 150, `estante` 54,
    `banqueta` 35, `banco` 7).
-4. 🟡 **Contratos não editáveis** — não é bug, é permissão. `canEdit` em
-   Contratos, Clientes e Publicações é `role === "admin"`, e a Jessica é
-   `internal_ops` no seed (`u6`, info@archtechtour.com), então o botão de editar
-   nem é renderizado. O login SSO só promove a admin quem **não** está no seed
-   (`Portal.tsx`, LoginPage) — quem está, herda o papel do seed. Os contadores
-   `usedBlocks` foram auditados e batem com a contagem real de blocos nos 18
-   contratos; o que ela precisa é aumentar `totalBlocks`, porque vários contratos
-   estão em capacidade máxima (Estúdio Bola 107/107, Cadeiras Rosa 11/11,
-   Riccó 38/38). **Falta decidir**: promover a Jessica a admin ou liberar
-   `internal_ops` para editar contratos.
+4. ✅ **Contratos não editáveis** — não era bug, era permissão. `canEdit` em
+   Contratos, Clientes e Publicações é `role === "admin"`, e a Jessica era
+   `internal_ops` no seed (`u6`), então o botão de editar nem era renderizado.
+   O login SSO só promove a admin quem **não** está no seed (`Portal.tsx`,
+   LoginPage) — quem está, herda o papel de lá. Jessica promovida a admin no
+   seed **e** no DynamoDB (mudar só o seed não adianta: a hidratação sobrescreve
+   com o que vier do banco). Os contadores `usedBlocks` foram auditados e batem
+   com a contagem real de blocos nos 18 contratos — nenhuma divergência. O que
+   ela precisa é aumentar `totalBlocks`, porque vários contratos estão em
+   capacidade máxima (Estúdio Bola 107/107, Cadeiras Rosa 11/11, Riccó 38/38,
+   RS Design 13/13).
 5. ✅ **Usuários criados somem** — `UsersPage` usava `useState` local em vez do
    estado do `AppContext`, então o efeito de persistência nunca disparava e nada
    chegava ao DynamoDB (confirmado: `att-users` tinha só os 25 do seed).

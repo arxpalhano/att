@@ -169,7 +169,9 @@ let USERS: SeedUser[] = [
   { id: "u3", email: "vsalles@archtechtour.com", password: "arch@2025", name: "Victor Salles", role: "internal_modeling", active: true },
   { id: "u4", email: "ijesus@archtechtour.com", password: "arch@2025", name: "Igor Augusto", role: "internal_modeling", active: true },
   { id: "u5", email: "lliles@archtechtour.com", password: "arch@2025", name: "Lucas Liles", role: "internal_programming", active: true },
-  { id: "u6", email: "info@archtechtour.com", password: "arch@2025", name: "Jéssica Ribeiro", role: "internal_ops", active: true },
+  // PM — precisa de admin para editar contratos/clientes/publicações. O login SSO
+  // só promove a admin quem NÃO está neste seed, então quem está aqui herda este papel.
+  { id: "u6", email: "info@archtechtour.com", password: "arch@2025", name: "Jéssica Ribeiro", role: "admin", active: true },
   { id: "u7", email: "financeiro@archtechtour.com", password: "arch@2025", name: "Danielli Nunes", role: "internal_ops", active: true },
   { id: "u8", email: "contato@escal.com.br", password: "escal@2025", name: "Escal Móveis", role: "client", clientId: "c1", active: true },
   { id: "u9", email: "contato@estudiobola.com.br", password: "bola@2025", name: "Estúdio Bola", role: "client", clientId: "c2", active: true },
