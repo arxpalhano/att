@@ -163,9 +163,34 @@ pagespeed, monitores, e tráfego interno (localhost, explorar.archtechtour.com).
 **Insights AI** (`/api/analytics/[client]/insights`): botão no dashboard que gera
 interpretação amigável dos números para o cliente (Claude Haiku).
 
-**`dim_client_alias`** (Athena, S3 `explorar.archtechtour.com/dim/`): mapeia
-alias→nome do cliente. Tem os 18 clientes. Para adicionar cliente novo ao analytics,
-incluir linha aqui (CSV com header, `skip.header.line.count=1`).
+**`dim_client_alias`** (Athena, S3 `explorar.archtechtour.com/dim/dim_client_alias/`):
+mapeia alias→nome do cliente. Para adicionar cliente novo ao analytics, incluir
+linha aqui (CSV com header, `skip.header.line.count=1`). ⚠️ Cada arquivo no prefixo
+precisa do seu próprio header, e **um alias não pode aparecer duas vezes** — o
+LEFT JOIN da view duplicaria os eventos.
+
+**`dim_produto_cliente`** (S3 `explorar.archtechtour.com/dim/dim_produto_cliente/`):
+mapa **produto→cliente**, criado em 2026-08-12. Existe porque o campo `produto` vem
+de um atributo no HTML de cada customizador, preenchido à mão, e muitos não têm o
+prefixo do cliente — `"Cadeira Office Soul"` (Escal) virava o cliente `"cadeira"`.
+Prefixo genérico não dá pra resolver por alias: *Cadeira Office Soul* é da Escal e
+*Cadeira Olive* é do Jader. A verdade vem da URL das publicações
+(`.../{pasta-do-cliente}/ver-N/{slug-do-produto}/`). Isso devolveu **6.137 eventos**
+aos donos certos, ~5.100 só da Escal (+67% no dashboard dela).
+Regenerar com `scripts/gerar-dim-produto-cliente.py` sempre que entrarem
+publicações de produtos sem prefixo.
+
+**Ordem de resolução do cliente na `vw_eventos_base_com_cliente`:**
+```sql
+COALESCE(d.cliente, p.cliente, LOWER(alias))
+      -- ^dim_client_alias (prefixo)
+                 -- ^dim_produto_cliente (produto inteiro)
+                             -- ^fallback: vira "lixo" e some dos dashboards
+```
+O alias vem primeiro **de propósito**: quem já resolvia pelo prefixo continua
+idêntico, e o dim de produto só entra como resgate. A mudança é estritamente
+aditiva — nenhum cliente perde evento. Ao mexer na view, validar que o
+`COUNT(*)` total por período não muda.
 
 ---
 
@@ -263,11 +288,19 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
 1. ✅ **Números inflados** (WJ 234.685 eventos, Riccó acima dos outros meses) —
    era a duplicação do ETL. Corrigido e reprocessado em 2026-08-12 (ver §7).
 2. 🔴 **"Erro desconhecido"** ao selecionar período de 30 dias no dashboard.
-3. 🔴 **Vazamento entre clientes:** dashboard da Tidelli mostra `persolpersianas.com.br`
-   em Origem de Acessos. Suspeita relacionada: a coluna `cliente` da
-   `vw_eventos_base_com_cliente` tem valores-lixo (`mesa`, `cadeira`, `aparador`,
-   `poltrona`, `persiana`, `dengo`, `<!`) — aliases que não existem no
-   `dim_client_alias`, então esses eventos somem do dashboard do cliente certo.
+3. ✅ **Vazamento Persol↔Tidelli** — causa raiz achada: a página
+   `persolpersianas.com.br/produtos/cortinas/cortina-rolo` embeda o customizador
+   `explorar.archtechtour.com/tidelli/ver-5/cadeira-com-braco-caraiva/`. Embed
+   errado no site da Persol (16 eventos desde junho). **Correção é no site da
+   Persol**, não no nosso código.
+   Junto veio o problema maior dos produtos sem prefixo, resolvido pelo
+   `dim_produto_cliente` (ver §7). **Ainda sem dono** (precisam de resposta da
+   Jessica): `dengo` (2.315 ev — a Dengo não é cliente do portal), `<!` (562 ev —
+   embed quebrado em `estudiobola.com` + tráfego interno de
+   `marketing.archtechtour.com` e do editor do RD Station), `persiana` (100 ev —
+   Persol ou Hunter Douglas?), `naiade` (40), `inkasa` (33), e produtos que não
+   estão em `att-publications` (`cadeira` 194, `mesa` 175, `puff` 150, `estante` 54,
+   `banqueta` 35, `banco` 7).
 4. 🔴 **Contratos não editáveis** na UI — precisa alterar quantidade de produtos e
    conferir disponível/concluída.
 5. 🔴 **Usuários criados somem** (Jessica criou usuários e eles desapareceram no dia
