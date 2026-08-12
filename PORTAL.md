@@ -109,6 +109,27 @@ Publicações, Analytics, Clientes, Contratos, Atividade, Usuários, **Agentes A
 SLA +14d, sem responsável) → Jessica (PM) atribui → modelador/dev trabalha →
 status atualizado → cliente vê em tempo real.
 
+### Cadastrar um cliente novo ponta a ponta (tudo pela UI, sem AWS CLI)
+
+A PM faz sozinha — se algum passo exigir intervenção técnica, isso é bug de
+produto, não tarefa de quem mantém o repo. Requer perfil **admin**.
+
+1. **Clientes → Novo Cliente** — nome, `code` e e-mail de contato.
+   O `code` deve ser igual ao alias do Athena (minúsculo, sem espaço/acento).
+2. **Contratos → Novo Contrato** — escolhe o cliente e define *Total Blocos*.
+   Sem contrato com folga não dá pra cadastrar produto (o bloco consome saldo).
+3. **Usuários → Novo Usuário** — perfil *Cliente* + o cliente criado. Esse é o
+   login com que a marca acessa o próprio portal.
+4. **Analytics → "Gerenciar clientes" → Adicionar cliente** — alias + nome,
+   grava no `dim_client_alias`. Depois **"Gerar"** na linha dele monta o
+   dashboard. Sem este passo o cliente existe no portal mas fica sem analytics.
+
+⚠️ O nome digitado no passo 4 vira a chave de tudo: o refresh filtra os eventos
+por `cliente`, não por alias. Se divergir do que está no dim, o dashboard vem
+vazio. O alias é o **prefixo do nome do produto** no customizador (`wj-enigma`
+→ `wj`) — quando o produto não tem prefixo, o dono sai do `dim_produto_cliente`
+(ver §7).
+
 ---
 
 ## 7. Analytics
