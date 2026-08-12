@@ -25,7 +25,9 @@ export default function AnalyticsClientsAdmin() {
   const loadClients = useCallback(() => {
     setLoading(true);
     setError("");
-    fetch("/api/analytics/clients")
+    // ?todos=1: esta tela mostra o dim_client_alias como ele é, sem deduplicar
+    // por cliente — um cliente pode ter mais de um alias de propósito.
+    fetch("/api/analytics/clients?todos=1")
       .then((r) => r.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
@@ -215,7 +217,7 @@ export default function AnalyticsClientsAdmin() {
       </div>
 
       <p className="text-xs text-slate-400">
-        💡 <strong>Atualização automática:</strong> A Lambda <code className="font-mono bg-slate-100 px-1 rounded">analytics-compute</code> roda todo dia 10 e atualiza todos esses clientes para o mês anterior. Esta página é só pra refresh manual e adicionar clientes novos.
+        💡 <strong>Atualização automática:</strong> a Lambda <code className="font-mono bg-slate-100 px-1 rounded">analytics-compute</code> roda todo dia 1º e atualiza todos esses clientes (janela dos últimos 30 dias). Esta página é pra refresh manual e pra cadastrar clientes novos.
       </p>
     </div>
   );

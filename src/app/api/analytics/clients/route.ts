@@ -82,20 +82,28 @@ async function getAnalyticsMeta(alias: string): Promise<{ has_data: boolean; las
   return { has_data: false, last_updated: null, periodo: null };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // ?todos=1 devolve o dim inteiro, sem deduplicar. A tela de admin
+    // (AnalyticsClientsAdmin) usa esse modo porque ela existe justamente pra
+    // mostrar o conteúdo real da tabela — esconder um alias ali faria a contagem
+    // mentir e daria "alias já existe" num alias que não aparece na lista.
+    const todos = request.nextUrl.searchParams.get("todos") === "1";
+
     const dim = await listDim();
     const clients = await Promise.all(dim.map(async (c) => {
       const meta = await getAnalyticsMeta(c.alias);
       return { ...c, ...meta };
     }));
 
+    if (todos) return NextResponse.json({ clients });
+
     // Um cliente pode ter mais de um alias no dim — ex: "jader" e "jaderalmeida",
     // porque os customizadores nomeiam o produto das duas formas e precisamos dos
     // dois para atribuir os eventos. Os dois produzem os MESMOS números (o refresh
     // filtra por `cliente`, não por alias), então listar ambos só duplicaria o
-    // cliente na tela da PM. Fica o alias canônico: o que tem dados e, entre
-    // esses, o mais curto.
+    // cliente no seletor do dashboard. Fica o alias canônico: o que tem dados e,
+    // entre esses, o mais curto.
     const canonico = new Map<string, (typeof clients)[number]>();
     for (const c of clients) {
       const atual = canonico.get(c.cliente);
