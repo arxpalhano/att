@@ -1,37 +1,54 @@
 /**
  * Lambda: parquet-monthly-etl
  *
- * Disparo: EventBridge → "cron(0 3 5 * ? *)" — todo dia 5 às 03h UTC
+ * Disparo: EventBridge → diário, 02h UTC
  *
  * O que faz:
- *   1. Calcula o mês anterior completo (ex: rodando 05/maio → migra abril)
- *   2. Roda INSERT INTO customizador_events.eventos_parquet ...
+ *   1. Escolhe os meses a processar (padrão: mês anterior + mês corrente)
+ *   2. Para cada mês: APAGA os arquivos Parquet das partições do mês no S3,
+ *      dropa as partições no Glue, e roda INSERT INTO eventos_parquet
  *      lendo do eventos_customizador (JSON) com filtro de timestamp no mês
  *   3. Particiona por dt (YYYY-MM-DD) automaticamente
  *
  * Pipeline geral:
  *   - Dia X: Lambda do customizador escreve JSONs em s3://explorar.archtechtour.com/eventos/
- *   - Dia 5: ESTA Lambda migra o mês anterior pra Parquet (faster + cheaper)
- *   - Dia 10: Lambda analytics-compute atualiza dashboards (lê do Parquet)
+ *   - Diário: ESTA Lambda reconstrói o Parquet do mês corrente + anterior
+ *   - Dia 1º: Lambda analytics-compute atualiza dashboards (lê do Parquet)
  *
- * Idempotência: roda 2x no mesmo mês = duplica eventos.
- * Pra reproc: dropar partições do mês primeiro com ALTER TABLE DROP PARTITION.
+ * ⚠️ IDEMPOTÊNCIA (bug corrigido em 2026-08):
+ *   `ALTER TABLE ... DROP PARTITION` remove SÓ o metadado no Glue — os arquivos
+ *   .parquet continuam no S3. Como o INSERT INTO recria a partição no MESMO
+ *   prefixo, os arquivos antigos voltavam a ser lidos junto com os novos: cada
+ *   execução diária somava uma cópia inteira do mês (jun/2026 chegou a 35x).
+ *   Por isso o passo `deleteMonthPrefixes()` abaixo é OBRIGATÓRIO e roda ANTES
+ *   do drop/insert. Não remover.
  *
  * Env vars:
  *   ATHENA_DB        → padrão: customizador_events
  *   ATHENA_OUTPUT    → s3://... onde Athena escreve resultados tmp
+ *   PARQUET_BUCKET   → bucket da tabela eventos_parquet (padrão: archtechtour-assets)
+ *   PARQUET_PREFIX   → prefixo da tabela (padrão: eventos-parquet)
  *   TARGET_MONTH     → opcional, formato YYYY-MM (ex: '2026-04') pra rodar manual.
- *                      Se vazio, usa mês anterior automaticamente.
+ *                      Se vazio, usa mês anterior + corrente.
  */
 import {
   AthenaClient,
   StartQueryExecutionCommand,
   GetQueryExecutionCommand,
 } from "@aws-sdk/client-athena";
+import {
+  S3Client,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
 
 const athena = new AthenaClient({ region: "us-east-1" });
+const s3 = new S3Client({ region: "us-east-1" });
 const DB = process.env.ATHENA_DB || "customizador_events";
 const ATHENA_OUTPUT = process.env.ATHENA_OUTPUT || "s3://explorar.archtechtour.com/athena-tmp/";
+// Localização da tabela eventos_parquet (Glue: s3://archtechtour-assets/eventos-parquet)
+const PARQUET_BUCKET = process.env.PARQUET_BUCKET || "archtechtour-assets";
+const PARQUET_PREFIX = (process.env.PARQUET_PREFIX || "eventos-parquet").replace(/^\/+|\/+$/g, "");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -90,25 +107,65 @@ async function runAthena(sql: string, label: string): Promise<void> {
   throw new Error(`Athena ${label} timeout (14min)`);
 }
 
-/** Processa 1 mês: dropa as partições (idempotência) e re-insere do raw. */
+/** Lista os dias (YYYY-MM-DD) de um mês. */
+function daysOfMonth(yyyymm: string): string[] {
+  const [y, m] = yyyymm.split("-").map(Number);
+  const total = new Date(y, m, 0).getDate();
+  return Array.from({ length: total }, (_, i) => `${yyyymm}-${String(i + 1).padStart(2, "0")}`);
+}
+
+/**
+ * Apaga os arquivos .parquet das partições do mês no S3.
+ * Sem isso, DROP PARTITION + INSERT INTO duplica os dados (ver nota no topo).
+ * Retorna quantos objetos foram removidos.
+ */
+async function deleteMonthPrefixes(targetMonth: string): Promise<number> {
+  let removidos = 0;
+  for (const dia of daysOfMonth(targetMonth)) {
+    const Prefix = `${PARQUET_PREFIX}/dt=${dia}/`;
+    let ContinuationToken: string | undefined;
+    do {
+      const list = await s3.send(new ListObjectsV2Command({
+        Bucket: PARQUET_BUCKET, Prefix, ContinuationToken,
+      }));
+      const objetos = (list.Contents || []).map((o) => ({ Key: o.Key! }));
+      if (objetos.length > 0) {
+        // DeleteObjects aceita no máximo 1000 chaves por chamada
+        for (let i = 0; i < objetos.length; i += 1000) {
+          const lote = objetos.slice(i, i + 1000);
+          const res = await s3.send(new DeleteObjectsCommand({
+            Bucket: PARQUET_BUCKET, Delete: { Objects: lote, Quiet: true },
+          }));
+          if (res.Errors?.length) {
+            throw new Error(`Falha ao apagar ${res.Errors.length} objeto(s) em ${Prefix}: ${res.Errors[0].Message}`);
+          }
+          removidos += lote.length;
+        }
+      }
+      ContinuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+    } while (ContinuationToken);
+  }
+  return removidos;
+}
+
+/** Processa 1 mês: limpa S3 + partições (idempotência) e re-insere do raw. */
 async function processMonth(targetMonth: string): Promise<void> {
   const { start, nextStart } = monthRange(targetMonth);
   console.log(`--- Mês ${targetMonth}: ${start} → ${nextStart} ---`);
 
-  // 1. Dropa partições do mês (idempotência)
+  // 1. Apaga os arquivos Parquet do mês no S3 (idempotência de verdade)
+  const removidos = await deleteMonthPrefixes(targetMonth);
+  console.log(`[s3-clean-${targetMonth}] ${removidos} objeto(s) removido(s) de s3://${PARQUET_BUCKET}/${PARQUET_PREFIX}/dt=${targetMonth}-*/`);
+
+  // 2. Dropa as partições no Glue (metadado)
   try {
-    const [y, m] = targetMonth.split("-").map(Number);
-    const daysInMonth = new Date(y, m, 0).getDate();
-    const partitionSpecs: string[] = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      partitionSpecs.push(`PARTITION (dt='${targetMonth}-${String(d).padStart(2, "0")}')`);
-    }
+    const partitionSpecs = daysOfMonth(targetMonth).map((d) => `PARTITION (dt='${d}')`);
     await runAthena(`ALTER TABLE ${DB}.eventos_parquet DROP IF EXISTS ${partitionSpecs.join(", ")}`, `drop-${targetMonth}`);
   } catch (err) {
     console.warn(`Drop ${targetMonth} falhou (provável: sem partições):`, (err as Error).message);
   }
 
-  // 2. INSERT do raw (CAST timestamp — coluna pode ser string)
+  // 3. INSERT do raw (CAST timestamp — coluna pode ser string)
   const insertSql = `
     INSERT INTO ${DB}.eventos_parquet
     SELECT evento, produto, categoria, rotulo, user_id, session_id, user_agent, referrer,
@@ -121,12 +178,18 @@ async function processMonth(targetMonth: string): Promise<void> {
   await runAthena(insertSql, `insert-${targetMonth}`);
 }
 
-export const handler = async (event?: { targetMonth?: string }) => {
-  // Manual: TARGET_MONTH ou event.targetMonth. Cron diário: mês corrente + anterior
-  // (mantém o Parquet atualizado com dados frescos, sem esperar virada de mês).
-  const meses = event?.targetMonth || process.env.TARGET_MONTH
-    ? [event?.targetMonth || process.env.TARGET_MONTH!]
-    : [previousMonth(), currentMonth()];
+export const handler = async (event?: { targetMonth?: string; targetMonths?: string[] }) => {
+  // Manual: event.targetMonths (lista, p/ backfill), event.targetMonth ou TARGET_MONTH.
+  // Cron diário: mês corrente + anterior (mantém o Parquet fresco sem esperar virar o mês).
+  const manual = event?.targetMonths?.length
+    ? event.targetMonths
+    : event?.targetMonth || process.env.TARGET_MONTH
+      ? [event?.targetMonth || process.env.TARGET_MONTH!]
+      : null;
+  const meses = manual ?? [previousMonth(), currentMonth()];
+
+  const invalido = meses.find((m) => !/^\d{4}-(0[1-9]|1[0-2])$/.test(m));
+  if (invalido) throw new Error(`Mês inválido: "${invalido}" (esperado YYYY-MM)`);
 
   console.log(`============================================`);
   console.log(`Parquet ETL — processando: ${meses.join(", ")}`);
