@@ -64,6 +64,13 @@ const BOT_FILTER = `
   AND COALESCE(referrer,'') NOT LIKE '%localhost%'
   AND COALESCE(referrer,'') NOT LIKE '%explorar.archtechtour.com%'
 `;
+// Origens ocultas por cliente: domínios de terceiros que embedaram o customizador
+// de outro cliente sem autorização. O tráfego continua contando nos KPIs, mas o
+// domínio não aparece no gráfico "Origem de Acessos" (chave = alias, lowercase).
+const ORIGENS_OCULTAS: Record<string, string[]> = {
+  tidelli: ["persolpersianas.com.br"],
+};
+
 const BOT_FILTER_E = BOT_FILTER.replace(/user_agent/g, "e.user_agent").replace(/referrer/g, "e.referrer");
 
 export async function buildAnalytics(opts: {
@@ -264,9 +271,13 @@ export async function buildAnalytics(opts: {
     sessoes: inum(r.sessoes),
   }));
 
-  // 7. Origem de acesso (filtra localhost)
+  // 7. Origem de acesso (filtra localhost + origens ocultas do cliente)
+  const ocultas = ORIGENS_OCULTAS[opts.alias.toLowerCase()] || [];
   const origensFiltradas = origemRows
-    .filter((r) => !r.origem.toLowerCase().includes("localhost"))
+    .filter((r) => {
+      const o = r.origem.toLowerCase();
+      return !o.includes("localhost") && !ocultas.some((d) => o.includes(d));
+    })
     .slice(0, 6);
   const totalOrigens = origensFiltradas.reduce((s, r) => s + inum(r.total), 0) || 1;
   const origem_acesso = origensFiltradas.map((r) => ({

@@ -197,6 +197,12 @@ Customizador → enviarEventoCustomizador()
 meta-externalads, facebookexternalhit, bingpreview, crawlers, headless, lighthouse,
 pagespeed, monitores, e tráfego interno (localhost, explorar.archtechtour.com).
 
+**Origens ocultas (ORIGENS_OCULTAS):** mapa `alias → domínios` no builder que remove
+referrers específicos do gráfico "Origem de Acessos" (o tráfego continua contando nos
+KPIs). Hoje: `tidelli → persolpersianas.com.br` — a Persol embedou o customizador da
+Tidelli no site dela sem autorização, e o domínio poluía o dashboard da Tidelli.
+Só some do gráfico depois de rodar o refresh do cliente (o dashboard lê o JSON do S3).
+
 **KPIs do dashboard (honestos):**
 - **Visitantes Únicos** — pessoas reais (sem bot)
 - **Carregamentos** — impressões (iframe exibido; `session_start` dispara no load)
