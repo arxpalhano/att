@@ -67,7 +67,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 
 ## 5. Modelo de dados (DynamoDB)
 
-7 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
+9 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
 
 | Tabela | Conteúdo |
 |--------|----------|
@@ -78,6 +78,8 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 | `att-tickets` | Tickets de produção (clientId, blockId, title, status, slaDate, assignedTo) |
 | `att-activities` | Log de atividades (blockId, userId, type, desc, at) |
 | `att-users` | Usuários do portal (email, password, name, role, clientId) |
+| `att-agent-routines` | Rotinas dos agentes automáticos (hoje só `argus-watchtower`: horários, destinatários, sites monitorados) |
+| `att-agent-checks` | Histórico de verificações do Argus Watchtower (TTL 90 dias via `expiresAt`) |
 
 **Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`.
 Se vazias, faz seed inicial (de `src/data/seed.ts` + `wj-seed.ts` + hardcoded).
@@ -266,9 +268,41 @@ com histórico em localStorage. Modelo Haiku 4.5 com retry/fallback (`claude-ret
 | 🟦 **Monk Lighthouse** | Adrian Monk + Lighthouse | QA dos customizadores publicados: HTTP, analytics, downloads corretos (lê `ui.js`), AR, escala. Por cliente, todos, ou URL específica. |
 | 🟢 **Yoda Kanban** | Yoda + Kanban | Gerente de projetos: saúde do portfólio, riscos, oportunidades, ações para a PM. |
 | 🟣 **Harvey Closer** | Harvey Specter + Closer | Comercial/retenção: traduz analytics em valor e ações comerciais/marketing. Ajuda a reter cliente em risco de cancelamento. |
+| 🔵 **Argus Watchtower** | Argus Panoptes (o de cem olhos) | Monitor de disponibilidade: verifica nos horários da rotina (padrão **13h e 21h**, Brasília) se os sites da ATT estão no ar e manda e-mail pra equipe. **Não usa Claude** — é probe HTTP puro. Rotina editável na própria tela. |
 
 **Regra de contexto:** agentes NUNCA inventam números/preços. Usam só dados reais do
 dashboard/dossiê. Fonte de verdade institucional = archtechtour.com.
+
+### Argus Watchtower — monitor de disponibilidade (desde 2026-08-24)
+
+Único agente que roda **sozinho**, sem ninguém abrir o portal. Quem executa é a Lambda
+`site-watchdog` (ver §10), não o Next.js — assim o monitoramento sobrevive a uma queda
+do próprio `app.archtechtour.com`.
+
+**Rotina padrão:** 13h e 21h (Brasília) · e-mail para `info@archtechtour.com` e
+`palhano@arx.hk` · alvo `https://archtechtour.com` · avisa sempre (OK e falha).
+
+**Tudo é editável na tela do agente** (Agentes AI → Argus Watchtower), e salvar já vale
+para a próxima hora — a rotina mora no DynamoDB e a Lambda relê a cada execução:
+horários (chips de 00h a 23h), destinatários, sites monitorados (com texto opcional que
+precisa existir na página — pega "site no ar mas quebrado"), avisar sempre × só em falha,
+timeout, tentativas extras, remetente, e liga/desliga geral.
+
+A tela mostra ainda a última verificação, a próxima automática, e o histórico de 90 dias.
+Os botões **"Verificar sem e-mail"** e **"Verificar e enviar e-mail"** rodam na hora
+(esses passam pelo Next.js, não pela Lambda).
+
+**Anti-falso-positivo:** cada alvo é testado com `retries` tentativas espaçadas em 5s
+antes de ser declarado fora do ar. **Anti-duplicidade:** a Lambda grava um lock
+idempotente por slot (`argus-watchtower#YYYY-MM-DDTHH`), então redisparo do EventBridge
+não gera e-mail repetido.
+
+**E-mail (SES, us-east-1):** remetente `monitor@archtechtour.com` (identidade de domínio
+`archtechtour.com`). ⚠️ A conta SES está em **sandbox** — só envia para destinatários
+verificados. Hoje: todo `@archtechtour.com` (pelo domínio) + `palhano@arx.hk`. Para um
+destinatário novo fora do domínio, verificar antes:
+`aws sesv2 create-email-identity --email-identity NOVO@dominio.com --region us-east-1 --profile att-admin`
+(a pessoa clica no link que a AWS envia) — ou pedir production access no console do SES.
 
 ---
 
@@ -290,6 +324,10 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 
 **Agentes:** `POST /api/agents/{sherlock-codes,monk-lighthouse,yoda-kanban,harvey-closer}`.
 
+**Argus Watchtower:** `GET /api/agents/argus-watchtower` (rotina + histórico),
+`POST /api/agents/argus-watchtower` (verifica agora; body `{sendEmail?: boolean}`),
+`GET/PUT /api/agents/argus-watchtower/routine` (rotina editável).
+
 **Auth:** `/api/auth/[...nextauth]`. **Outros:** `/api/upload`, `/api/analyze`.
 
 ---
@@ -301,6 +339,7 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 | `parquet-monthly-etl` | **diário, 02h UTC** | Converte raw → Parquet (mês corrente + anterior). Apaga os objetos S3 da partição antes de reinserir (idempotência — ver ⚠️ em §7). Mantém o Parquet sempre atualizado, sem esperar virar o mês. Aceita `{targetMonth}` ou `{targetMonths:[...]}` no payload para reprocessar meses específicos. Timeout 900s / 1024MB |
 | `analytics-compute` | dia 1º, 04h UTC | Chama `/api/analytics/{alias}/refresh` de cada cliente (janela móvel 30d, ou período do payload) |
 | `auditoria-compute` | domingo, 03h UTC | Valida todos os customizadores publicados (12 checks/produto) → `s3://.../\_auditoria/` |
+| `site-watchdog` | **de hora em hora** (`cron(0 * * * ? *)`, rule `site-watchdog-hourly`) | Agente Argus Watchtower. Acorda toda hora, lê a rotina em `att-agent-routines` e só age se a hora atual (America/Sao_Paulo) estiver na lista — é isso que deixa os horários editáveis pelo portal sem redeploy. Testa as URLs, manda e-mail via SES e grava o histórico. Role própria: `lambda-site-watchdog-role`. Timeout 120s / 256MB |
 
 Código em `lambda/`. Deploy via AWS CLI (profile `att-admin`) ou `deploy.sh`.
 

@@ -3,7 +3,7 @@
  * Tabelas em us-east-1 (PAY_PER_REQUEST). Custo: ~$0 no free tier.
  */
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, ScanCommand, ScanCommandOutput, PutCommand, DeleteCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, ScanCommand, ScanCommandOutput, GetCommand, PutCommand, DeleteCommand, BatchWriteCommand } from "@aws-sdk/lib-dynamodb";
 
 const REGION = process.env.APP_AWS_REGION || "us-east-1";
 
@@ -29,6 +29,11 @@ export async function scanAll<T>(table: string): Promise<T[]> {
     lastKey = res.LastEvaluatedKey;
   } while (lastKey);
   return items;
+}
+
+export async function getItem<T>(table: string, id: string): Promise<T | null> {
+  const res = await getDoc().send(new GetCommand({ TableName: table, Key: { id } }));
+  return (res.Item as T) || null;
 }
 
 export async function putItem<T extends { id: string }>(table: string, item: T): Promise<void> {
@@ -63,4 +68,6 @@ export const TABLES = {
   CONTRACTS: "att-contracts",
   PUBLICATIONS: "att-publications",
   USERS: "att-users",
+  AGENT_ROUTINES: "att-agent-routines",
+  AGENT_CHECKS: "att-agent-checks",
 } as const;

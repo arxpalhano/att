@@ -3827,6 +3827,15 @@ const AGENTS: AgentDef[] = [
     color: "from-indigo-500 to-violet-600",
     active: true,
   },
+  {
+    id: "argus-watchtower",
+    name: "Argus Watchtower",
+    role: "Monitor de Disponibilidade",
+    description: "Vigia se os sites da ATT estão no ar. Verifica automaticamente nos horários configurados (padrão: 13h e 21h, Brasília) e envia e-mail para a equipe dizendo se está tudo OK ou o que caiu. Horários, destinatários e sites monitorados são editáveis aqui.",
+    page: "agent_argus_watchtower",
+    color: "from-sky-400 to-blue-600",
+    active: true,
+  },
 ];
 
 function AgentsPage({ setPage }: { setPage: (p: string) => void }) {
@@ -4459,6 +4468,305 @@ function HarveyCloserPage({ setPage }: { setPage: (p: string) => void }) {
   );
 }
 
+// ------------------------------------------------------------
+// Argus Watchtower — monitor de disponibilidade (Lambda site-watchdog)
+// A rotina (horários, destinatários, alvos) vive no DynamoDB e é lida pela
+// Lambda a cada hora — salvar aqui já muda o agendamento, sem redeploy.
+// ------------------------------------------------------------
+interface WatchTarget { id: string; label: string; url: string; mustContain?: string; enabled: boolean }
+interface WatchRoutine {
+  id: string; enabled: boolean; hours: number[]; recipients: string[]; sender: string;
+  targets: WatchTarget[]; notifyWhen: "always" | "only_failure"; timeoutMs: number; retries: number;
+  updatedAt: string; updatedBy?: string;
+}
+interface WatchResult {
+  id: string; label: string; url: string; ok: boolean; httpStatus: number;
+  finalUrl?: string; durationMs: number; attempts: number; error?: string;
+}
+interface WatchCheck {
+  id: string; ranAt: string; trigger: "schedule" | "manual"; overallOk?: boolean;
+  results?: WatchResult[]; emailSent?: boolean; emailError?: string; recipients?: string[]; running?: boolean;
+}
+
+function ArgusWatchtowerPage({ setPage }: { setPage: (p: string) => void }) {
+  const { currentUser } = useContext(AppContext);
+  const [routine, setRoutine] = useState<WatchRoutine | null>(null);
+  const [draft, setDraft] = useState<WatchRoutine | null>(null);
+  const [history, setHistory] = useState<WatchCheck[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [okMsg, setOkMsg] = useState("");
+
+  const load = useCallback(async () => {
+    setError("");
+    try {
+      const res = await fetch("/api/agents/argus-watchtower");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setRoutine(data.routine);
+      setDraft(data.routine);
+      setHistory(data.history || []);
+    } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const dirty = !!draft && !!routine && JSON.stringify({ ...draft, updatedAt: "" }) !== JSON.stringify({ ...routine, updatedAt: "" });
+
+  const runNow = async (sendEmail: boolean) => {
+    setRunning(true); setError(""); setOkMsg("");
+    try {
+      const res = await fetch("/api/agents/argus-watchtower", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sendEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      const check: WatchCheck = data.check;
+      setHistory((prev) => [check, ...prev]);
+      if (sendEmail) {
+        setOkMsg(check.emailSent
+          ? `Verificação concluída e e-mail enviado para ${(check.recipients || []).join(", ")}.`
+          : `Verificação concluída, mas o e-mail falhou: ${check.emailError}`);
+      } else {
+        setOkMsg(check.overallOk ? "Verificação concluída — tudo no ar." : "Verificação concluída — há alvo fora do ar.");
+      }
+    } catch (e) { setError((e as Error).message); } finally { setRunning(false); }
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    setSaving(true); setError(""); setOkMsg("");
+    try {
+      const res = await fetch("/api/agents/argus-watchtower/routine", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...draft, updatedBy: currentUser?.name || currentUser?.email }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setRoutine(data.routine); setDraft(data.routine);
+      setOkMsg("Rotina salva. A partir de agora a Lambda usa estes horários e destinatários.");
+    } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
+  };
+
+  const patch = (p: Partial<WatchRoutine>) => setDraft((d) => (d ? { ...d, ...p } : d));
+  const toggleHour = (h: number) => patch({ hours: draft!.hours.includes(h) ? draft!.hours.filter((x) => x !== h) : [...draft!.hours, h].sort((a, b) => a - b) });
+  const patchTarget = (i: number, p: Partial<WatchTarget>) => patch({ targets: draft!.targets.map((t, idx) => (idx === i ? { ...t, ...p } : t)) });
+
+  const last = history.find((h) => h.results && h.results.length > 0);
+  const nextHour = useMemo(() => {
+    if (!routine?.enabled || !routine.hours.length) return null;
+    const spHour = Number(new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", hour12: false }).format(new Date())) % 24;
+    return routine.hours.find((h) => h > spHour) ?? routine.hours[0];
+  }, [routine]);
+
+  return (
+    <div className="space-y-4">
+      <button onClick={() => setPage("agents")} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"><ArrowLeft className="w-4 h-4" /> Voltar</button>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-sky-400 to-blue-600 flex items-center justify-center shadow-lg"><Bot className="w-6 h-6 text-white" /></div>
+          <div>
+            <h1 className="text-xl font-bold text-slate-800">Argus Watchtower</h1>
+            <p className="text-sm text-slate-500">
+              Monitor de disponibilidade · {routine?.enabled ? `rotina ativa às ${routine.hours.map((h) => `${String(h).padStart(2, "0")}h`).join(" e ")} (Brasília)` : "rotina desativada"}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => runNow(false)} disabled={running || loading} className="px-3 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50">Verificar sem e-mail</button>
+          <button onClick={() => runNow(true)} disabled={running || loading} className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-sky-400 to-blue-600 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-50">
+            {running ? <><RefreshCw className="w-3.5 h-3.5 animate-spin" /> Verificando…</> : <><Zap className="w-3.5 h-3.5" /> Verificar e enviar e-mail</>}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <Card className="p-4 border-red-200 bg-red-50">
+          <div className="flex items-start gap-3"><AlertTriangle className="w-4 h-4 text-red-500 mt-0.5" /><div><p className="text-sm font-semibold text-red-700">Erro</p><p className="text-xs text-red-600 mt-1">{error}</p></div></div>
+        </Card>
+      )}
+      {okMsg && (
+        <Card className="p-4 border-emerald-200 bg-emerald-50">
+          <div className="flex items-start gap-3"><CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5" /><p className="text-sm text-emerald-700">{okMsg}</p></div>
+        </Card>
+      )}
+
+      {loading && <Card className="p-5"><div className="flex items-center gap-3"><RefreshCw className="w-4 h-4 animate-spin text-sky-500" /><p className="text-sm text-slate-600">Carregando rotina e histórico…</p></div></Card>}
+
+      {/* Situação atual */}
+      {!loading && (
+        <Card className="p-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Última verificação</p>
+              {last ? (
+                <>
+                  <p className={`mt-1 text-lg font-bold ${last.overallOk ? "text-emerald-600" : "text-red-600"}`}>{last.overallOk ? "Tudo no ar" : "Falha detectada"}</p>
+                  <p className="text-xs text-slate-500">
+                    {new Date(last.ranAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })} · {last.trigger === "manual" ? "manual" : "automática"}
+                    {last.emailSent ? " · e-mail enviado" : last.emailError ? " · e-mail falhou" : ""}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-slate-500">Nenhuma verificação registrada ainda.</p>
+              )}
+            </div>
+            <div className="text-right">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Próxima automática</p>
+              <p className="mt-1 text-lg font-bold text-slate-800">{nextHour !== null ? `${String(nextHour).padStart(2, "0")}h` : "—"}</p>
+              <p className="text-xs text-slate-500">horário de Brasília</p>
+            </div>
+          </div>
+          {last?.results && (
+            <div className="mt-4 space-y-2">
+              {last.results.map((r) => (
+                <div key={r.id} className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                  <Badge className={r.ok ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-xs" : "bg-red-50 text-red-700 border-red-200 text-xs"}>{r.ok ? "OK" : "FALHA"}</Badge>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-800 truncate">{r.label}</p>
+                    <p className="text-xs text-slate-400 truncate">{r.url}</p>
+                  </div>
+                  <p className="text-xs text-slate-500 whitespace-nowrap">{r.ok ? `HTTP ${r.httpStatus} · ${r.durationMs}ms` : `${r.error} · ${r.attempts} tent.`}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Editor da rotina */}
+      {draft && (
+        <Card className="p-5 space-y-5">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Rotina do agente</p>
+            <label className="flex items-center gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={draft.enabled} onChange={(e) => patch({ enabled: e.target.checked })} className="w-4 h-4 accent-sky-500" />
+              Verificação automática ligada
+            </label>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-500">Horários (Brasília) — clique para ligar/desligar</label>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {Array.from({ length: 24 }, (_, h) => (
+                <button key={h} onClick={() => toggleHour(h)} className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition ${draft.hours.includes(h) ? "bg-sky-500 text-white border-sky-500" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}>
+                  {String(h).padStart(2, "0")}h
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-slate-400 mt-2">A Lambda acorda de hora em hora e só roda nos horários marcados — mudar aqui já vale para a próxima hora.</p>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-slate-500">Destinatários (um por linha)</label>
+              <textarea
+                value={draft.recipients.join("\n")}
+                onChange={(e) => patch({ recipients: e.target.value.split("\n").map((s) => s.trim()).filter(Boolean) })}
+                rows={3}
+                className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono focus:outline-none focus:border-sky-400"
+              />
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-medium text-slate-500">Quando enviar e-mail</label>
+                <select value={draft.notifyWhen} onChange={(e) => patch({ notifyWhen: e.target.value as WatchRoutine["notifyWhen"] })} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+                  <option value="always">Sempre (confirma que está OK também)</option>
+                  <option value="only_failure">Só quando algo estiver fora do ar</option>
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-500">Timeout (ms)</label>
+                  <input type="number" min={3000} max={30000} step={1000} value={draft.timeoutMs} onChange={(e) => patch({ timeoutMs: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-500">Tentativas extras</label>
+                  <input type="number" min={0} max={5} value={draft.retries} onChange={(e) => patch({ retries: Number(e.target.value) })} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-slate-500">Sites monitorados</label>
+              <button
+                onClick={() => patch({ targets: [...draft.targets, { id: `alvo-${Date.now()}`, label: "", url: "", enabled: true }] })}
+                className="flex items-center gap-1 text-xs font-semibold text-sky-600 hover:text-sky-700"
+              ><Plus className="w-3.5 h-3.5" /> Adicionar site</button>
+            </div>
+            <div className="mt-2 space-y-2">
+              {draft.targets.map((t, i) => (
+                <div key={t.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" checked={t.enabled} onChange={(e) => patchTarget(i, { enabled: e.target.checked })} className="w-4 h-4 accent-sky-500" title="Monitorar este site" />
+                    <input value={t.label} onChange={(e) => patchTarget(i, { label: e.target.value })} placeholder="Nome (ex: Site institucional)" className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+                    <button onClick={() => patch({ targets: draft.targets.filter((_, idx) => idx !== i) })} className="p-2 text-slate-400 hover:text-red-500" title="Remover"><X className="w-4 h-4" /></button>
+                  </div>
+                  <input value={t.url} onChange={(e) => patchTarget(i, { url: e.target.value })} placeholder="https://archtechtour.com" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm font-mono" />
+                  <input value={t.mustContain || ""} onChange={(e) => patchTarget(i, { mustContain: e.target.value || undefined })} placeholder="Texto que precisa aparecer na página (opcional) — detecta site no ar mas quebrado" className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {[
+                { label: "Portal ATT", url: "https://app.archtechtour.com" },
+                { label: "Customizadores", url: "https://explorar.archtechtour.com" },
+              ].filter((s) => !draft.targets.some((t) => t.url.replace(/\/$/, "") === s.url)).map((s) => (
+                <button key={s.url} onClick={() => patch({ targets: [...draft.targets, { id: `alvo-${Date.now()}`, label: s.label, url: s.url, enabled: true }] })} className="text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-sky-400 hover:text-sky-600">
+                  + {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-500">Remetente (precisa ser do domínio verificado archtechtour.com)</label>
+            <input value={draft.sender} onChange={(e) => patch({ sender: e.target.value })} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 flex-wrap border-t border-slate-100 pt-4">
+            <p className="text-xs text-slate-400">
+              {routine?.updatedAt && new Date(routine.updatedAt).getTime() > 0
+                ? `Última alteração: ${new Date(routine.updatedAt).toLocaleString("pt-BR")}${routine.updatedBy ? ` por ${routine.updatedBy}` : ""}`
+                : "Rotina padrão — ainda não editada."}
+            </p>
+            <div className="flex gap-2">
+              {dirty && <button onClick={() => setDraft(routine)} className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100">Descartar</button>}
+              <button onClick={save} disabled={!dirty || saving} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold hover:bg-slate-800 disabled:opacity-30">
+                {saving ? "Salvando…" : "Salvar rotina"}
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      {/* Histórico */}
+      {history.length > 0 && (
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Histórico (90 dias)</p>
+          <div className="space-y-1.5">
+            {history.filter((h) => h.results).map((h) => (
+              <div key={h.id} className="flex items-center gap-3 text-sm py-2 border-b border-slate-100 last:border-0">
+                <Badge className={h.overallOk ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-xs" : "bg-red-50 text-red-700 border-red-200 text-xs"}>{h.overallOk ? "OK" : "FALHA"}</Badge>
+                <span className="text-slate-600">{new Date(h.ranAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}</span>
+                <span className="text-xs text-slate-400">{h.trigger === "manual" ? "manual" : "automática"}</span>
+                <span className="ml-auto text-xs text-slate-400">
+                  {(h.results || []).map((r) => `${r.label}: ${r.ok ? `${r.httpStatus}` : r.error}`).join(" · ")}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ============================================================
 // FASE 8 — ANALYTICS
 // ============================================================
@@ -4727,6 +5035,7 @@ export default function Portal() {
       case "agent_monk_lighthouse": return <MonkLighthousePage setPage={setPage} />;
       case "agent_yoda_kanban": return <YodaKanbanPage setPage={setPage} />;
       case "agent_harvey_closer": return <HarveyCloserPage setPage={setPage} />;
+      case "agent_argus_watchtower": return <ArgusWatchtowerPage setPage={setPage} />;
       default: return <InternalDashboard setPage={setPage} />;
     }
   };

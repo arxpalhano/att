@@ -50,7 +50,9 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
   `src/components/AnalyticsDashboard.tsx`.
 - **Agentes IA:** `src/app/api/agents/{sherlock-codes,monk-lighthouse,yoda-kanban,harvey-closer}`.
   Contexto compartilhado em `src/lib/agent-context.ts`. Retry em `src/lib/claude-retry.ts`.
-- **Lambdas:** `lambda/{parquet-monthly-etl,analytics-compute,auditoria-compute}`.
+  **Argus Watchtower** (monitor de uptime) é o único que roda sozinho e sem Claude:
+  `src/lib/watchdog.ts` + `lambda/site-watchdog` — ver PORTAL.md §8.
+- **Lambdas:** `lambda/{parquet-monthly-etl,analytics-compute,auditoria-compute,site-watchdog}`.
 - **Auth:** NextAuth + Microsoft Entra em `src/app/api/auth/[...nextauth]`.
 - **i18n:** `src/lib/i18n.tsx` (PT/EN/ES/FR).
 - **Seed de dados:** `src/data/seed.ts` + `src/data/wj-seed.ts`.
@@ -77,7 +79,8 @@ Portal em produção, funcional. Resumo do que foi construído (ordem cronológi
 - ✅ Deploy Amplify + domínio `app.archtechtour.com` + SSO Microsoft + i18n (4 idiomas)
 - ✅ Migração Notion/Planner → portal (18 clientes, blocos, tickets, publicações no DynamoDB)
 - ✅ Analytics real do Athena com filtro de bots + métrica "Engajamento Real" + insights IA
-- ✅ 4 agentes de IA (Sherlock/Monk/Yoda/Harvey) na aba "Agentes AI" (admin)
+- ✅ 5 agentes na aba "Agentes AI" (admin): Sherlock/Monk/Yoda/Harvey (IA) + Argus Watchtower
+  (monitor de uptime: checa os sites 13h/21h e avisa por e-mail; rotina editável na tela)
 - ✅ CRUD completo admin: clientes, contratos, blocos (criar/editar/**excluir**), publicações, usuários
 - ✅ Pipeline analytics robusto: parquet ETL **diário** (mês corrente+anterior),
   analytics-compute dia 1º. Resolveu dashboards zerados.

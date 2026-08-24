@@ -17,6 +17,9 @@ lambda/parquet-monthly-etl/function.zip
 lambda/analytics-compute/node_modules
 lambda/analytics-compute/dist
 lambda/analytics-compute/function.zip
+lambda/site-watchdog/node_modules
+lambda/site-watchdog/dist
+lambda/site-watchdog/function.zip
 
 # OS junk
 .DS_Store

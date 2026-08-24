@@ -1,0 +1,20 @@
+{
+  "name": "site-watchdog",
+  "version": "1.0.0",
+  "description": "Lambda do agente Argus Watchtower — verifica se os sites da ATT estão no ar e avisa por e-mail (SES). Roda de hora em hora e obedece a rotina salva no DynamoDB.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "deploy": "npm run build && rm -f function.zip && zip -qr function.zip dist node_modules && aws lambda update-function-code --function-name site-watchdog --zip-file fileb://function.zip --region us-east-1 --profile att-admin"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@aws-sdk/client-sesv2": "^3.600.0"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.140",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}
