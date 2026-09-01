@@ -3512,16 +3512,25 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
 }
 
 function ProductionTicketsPage({ user }: { user: SeedUser }) {
-  const { blocks, tickets, setTickets } = useContext(AppContext);
+  const { blocks, tickets, setTickets, clients, users } = useContext(AppContext);
   const [filter, setFilter] = useState<TicketStatus | "all">("all");
+  const [filterClient, setFilterClient] = useState<string>("");
+  const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
   const [showNewTicket, setShowNewTicket] = useState(false);
 
   const isClient = user.role === "client";
-  const visible = tickets.filter((t) => {
+
+  // Escopo do usuário + filtros de marca/pessoa, ANTES do filtro de status.
+  // Os contadores das abas saem daqui, senão a aba diz "12 novos" enquanto a
+  // lista mostra 2.
+  const scoped = tickets.filter((t) => {
     if (isClient && t.clientId !== user.clientId) return false;
-    if (filter !== "all" && t.status !== filter) return false;
+    if (filterClient && t.clientId !== filterClient) return false;
+    if (filterAssignee === "none" && t.assignedTo) return false;
+    if (filterAssignee && filterAssignee !== "none" && t.assignedTo !== filterAssignee) return false;
     return true;
   });
+  const visible = scoped.filter((t) => filter === "all" || t.status === filter);
 
   const createTicket = (t: ProductionTicket) => {
     const updated = [...tickets, t];
@@ -3538,9 +3547,16 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     setTickets(updated);
   };
 
-  const internalUsers = USERS.filter((u) => u.role !== "client" && u.active);
-  const counts = { all: tickets.filter((t) => !isClient || t.clientId === user.clientId).length, new: 0, in_production: 0, internal_review: 0, delivered: 0 };
-  tickets.filter((t) => !isClient || t.clientId === user.clientId).forEach((t) => { counts[t.status]++; });
+  const internalUsers = users.filter((u) => u.role !== "client" && u.active);
+  const counts = { all: scoped.length, new: 0, in_production: 0, internal_review: 0, delivered: 0 };
+  scoped.forEach((t) => { counts[t.status]++; });
+
+  // Só listamos no seletor quem/o que de fato tem ticket — evita menu enorme
+  // de opções que só levam a tela vazia.
+  const marcasComTicket = clients.filter((c) => tickets.some((t) => t.clientId === c.id));
+  const responsaveisComTicket = internalUsers.filter((u) => tickets.some((t) => t.assignedTo === u.id));
+  const semResponsavel = tickets.filter((t) => !isClient || t.clientId === user.clientId).some((t) => !t.assignedTo);
+  const filtrosAtivos = !!filterClient || !!filterAssignee;
 
   return (
     <div className="space-y-6">
@@ -3561,10 +3577,39 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
         }
       />
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {([["all", "Todos", counts.all], ["new", "Novos", counts.new], ["in_production", "Em Produção", counts.in_production], ["internal_review", "Revisão", counts.internal_review], ["delivered", "Entregues", counts.delivered]] as const).map(([id, label, count]) => (
           <TabBtn key={id} active={filter === id} label={label} count={count} onClick={() => setFilter(id)} />
         ))}
+        {!isClient && (
+          <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+            <select
+              value={filterClient}
+              onChange={(e) => setFilterClient(e.target.value)}
+              className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 outline-none focus:border-cyan-400 transition"
+            >
+              <option value="">Todas as marcas</option>
+              {marcasComTicket.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select
+              value={filterAssignee}
+              onChange={(e) => setFilterAssignee(e.target.value)}
+              className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600 outline-none focus:border-cyan-400 transition"
+            >
+              <option value="">Todos os responsáveis</option>
+              {semResponsavel && <option value="none">Sem responsável</option>}
+              {responsaveisComTicket.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            {filtrosAtivos && (
+              <button
+                onClick={() => { setFilterClient(""); setFilterAssignee(""); }}
+                className="text-xs font-semibold text-slate-500 hover:text-slate-700 px-2 py-1.5"
+              >
+                Limpar
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {visible.length === 0 ? (
@@ -3573,8 +3618,8 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
         <div className="space-y-3">
           {visible.map((ticket) => {
             const block = blocks.find((b) => b.id === ticket.blockId);
-            const client = CLIENTS.find((c) => c.id === ticket.clientId);
-            const assignedUser = USERS.find((u) => u.id === ticket.assignedTo);
+            const client = clients.find((c) => c.id === ticket.clientId);
+            const assignedUser = users.find((u) => u.id === ticket.assignedTo);
             const slaDate = new Date(ticket.slaDate);
             const daysLeft = Math.ceil((slaDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
             const slaUrgent = daysLeft <= 3;
