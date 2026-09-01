@@ -8,6 +8,13 @@ const handler = NextAuth({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
       tenantId: process.env.AZURE_AD_TENANT_ID!,
+      // Sem isto, quem sai do portal e clica em "Entrar com Microsoft" volta
+      // direto na mesma conta: a sessão no Entra continua aberta e o login é
+      // silencioso — o usuário jura que o logout não funcionou. O seletor de
+      // conta também é o que permite trocar de usuário na mesma máquina.
+      // (Encerramos só a sessão do portal; a do Microsoft no navegador segue,
+      // como em qualquer app corporativo.)
+      authorization: { params: { prompt: "select_account" } },
     }),
   ],
   callbacks: {
