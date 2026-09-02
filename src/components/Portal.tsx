@@ -5553,6 +5553,13 @@ export default function Portal() {
   const openBlocks = (status: BlockStatus | "all") => { setBlocksPreset(status); setPage("blocks"); };
   useEffect(() => { if (page !== "blocks" && blocksPreset !== "all") setBlocksPreset("all"); }, [page, blocksPreset]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Retrato de cada tabela como veio do banco. Os efeitos de persistência só
+  // gravam quando o estado DIFERE disso — antes, toda abertura do portal
+  // repostava as 7 tabelas inteiras 800 ms depois de hidratar. Com o
+  // replaceAll, quem abria a tela durante uma escrita externa (importação,
+  // outro usuário) lia um retrato intermediário e o gravava por cima.
+  const hydratedSnapshot = useRef<Record<string, string>>({});
+  const unchangedSinceHydration = (key: string, value: unknown) => hydratedSnapshot.current[key] === JSON.stringify(value);
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
   const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
@@ -5589,6 +5596,12 @@ export default function Portal() {
           load("/api/state/users"), load("/api/state/bim-demands"),
         ]);
 
+        hydratedSnapshot.current = {
+          blocks: JSON.stringify(b.length ? b : INITIAL_BLOCKS), tickets: JSON.stringify(t.length ? t : TICKETS),
+          activities: JSON.stringify(a.length ? a : ACTIVITIES), clients: JSON.stringify(c.length ? c : CLIENTS),
+          contracts: JSON.stringify(ctr.length ? ctr : CONTRACTS), publications: JSON.stringify(pub.length ? pub : PUBLICATIONS),
+          users: JSON.stringify(u.length ? u : USERS), bimDemands: JSON.stringify(bd),
+        };
         if (b.length) setBlocks(b as SeedBlock[]); else await seedIfEmpty("/api/state/blocks", b, INITIAL_BLOCKS);
         if (t.length) { setTickets(t as ProductionTicket[]); TICKETS = t as ProductionTicket[]; } else await seedIfEmpty("/api/state/tickets", t, TICKETS);
         if (a.length) setActivities(a as SeedActivity[]); else await seedIfEmpty("/api/state/activities", a, ACTIVITIES);
@@ -5609,14 +5622,14 @@ export default function Portal() {
   }, []);
 
   // Persistência DynamoDB com debounce 800ms (anti-flood)
-  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [blocks, hydrated]);
-  useEffect(() => { if (!hydrated) return; TICKETS = tickets; const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [tickets, hydrated]);
-  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/activities", { method: "POST", body: JSON.stringify(activities) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [activities, hydrated]);
-  useEffect(() => { if (!hydrated) return; CLIENTS = clients; const t = setTimeout(() => { fetch("/api/state/clients", { method: "POST", body: JSON.stringify(clients) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [clients, hydrated]);
-  useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
-  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
-  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/bim-demands", { method: "POST", body: JSON.stringify(bimDemands) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [bimDemands, hydrated]);
-  useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
+  useEffect(() => { if (!hydrated || unchangedSinceHydration("blocks", blocks)) return; const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [blocks, hydrated]);
+  useEffect(() => { if (!hydrated) return; TICKETS = tickets; if (unchangedSinceHydration("tickets", tickets)) return; const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [tickets, hydrated]);
+  useEffect(() => { if (!hydrated || unchangedSinceHydration("activities", activities)) return; const t = setTimeout(() => { fetch("/api/state/activities", { method: "POST", body: JSON.stringify(activities) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [activities, hydrated]);
+  useEffect(() => { if (!hydrated) return; CLIENTS = clients; if (unchangedSinceHydration("clients", clients)) return; const t = setTimeout(() => { fetch("/api/state/clients", { method: "POST", body: JSON.stringify(clients) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [clients, hydrated]);
+  useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; if (unchangedSinceHydration("contracts", contracts)) return; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
+  useEffect(() => { if (!hydrated || unchangedSinceHydration("publications", publications)) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
+  useEffect(() => { if (!hydrated || unchangedSinceHydration("bimDemands", bimDemands)) return; const t = setTimeout(() => { fetch("/api/state/bim-demands", { method: "POST", body: JSON.stringify(bimDemands) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [bimDemands, hydrated]);
+  useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); if (unchangedSinceHydration("users", users)) return; const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
 
   // Ao logar, cai na primeira página permitida. Sem isso um cliente restrito a
   // Analytics entraria direto na tela bloqueada, já que o padrão é "dashboard".

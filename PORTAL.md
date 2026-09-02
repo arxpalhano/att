@@ -132,7 +132,16 @@ fica `false` (efeitos de persistência não rodam) e um banner avisa que nada se
 salvo. Antes, uma resposta `{error}` caía no "else" e fazia `replaceAll` do seed por
 cima da tabela de produção.
 
-**5. Card do dashboard abre a lista já filtrada.** `openBlocks(status)` guarda o
+**5. O portal não "ecoa" o que acabou de ler.** Os efeitos de persistência comparam o
+estado com o retrato hidratado (`hydratedSnapshot`) e só gravam quando algo mudou de fato.
+Antes, toda abertura do portal repostava as tabelas inteiras 800 ms após hidratar; como o
+POST com array é `replaceAll`, quem abria a tela **durante** uma escrita externa (importação,
+outro usuário) lia um retrato intermediário e o gravava por cima — foi assim que 98 blocos
+da importação de 2026-09-02 sumiram e tiveram de ser regravados. Limitação que continua:
+dois usuários editando a mesma tabela ao mesmo tempo ainda se sobrescrevem (último ganha);
+resolver isso exige gravação por item, não por tabela.
+
+**6. Card do dashboard abre a lista já filtrada.** `openBlocks(status)` guarda o
 preset e navega; `BlocksListPage` monta com `initialStatus` (chave = status, então
 remonta ao trocar). Sair de "Blocos" limpa o preset.
 
