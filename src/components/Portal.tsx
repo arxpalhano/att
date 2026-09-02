@@ -2,6 +2,7 @@
 import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useT } from "@/lib/i18n";
+import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug } from "@/lib/bim";
 import LanguageSwitcher from "./LanguageSwitcher";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
@@ -18,7 +19,7 @@ import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
 // ============================================================
 // TYPES & CONSTANTS
 // ============================================================
-type UserRole = "admin" | "internal_ops" | "internal_modeling" | "internal_programming" | "client";
+type UserRole = "admin" | "internal_ops" | "internal_modeling" | "internal_programming" | "client" | "freelancer_bim";
 type ServiceType = "standard" | "plus" | "ultra";
 type Priority = "low" | "normal" | "high" | "urgent";
 type BlockStatus =
@@ -123,7 +124,7 @@ const SERVICE_COLORS: Record<ServiceType, string> = {
   plus: "border-cyan-200/80 bg-cyan-50 text-cyan-700",
   ultra: "border-violet-200/80 bg-violet-50 text-violet-700",
 };
-const ROLE_LABELS: Record<UserRole, string> = { admin: "Admin", internal_ops: "Operações", internal_modeling: "Modelagem", internal_programming: "Programação", client: "Cliente" };
+const ROLE_LABELS: Record<UserRole, string> = { admin: "Admin", internal_ops: "Operações", internal_modeling: "Modelagem", internal_programming: "Programação", client: "Cliente", freelancer_bim: "Terceirizado BIM" };
 const CATEGORY_LABELS: Record<AssetCategory, string> = {
   cad: "CAD / Estrutural", finishing: "Acabamento / Material", photos: "Fotos do produto",
   videos: "Vídeos", technical_drawing: "Desenho Técnico", "3d_block": "Bloco 3D",
@@ -452,6 +453,8 @@ interface AppState {
   contracts: SeedContract[];
   setContracts: React.Dispatch<React.SetStateAction<SeedContract[]>>;
   publications: SeedPub[];
+  bimDemands: BimDemand[];
+  setBimDemands: React.Dispatch<React.SetStateAction<BimDemand[]>>;
   setPublications: React.Dispatch<React.SetStateAction<SeedPub[]>>;
   users: SeedUser[];
   setUsers: React.Dispatch<React.SetStateAction<SeedUser[]>>;
@@ -560,6 +563,9 @@ const PAGINA_PAI: Record<string, string> = {
 
 /** Páginas liberadas para o usuário. `"all"` = sem restrição. */
 function paginasPermitidas(user: SeedUser): string[] | "all" {
+  // Terceirizado de BIM só enxerga as próprias demandas — nada do pipeline,
+  // clientes, analytics ou usuários.
+  if (user.role === "freelancer_bim") return ["bim_minhas"];
   if (user.role !== "client") return "all";
   const cfg = user.allowedPages;
   if (cfg?.includes("all")) return "all";
@@ -582,7 +588,7 @@ function podeAcessar(user: SeedUser, page: string): boolean {
 function primeiraPaginaPermitida(user: SeedUser): string {
   const permitidas = paginasPermitidas(user);
   if (permitidas === "all") return "dashboard";
-  return PAGINAS_CLIENTE.find((p) => permitidas.includes(p.id))?.id ?? "analytics";
+  return PAGINAS_CLIENTE.find((p) => permitidas.includes(p.id))?.id ?? permitidas[0] ?? "analytics";
 }
 
 function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
@@ -831,7 +837,10 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   const isClient = user.role === "client";
   const pendingApprovals = blocks.filter((b) => isAwaitingClient(b) && (!isClient || b.clientId === user.clientId)).length;
 
-  const todosItens = isClient
+  const isFreelancer = user.role === "freelancer_bim";
+  const todosItens = isFreelancer
+    ? [{ id: "bim_minhas", icon: Box, label: "Minhas demandas" }]
+    : isClient
     ? [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
         { id: "onboarding", icon: Clipboard, label: "Onboarding" },
@@ -844,6 +853,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
     : [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
         { id: "tickets", icon: Hash, label: "Tickets" },
+        { id: "bim", icon: Box, label: "BIM · Terceirizados" },
         { id: "queue", icon: Layers, label: "Fila de Trabalho" },
         { id: "blocks", icon: Package, label: "Todos os Blocos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
@@ -860,7 +870,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   // o podeAcessar() no renderPage.
   const navItems = todosItens.filter((item) => podeAcessar(user, item.id));
 
-  const workspaceLabel = isClient ? getClientName(user.clientId!) : "Operação Interna";
+  const workspaceLabel = isFreelancer ? "Terceirizado BIM" : isClient ? getClientName(user.clientId!) : "Operação Interna";
 
   return (
     <aside className={`fixed left-0 top-0 z-40 flex h-full flex-col border-r border-slate-800/60 backdrop-blur-xl transition-all duration-300 ${collapsed ? "w-[88px]" : "w-[280px]"}`} style={{ backgroundColor: "rgba(7,17,31,0.97)", color: "white" }}>
@@ -933,7 +943,10 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => void; openBlocks: (status: BlockStatus | "all") => void }) {
   // Tudo aqui sai do estado vivo do app (hidratado do DynamoDB e atualizado
   // por qualquer tela). Nada de constantes de seed: elas congelam o número.
-  const { blocks, activities, clients, hydrated } = useContext(AppContext);
+  const { blocks, activities, clients, hydrated, bimDemands } = useContext(AppContext);
+  const bimOpen = bimDemands.filter(bimIsOpen);
+  const bimOpenProducts = bimOpen.reduce((n, d) => n + d.productCount, 0);
+  const bimLate = bimOpen.filter((d) => bimDaysLeft(d) < 0).length;
   const byStatus: Record<string, number> = {};
   blocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
   const pending = blocks.filter(isAwaitingClient).length;
@@ -1044,6 +1057,14 @@ function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => vo
             sub="Itens que precisam de destravamento operacional ou retorno do cliente."
             color="text-rose-600"
             onClick={() => openBlocks("blocked")}
+          />
+          <MetricCard
+            icon={Box}
+            label="BIM com terceirizados"
+            value={bimOpenProducts}
+            sub={bimOpen.length === 0 ? "Nenhuma demanda aberta." : `${bimOpen.length} demanda${bimOpen.length === 1 ? "" : "s"} aberta${bimOpen.length === 1 ? "" : "s"}${bimLate ? ` · ${bimLate} atrasada${bimLate === 1 ? "" : "s"}` : ""}`}
+            color={bimLate ? "text-rose-600" : "text-sky-700"}
+            onClick={() => setPage("bim")}
           />
         </div>
       </div>
@@ -3105,7 +3126,7 @@ function UsersPage() {
           { label: "Acesso", render: (r: SeedUser) => {
             const p = paginasPermitidas(r);
             if (p === "all") {
-              return <span className="text-xs text-slate-400">{r.role === "client" ? "Total" : "Interno"}</span>;
+              return <span className="text-xs text-slate-400">{r.role === "freelancer_bim" ? "Só as próprias demandas BIM" : r.role === "client" ? "Total" : "Interno"}</span>;
             }
             const rotulos = p.map((id) => PAGINAS_CLIENTE.find((x) => x.id === id)?.label || id);
             return (
@@ -3520,7 +3541,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
   const [priority, setPriority] = useState<Priority>("normal");
   const [plan, setPlan] = useState<ServiceType>("standard");
 
-  const internalUsers = USERS.filter((u) => u.role !== "client" && u.active);
+  const internalUsers = USERS.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
   const clientBlocks = blocks.filter((b) => b.clientId === clientId);
   const selectedBlock = blocks.find((b) => b.id === blockId);
 
@@ -3651,7 +3672,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     setTickets(updated);
   };
 
-  const internalUsers = users.filter((u) => u.role !== "client" && u.active);
+  const internalUsers = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
   const counts = { all: scoped.length, new: 0, in_production: 0, internal_review: 0, delivered: 0 };
   scoped.forEach((t) => { counts[t.status]++; });
 
@@ -3772,6 +3793,428 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
               </Card>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// BIM · TERCEIRIZADOS (Danilo, Raquel) — espelho do "Demandas" do Notion
+// ============================================================
+const BIM_ALL_FORMATS: BimFormat[] = ["archicad", "revit", "sketchup"];
+
+function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus, onEdit, onDelete, onFreelancerNotes }: {
+  d: BimDemand;
+  mode: "internal" | "freelancer";
+  clientName: string;
+  freelancerName?: string;
+  onToggle: (itemId: string, fmt: BimFormat) => void;
+  onStatus: (status: BimDemandStatus) => void;
+  onEdit?: () => void;
+  onDelete?: () => void;
+  onFreelancerNotes?: (text: string) => void;
+}) {
+  const [open, setOpen] = useState(mode === "freelancer" && bimIsOpen(d));
+  const [notesDraft, setNotesDraft] = useState(d.freelancerNotes || "");
+  const prog = bimProgress(d);
+  const isOpen = bimIsOpen(d);
+  const days = bimDaysLeft(d);
+  const late = isOpen && days < 0;
+  const soon = isOpen && days >= 0 && days <= 3;
+
+  return (
+    <Card className={`p-5 ${late ? "border-rose-200" : ""}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <Badge className={BIM_STATUS_COLORS[d.status]}>{BIM_STATUS_LABELS[d.status]}</Badge>
+            {late && <Badge className="border-rose-200 bg-rose-50 text-rose-700">{Math.abs(days)}d atrasada</Badge>}
+            {soon && <Badge className="border-amber-200 bg-amber-50 text-amber-700">{days === 0 ? "vence hoje" : `${days}d p/ o prazo`}</Badge>}
+          </div>
+          <p className="text-base font-semibold text-slate-900">{d.title}</p>
+          <p className="text-sm text-slate-500 mt-0.5">
+            {clientName} · {d.productCount} produto{d.productCount === 1 ? "" : "s"}
+            {mode === "internal" && freelancerName ? ` · ${freelancerName}` : ""}
+          </p>
+        </div>
+        <div className="text-right text-xs text-slate-500 flex-shrink-0">
+          <p>Pedido {fmtDate(d.requestedAt)}</p>
+          <p className={late ? "text-rose-600 font-semibold" : ""}>Prazo {fmtDate(d.dueAt)}</p>
+          {d.deliveredAt && <p className="text-emerald-700">Entregue {fmtDate(d.deliveredAt)}</p>}
+          {mode === "internal" && d.unitPrice ? <p className="mt-1 text-slate-400">R$ {d.unitPrice.toLocaleString("pt-BR")}/produto · total R$ {(d.unitPrice * d.productCount).toLocaleString("pt-BR")}</p> : null}
+        </div>
+      </div>
+
+      {prog.total > 0 && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between text-xs text-slate-500 mb-1.5"><span>Arquivos entregues</span><span className="font-semibold text-slate-700">{prog.done} / {prog.total}</span></div>
+          <ProgressBar value={prog.pct} />
+        </div>
+      )}
+
+      {d.notes && <p className="mt-3 text-sm text-slate-600 rounded-xl bg-slate-50 border border-slate-100 px-3 py-2 whitespace-pre-wrap">{d.notes}</p>}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+        {d.items.length > 0 && (
+          <button onClick={() => setOpen(!open)} className="text-xs font-semibold text-slate-600 hover:text-slate-900 flex items-center gap-1">
+            <ChevronRight className={`w-3.5 h-3.5 transition ${open ? "rotate-90" : ""}`} /> {open ? "Ocultar" : "Ver"} produtos ({d.items.length})
+          </button>
+        )}
+        <div className="ml-auto flex flex-wrap gap-2">
+          {mode === "freelancer" && isOpen && d.status !== "in_progress" && (
+            <button onClick={() => onStatus("in_progress")} className="px-3 py-1.5 rounded-xl border border-sky-200 bg-sky-50 text-xs font-semibold text-sky-700 hover:bg-sky-100">Comecei</button>
+          )}
+          {mode === "freelancer" && isOpen && d.status !== "waiting_info" && (
+            <button onClick={() => onStatus("waiting_info")} className="px-3 py-1.5 rounded-xl border border-amber-200 bg-amber-50 text-xs font-semibold text-amber-700 hover:bg-amber-100">Preciso de informação</button>
+          )}
+          {mode === "freelancer" && isOpen && (
+            <button onClick={() => { if (confirm("Marcar esta demanda como entregue? A equipe ATT será avisada aqui no portal.")) onStatus("delivered"); }} className="px-3 py-1.5 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700">Marcar como entregue</button>
+          )}
+          {mode === "internal" && (
+            <select value={d.status} onChange={(e) => onStatus(e.target.value as BimDemandStatus)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700">
+              {BIM_STATUS_ORDER.map((st) => <option key={st} value={st}>{BIM_STATUS_LABELS[st]}</option>)}
+            </select>
+          )}
+          {mode === "internal" && d.status === "delivered" && (
+            <button onClick={() => onStatus("approved")} className="px-3 py-1.5 rounded-xl bg-emerald-600 text-xs font-semibold text-white hover:bg-emerald-700">Aprovar entrega</button>
+          )}
+          {mode === "internal" && onEdit && <button onClick={onEdit} className="px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50">Editar</button>}
+          {mode === "internal" && onDelete && <button onClick={onDelete} className="px-2 py-1.5 rounded-xl text-slate-400 hover:text-rose-600" title="Excluir"><X className="w-4 h-4" /></button>}
+        </div>
+      </div>
+
+      {open && d.items.length > 0 && (
+        <div className="mt-3 space-y-1.5">
+          {d.items.map((it) => (
+            <div key={it.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-800 truncate">{it.code || it.name}</p>
+                {it.code && it.name && it.code !== it.name && <p className="text-xs text-slate-400 truncate">{it.name}</p>}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {it.formats.map((f) => {
+                  const done = it.done.includes(f);
+                  return (
+                    <button key={f} onClick={() => onToggle(it.id, f)} title={`${BIM_FORMAT_LABELS[f]}-${bimFileSlug(it.name || it.code)}`}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${done ? "bg-emerald-500 text-white border-emerald-500" : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"}`}>
+                      {done ? "✓ " : ""}{BIM_FORMAT_LABELS[f]}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {mode === "freelancer" && isOpen && onFreelancerNotes && (
+        <div className="mt-3">
+          <textarea value={notesDraft} onChange={(e) => setNotesDraft(e.target.value)} onBlur={() => notesDraft !== (d.freelancerNotes || "") && onFreelancerNotes(notesDraft)}
+            rows={2} placeholder="Observação para a equipe ATT (dúvida, arquivo faltando, link de entrega…)"
+            className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-sky-400" />
+        </div>
+      )}
+      {mode === "internal" && d.freelancerNotes && (
+        <p className="mt-3 text-sm text-amber-900 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 whitespace-pre-wrap"><span className="text-xs font-semibold uppercase tracking-wider text-amber-600 mr-2">Terceirizado</span>{d.freelancerNotes}</p>
+      )}
+    </Card>
+  );
+}
+
+function BimDemandFormModal({ initial, onClose, onSave, freelancers, clients, blocks, currentUserId }: {
+  initial?: BimDemand; onClose: () => void; onSave: (d: BimDemand) => void;
+  freelancers: SeedUser[]; clients: SeedClient[]; blocks: SeedBlock[]; currentUserId: string;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [freelancerId, setFreelancerId] = useState(initial?.freelancerId ?? freelancers[0]?.id ?? "");
+  const [clientId, setClientId] = useState(initial?.clientId ?? clients[0]?.id ?? "");
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [productCount, setProductCount] = useState(String(initial?.productCount ?? ""));
+  const [requestedAt, setRequestedAt] = useState(initial?.requestedAt ?? today);
+  const [dueAt, setDueAt] = useState(initial?.dueAt ?? "");
+  const [unitPrice, setUnitPrice] = useState(initial?.unitPrice ? String(initial.unitPrice) : "");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [items, setItems] = useState<BimDemandItem[]>(initial?.items ?? []);
+  const [pickBlock, setPickBlock] = useState("");
+
+  const brandBlocks = blocks.filter((b) => b.clientId === clientId && !items.some((i) => i.blockId === b.id));
+  const addFromBlock = () => {
+    const b = blocks.find((x) => x.id === pickBlock);
+    if (!b) return;
+    setItems([...items, { id: `bi_${Date.now()}`, blockId: b.id, code: b.sku, name: b.title, formats: ["archicad", "revit"], done: [] }]);
+    setPickBlock("");
+  };
+  const addFree = () => setItems([...items, { id: `bi_${Date.now()}`, code: "", name: "", formats: ["archicad", "revit"], done: [] }]);
+  const patchItem = (id: string, p: Partial<BimDemandItem>) => setItems(items.map((i) => (i.id === id ? { ...i, ...p } : i)));
+  const toggleFmt = (id: string, f: BimFormat) => setItems(items.map((i) => (i.id === id ? { ...i, formats: i.formats.includes(f) ? i.formats.filter((x) => x !== f) : [...i.formats, f] } : i)));
+
+  const count = Number(productCount) || items.length;
+  const canSave = freelancerId && clientId && title.trim() && dueAt && count > 0;
+
+  const save = () => {
+    const now = new Date().toISOString();
+    onSave({
+      id: initial?.id ?? `bim_${Date.now()}`,
+      freelancerId, clientId, title: title.trim(),
+      productCount: count,
+      items: items.filter((i) => i.code.trim() || i.name.trim()).map((i) => ({ ...i, code: i.code.trim(), name: i.name.trim() || i.code.trim() })),
+      status: initial?.status ?? "not_started",
+      requestedAt, dueAt,
+      deliveredAt: initial?.deliveredAt, approvedAt: initial?.approvedAt,
+      unitPrice: unitPrice ? Number(unitPrice) : undefined,
+      notes: notes.trim() || undefined,
+      freelancerNotes: initial?.freelancerNotes,
+      createdBy: initial?.createdBy ?? currentUserId,
+      createdAt: initial?.createdAt ?? now,
+      updatedAt: now,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between p-5 border-b border-slate-100">
+          <h2 className="text-lg font-bold text-slate-800">{initial ? "Editar demanda BIM" : "Nova demanda BIM"}</h2>
+          <button onClick={onClose} className="p-1.5 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4 text-slate-400" /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div><label className="text-xs font-medium text-slate-500">Terceirizado *</label>
+              <select value={freelancerId} onChange={(e) => setFreelancerId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+                {freelancers.length === 0 && <option value="">Cadastre um usuário com perfil "Terceirizado BIM"</option>}
+                {freelancers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select></div>
+            <div><label className="text-xs font-medium text-slate-500">Marca *</label>
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+                {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select></div>
+          </div>
+          <div><label className="text-xs font-medium text-slate-500">Título *</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Ex: Green House Remessa 04" className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+          <div className="grid gap-3 md:grid-cols-4">
+            <div><label className="text-xs font-medium text-slate-500">Nº de produtos *</label>
+              <input type="number" min={1} value={productCount} onChange={(e) => setProductCount(e.target.value)} placeholder={String(items.length || "")} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-500">Pedido em</label>
+              <input type="date" value={requestedAt} onChange={(e) => setRequestedAt(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-500">Prazo *</label>
+              <input type="date" value={dueAt} onChange={(e) => setDueAt(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-500">R$ / produto</label>
+              <input type="number" min={0} step="0.01" value={unitPrice} onChange={(e) => setUnitPrice(e.target.value)} placeholder="opcional" className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+          </div>
+          <div><label className="text-xs font-medium text-slate-500">Orientações para o terceirizado</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="Ex: seguir padrão 2026-GH-01-01-CADEIRA… → Archicad-Cadeira… / Revit-Cadeira…" className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+
+          <div>
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <label className="text-xs font-medium text-slate-500">Produtos e arquivos ({items.length}) <span className="text-slate-400">— opcional; sem lista, o acompanhamento é só pelo status</span></label>
+              <button onClick={addFree} className="text-xs font-semibold text-sky-600 hover:text-sky-700 flex items-center gap-1"><Plus className="w-3.5 h-3.5" /> Produto avulso</button>
+            </div>
+            {brandBlocks.length > 0 && (
+              <div className="mt-2 flex gap-2">
+                <select value={pickBlock} onChange={(e) => setPickBlock(e.target.value)} className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+                  <option value="">Adicionar bloco já cadastrado no portal…</option>
+                  {brandBlocks.map((b) => <option key={b.id} value={b.id}>{b.sku} · {b.title}</option>)}
+                </select>
+                <button onClick={addFromBlock} disabled={!pickBlock} className="px-3 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30">Adicionar</button>
+              </div>
+            )}
+            <div className="mt-2 space-y-2">
+              {items.map((it) => (
+                <div key={it.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
+                  <div className="flex gap-2">
+                    <input value={it.code} onChange={(e) => patchItem(it.id, { code: e.target.value })} placeholder="Código interno (2026-GH-01-01-…)" className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm font-mono" />
+                    <input value={it.name} onChange={(e) => patchItem(it.id, { name: e.target.value })} placeholder="Nome do produto" className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-sm" />
+                    <button onClick={() => setItems(items.filter((i) => i.id !== it.id))} className="p-1.5 text-slate-400 hover:text-rose-600"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs text-slate-400 mr-1">Entregar:</span>
+                    {BIM_ALL_FORMATS.map((f) => (
+                      <button key={f} onClick={() => toggleFmt(it.id, f)} className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${it.formats.includes(f) ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-500 border-slate-200"}`}>{BIM_FORMAT_LABELS[f]}</button>
+                    ))}
+                    {it.name && <span className="ml-auto text-xs text-slate-400 font-mono">{it.formats.map((f) => `${BIM_FORMAT_LABELS[f]}-${bimFileSlug(it.name)}`).join(" · ")}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 p-5 border-t border-slate-100">
+          <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button onClick={save} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Tela da equipe interna: todas as demandas, filtros, criação/edição, aprovação. */
+function BimPage({ user }: { user: SeedUser }) {
+  const { bimDemands, setBimDemands, users, clients, blocks } = useContext(AppContext);
+  const [filterFreelancer, setFilterFreelancer] = useState("");
+  const [filterClient, setFilterClient] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"open" | "all" | BimDemandStatus>("open");
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<BimDemand | null>(null);
+
+  const freelancers = users.filter((u) => u.role === "freelancer_bim" && u.active);
+  const canEdit = user.role === "admin" || user.role === "internal_ops";
+
+  const list = bimDemands
+    .filter((d) => (!filterFreelancer || d.freelancerId === filterFreelancer) && (!filterClient || d.clientId === filterClient))
+    .filter((d) => filterStatus === "all" ? true : filterStatus === "open" ? bimIsOpen(d) : d.status === filterStatus)
+    .sort((a, b) => (bimIsOpen(a) === bimIsOpen(b) ? a.dueAt.localeCompare(b.dueAt) : bimIsOpen(a) ? -1 : 1));
+
+  const open = bimDemands.filter(bimIsOpen);
+  const openProducts = open.reduce((n, d) => n + d.productCount, 0);
+  const late = open.filter((d) => bimDaysLeft(d) < 0);
+  const waitingApproval = bimDemands.filter((d) => d.status === "delivered");
+  const month = new Date().toISOString().slice(0, 7);
+  const deliveredMonth = bimDemands.filter((d) => (d.deliveredAt || "").slice(0, 7) === month).reduce((n, d) => n + d.productCount, 0);
+
+  const upsert = (d: BimDemand) => {
+    setBimDemands((prev) => (prev.some((x) => x.id === d.id) ? prev.map((x) => (x.id === d.id ? d : x)) : [...prev, d]));
+    setShowForm(false); setEditing(null);
+  };
+  const setStatus = (d: BimDemand, status: BimDemandStatus) => {
+    const today = new Date().toISOString().slice(0, 10);
+    upsert({ ...d, status,
+      deliveredAt: status === "delivered" || status === "approved" ? (d.deliveredAt || today) : d.deliveredAt,
+      approvedAt: status === "approved" ? (d.approvedAt || today) : undefined,
+      updatedAt: new Date().toISOString() });
+  };
+  const toggle = (d: BimDemand, itemId: string, fmt: BimFormat) => {
+    upsert({ ...d, items: d.items.map((i) => (i.id === itemId ? { ...i, done: i.done.includes(fmt) ? i.done.filter((f) => f !== fmt) : [...i.done, fmt] } : i)), updatedAt: new Date().toISOString() });
+  };
+  const remove = (d: BimDemand) => { if (confirm(`Excluir a demanda "${d.title}"?`)) setBimDemands((prev) => prev.filter((x) => x.id !== d.id)); };
+
+  const nameOf = (id: string) => users.find((u) => u.id === id)?.name || "—";
+  const clientOf = (id: string) => clients.find((c) => c.id === id)?.name || "—";
+
+  return (
+    <div className="space-y-6">
+      {(showForm || editing) && <BimDemandFormModal initial={editing ?? undefined} onClose={() => { setShowForm(false); setEditing(null); }} onSave={upsert} freelancers={freelancers} clients={clients} blocks={blocks} currentUserId={user.id} />}
+      <SectionHeader
+        eyebrow="Produção · Blocos BIM"
+        title="BIM · Terceirizados"
+        description="Demandas de blocos ArchiCAD / Revit / SketchUp enviadas aos terceirizados. Cada demanda é um lote de produtos de uma marca, com prazo e entrega — o mesmo controle que ficava no Notion, agora com a página do terceirizado ligada a esta."
+        action={
+          <div className="flex items-center gap-2 flex-wrap">
+            <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{bimDemands.length} demandas</Badge>
+            {canEdit && <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova demanda</button>}
+          </div>
+        }
+      />
+
+      {freelancers.length === 0 && (
+        <Card className="p-4 border-amber-200 bg-amber-50"><p className="text-sm text-amber-800">Nenhum usuário com perfil <b>Terceirizado BIM</b> ainda. Cadastre Danilo e Raquel em <b>Usuários</b> com esse perfil — eles entram com e-mail e senha e veem só as próprias demandas.</p></Card>
+      )}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={Box} label="Produtos em aberto" value={openProducts} sub={`${open.length} demanda${open.length === 1 ? "" : "s"}`} />
+        <MetricCard icon={AlertTriangle} label="Atrasadas" value={late.length} sub={late.length ? late.map((d) => d.title).slice(0, 2).join(" · ") : "Nenhuma no prazo vencido"} color={late.length ? "text-rose-600" : "text-slate-900"} />
+        <MetricCard icon={CheckCircle} label="Aguardando aprovação" value={waitingApproval.length} sub="Entregues pelo terceirizado, a validar" color="text-emerald-600" />
+        <MetricCard icon={Clock} label="Entregues no mês" value={deliveredMonth} sub="produtos" />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        {([["open", "Abertas"], ["all", "Todas"], ...BIM_STATUS_ORDER.map((st) => [st, BIM_STATUS_LABELS[st]])] as [string, string][]).map(([id, label]) => (
+          <TabBtn key={id} active={filterStatus === id} label={label} count={id === "open" ? open.length : id === "all" ? bimDemands.length : bimDemands.filter((d) => d.status === id).length} onClick={() => setFilterStatus(id as typeof filterStatus)} />
+        ))}
+        <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+          <select value={filterFreelancer} onChange={(e) => setFilterFreelancer(e.target.value)} className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600">
+            <option value="">Todos os terceirizados</option>
+            {freelancers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+          <select value={filterClient} onChange={(e) => setFilterClient(e.target.value)} className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600">
+            <option value="">Todas as marcas</option>
+            {clients.filter((c) => bimDemands.some((d) => d.clientId === c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {list.length === 0 ? (
+        <Card className="p-4"><EmptyState icon={Box} title="Nenhuma demanda aqui" desc={bimDemands.length === 0 ? "Crie a primeira demanda: escolha o terceirizado, a marca, o prazo e (se quiser) a lista de produtos." : "Nada para o filtro selecionado."} /></Card>
+      ) : (
+        <div className="space-y-3">
+          {list.map((d) => (
+            <BimDemandCard key={d.id} d={d} mode="internal" clientName={clientOf(d.clientId)} freelancerName={nameOf(d.freelancerId)}
+              onToggle={(itemId, fmt) => toggle(d, itemId, fmt)} onStatus={(st) => setStatus(d, st)}
+              onEdit={canEdit ? () => setEditing(d) : undefined} onDelete={canEdit ? () => remove(d) : undefined} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Tela do terceirizado: só as próprias demandas. Marca arquivo a arquivo e sinaliza entrega. */
+function BimMinhasDemandasPage({ user }: { user: SeedUser }) {
+  const { bimDemands, setBimDemands, clients } = useContext(AppContext);
+  const mine = bimDemands.filter((d) => d.freelancerId === user.id);
+  const open = mine.filter(bimIsOpen).sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  const closed = mine.filter((d) => !bimIsOpen(d)).sort((a, b) => b.requestedAt.localeCompare(a.requestedAt));
+  const late = open.filter((d) => bimDaysLeft(d) < 0).length;
+  const pendingFiles = open.reduce((n, d) => { const p = bimProgress(d); return n + Math.max(p.total - p.done, 0); }, 0);
+  const month = new Date().toISOString().slice(0, 7);
+  const deliveredMonth = mine.filter((d) => (d.deliveredAt || "").slice(0, 7) === month).reduce((n, d) => n + d.productCount, 0);
+
+  const update = (d: BimDemand) => setBimDemands((prev) => prev.map((x) => (x.id === d.id ? { ...d, updatedAt: new Date().toISOString() } : x)));
+  const setStatus = (d: BimDemand, status: BimDemandStatus) => {
+    // Terceirizado nunca aprova a própria entrega — isso é da equipe ATT.
+    if (status === "approved") return;
+    update({ ...d, status, deliveredAt: status === "delivered" ? new Date().toISOString().slice(0, 10) : d.deliveredAt });
+  };
+  const toggle = (d: BimDemand, itemId: string, fmt: BimFormat) =>
+    update({ ...d, items: d.items.map((i) => (i.id === itemId ? { ...i, done: i.done.includes(fmt) ? i.done.filter((f) => f !== fmt) : [...i.done, fmt] } : i)) });
+  const clientOf = (id: string) => clients.find((c) => c.id === id)?.name || "—";
+
+  const groups = closed.reduce<Record<string, BimDemand[]>>((acc, d) => { const k = bimMonthKey(d.deliveredAt || d.requestedAt); (acc[k] ||= []).push(d); return acc; }, {});
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow="Blocos BIM · ArchTechTour"
+        title={`Olá, ${user.name.split(" ")[0]}. Suas demandas.`}
+        description="Cada demanda é um lote de produtos de uma marca. Marque cada arquivo conforme entregar e, ao terminar o lote, clique em “Marcar como entregue” — a equipe ATT vê na hora."
+        action={<Badge className="border-slate-200/80 bg-white/80 text-slate-600">{open.length} aberta{open.length === 1 ? "" : "s"}</Badge>}
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={Box} label="Produtos em aberto" value={open.reduce((n, d) => n + d.productCount, 0)} sub={`${open.length} demanda${open.length === 1 ? "" : "s"}`} />
+        <MetricCard icon={FileText} label="Arquivos pendentes" value={pendingFiles} sub="nas demandas com lista de produtos" />
+        <MetricCard icon={AlertTriangle} label="Atrasadas" value={late} color={late ? "text-rose-600" : "text-slate-900"} sub={late ? "Prazo vencido — fale com a equipe" : "Tudo dentro do prazo"} />
+        <MetricCard icon={CheckCircle} label="Entregues no mês" value={deliveredMonth} sub="produtos" color="text-emerald-600" />
+      </div>
+
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-3">Em aberto</p>
+        {open.length === 0 ? (
+          <Card className="p-4"><EmptyState icon={CheckCircle} title="Nenhuma demanda em aberto" desc="Quando a equipe ATT enviar um novo lote, ele aparece aqui." /></Card>
+        ) : (
+          <div className="space-y-3">
+            {open.map((d) => (
+              <BimDemandCard key={d.id} d={d} mode="freelancer" clientName={clientOf(d.clientId)}
+                onToggle={(itemId, fmt) => toggle(d, itemId, fmt)} onStatus={(st) => setStatus(d, st)}
+                onFreelancerNotes={(text) => update({ ...d, freelancerNotes: text || undefined })} />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {Object.keys(groups).length > 0 && (
+        <div className="space-y-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Entregues</p>
+          {Object.entries(groups).map(([k, ds]) => (
+            <div key={k}>
+              <p className="text-sm font-semibold text-slate-600 mb-2">{k} <span className="text-slate-400 font-normal">· {ds.reduce((n, d) => n + d.productCount, 0)} produtos</span></p>
+              <div className="space-y-3">
+                {ds.map((d) => (
+                  <BimDemandCard key={d.id} d={d} mode="freelancer" clientName={clientOf(d.clientId)} onToggle={(itemId, fmt) => toggle(d, itemId, fmt)} onStatus={(st) => setStatus(d, st)} />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
@@ -5090,6 +5533,7 @@ export default function Portal() {
   const [contracts, setContracts] = useState<SeedContract[]>(CONTRACTS);
   const [publications, setPublications] = useState<SeedPub[]>(PUBLICATIONS);
   const [users, setUsers] = useState<SeedUser[]>(USERS);
+  const [bimDemands, setBimDemands] = useState<BimDemand[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
@@ -5111,10 +5555,10 @@ export default function Portal() {
     };
     (async () => {
       try {
-        const [b, t, a, c, ctr, pub, u] = await Promise.all([
+        const [b, t, a, c, ctr, pub, u, bd] = await Promise.all([
           load("/api/state/blocks"), load("/api/state/tickets"), load("/api/state/activities"),
           load("/api/state/clients"), load("/api/state/contracts"), load("/api/state/publications"),
-          load("/api/state/users"),
+          load("/api/state/users"), load("/api/state/bim-demands"),
         ]);
 
         if (b.length) setBlocks(b as SeedBlock[]); else await seedIfEmpty("/api/state/blocks", b, INITIAL_BLOCKS);
@@ -5124,6 +5568,7 @@ export default function Portal() {
         if (ctr.length) { setContracts(ctr as SeedContract[]); CONTRACTS = ctr as SeedContract[]; } else await seedIfEmpty("/api/state/contracts", ctr, CONTRACTS);
         if (pub.length) setPublications(pub as SeedPub[]); else await seedIfEmpty("/api/state/publications", pub, PUBLICATIONS);
         if (u.length) { setUsers(u as SeedUser[]); USERS.length = 0; USERS.push(...(u as SeedUser[])); } else await seedIfEmpty("/api/state/users", u, USERS);
+        setBimDemands(bd as BimDemand[]); // sem seed: começa vazio mesmo
 
         setHydrated(true);
       } catch (e) {
@@ -5142,6 +5587,7 @@ export default function Portal() {
   useEffect(() => { if (!hydrated) return; CLIENTS = clients; const t = setTimeout(() => { fetch("/api/state/clients", { method: "POST", body: JSON.stringify(clients) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [clients, hydrated]);
   useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
   useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
+  useEffect(() => { if (!hydrated) return; const t = setTimeout(() => { fetch("/api/state/bim-demands", { method: "POST", body: JSON.stringify(bimDemands) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [bimDemands, hydrated]);
   useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
 
   // Ao logar, cai na primeira página permitida. Sem isso um cliente restrito a
@@ -5158,15 +5604,16 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, users, setUsers }}>
         <LoginPage />
       </AppContext.Provider>
     );
   }
 
   const isClient = currentUser.role === "client";
-  const shellLabel = isClient ? "Portal do cliente" : "Operações internas";
-  const workspaceTitle = isClient ? getClientName(currentUser.clientId!) : "Pipeline ArchTechTour";
+  const isFreelancer = currentUser.role === "freelancer_bim";
+  const shellLabel = isFreelancer ? "Área do terceirizado" : isClient ? "Portal do cliente" : "Operações internas";
+  const workspaceTitle = isFreelancer ? "Blocos BIM · ArchTechTour" : isClient ? getClientName(currentUser.clientId!) : "Pipeline ArchTechTour";
 
   const renderPage = () => {
     // Trava de acesso — vale para QUALQUER caminho até a página, inclusive os
@@ -5195,6 +5642,8 @@ export default function Portal() {
       case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage />;
       case "users": return <UsersPage />;
+      case "bim": return <BimPage user={currentUser} />;
+      case "bim_minhas": return <BimMinhasDemandasPage user={currentUser} />;
       case "agents": return <AgentsPage setPage={setPage} />;
       case "agent_sherlock_codes": return <SherlockCodesPage setPage={setPage} />;
       case "agent_monk_lighthouse": return <MonkLighthousePage setPage={setPage} />;
@@ -5206,7 +5655,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, users, setUsers }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />

@@ -70,4 +70,5 @@ export const TABLES = {
   USERS: "att-users",
   AGENT_ROUTINES: "att-agent-routines",
   AGENT_CHECKS: "att-agent-checks",
+  BIM_DEMANDS: "att-bim-demands",
 } as const;

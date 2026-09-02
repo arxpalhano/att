@@ -67,7 +67,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 
 ## 5. Modelo de dados (DynamoDB)
 
-9 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
+10 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
 
 | Tabela | Conteúdo |
 |--------|----------|
@@ -80,6 +80,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 | `att-users` | Usuários do portal (email, password, name, role, clientId) |
 | `att-agent-routines` | Rotinas dos agentes automáticos (hoje só `argus-watchtower`: horários, destinatários, sites monitorados) |
 | `att-agent-checks` | Histórico de verificações do Argus Watchtower (TTL 90 dias via `expiresAt`) |
+| `att-bim-demands` | Demandas de blocos BIM para terceirizados (lote por marca: produtos, arquivos ArchiCAD/Revit/SketchUp, prazo, entrega, status) |
 
 **Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`.
 Se vazias, faz seed inicial (de `src/data/seed.ts` + `wj-seed.ts` + hardcoded).
@@ -194,6 +195,34 @@ vazio. O alias é o **prefixo do nome do produto** no customizador (`wj-enigma`
 (ver §7).
 
 ---
+
+### BIM · Terceirizados (desde 2026-09-02)
+
+Substitui o controle que a Jessica mantinha no Notion (`Equipe ATT / Freelance |
+Serviços terceirizados / Controle terceirizados / <nome> / Demandas 2026`). O modelo
+é o mesmo do Notion: uma **demanda** é um lote de produtos de uma marca enviado a um
+terceirizado, com data do pedido, prazo, entrega e status
+(`não iniciada → aguardando informação → em andamento → entregue → aprovada`).
+Dentro dela, opcionalmente, a lista de produtos e, por produto, os arquivos a entregar
+(ArchiCAD / Revit / SketchUp) — o nome de arquivo segue o padrão do Notion
+(`Archicad-PoltronaCasuloNido`), gerado por `bimFileSlug`.
+
+**Duas telas, dois perfis:**
+
+| Tela | Quem vê | O que faz |
+|---|---|---|
+| **BIM · Terceirizados** (`bim`, sidebar interna) | equipe interna | KPIs (produtos em aberto, atrasadas, aguardando aprovação, entregues no mês), filtros por terceirizado/marca/status, criar/editar/excluir demanda (admin e operações), mudar status, **aprovar entrega**, ver valor por produto |
+| **Minhas demandas** (`bim_minhas`) | perfil `freelancer_bim` | só as próprias demandas; marca arquivo a arquivo o que entregou, "Comecei", "Preciso de informação", "Marcar como entregue", observação para a equipe. **Não vê valor** e **não aprova** a própria entrega |
+
+Perfil novo `freelancer_bim` ("Terceirizado BIM"): entra por e-mail/senha (não é
+Microsoft), `paginasPermitidas` devolve só `["bim_minhas"]`, e ele **não aparece** como
+responsável atribuível em tickets. Usuários criados: Danilo (`u_danilo`) e Raquel
+(`u_raquel`), com as demandas de 2026 importadas do Notion (as de 2025 ficaram lá).
+
+Tipos e helpers em `src/lib/bim.ts`; API `GET/POST /api/state/bim-demands`
+(mesmo contrato das outras rotas de estado); estado hidratado/persistido com o resto
+(`bimDemands` no `AppContext`). O dashboard interno tem o card "BIM com terceirizados"
+(produtos em aberto + atrasadas), que abre a tela.
 
 ## 7. Analytics
 
@@ -342,7 +371,7 @@ destinatário novo fora do domínio, verificar antes:
 
 ## 9. Endpoints da API
 
-**Estado (DynamoDB):** `GET/POST /api/state/{blocks,tickets,activities,clients,contracts,publications,users}`
+**Estado (DynamoDB):** `GET/POST /api/state/{blocks,tickets,activities,clients,contracts,publications,users,bim-demands}`
 (POST aceita item único ou array; array = replaceAll).
 
 **Manutenção (admin, server-side):**

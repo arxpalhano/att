@@ -43,7 +43,7 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
 
 - **Frontend/Backend:** Next.js 14 App Router, um único app. UI principal em
   `src/components/Portal.tsx` (arquivo grande — clientes, blocos, tickets, agentes).
-- **Estado persistente:** DynamoDB (us-east-1), 7 tabelas `att-*`. APIs em
+- **Estado persistente:** DynamoDB (us-east-1), 10 tabelas `att-*`. APIs em
   `src/app/api/state/*`. Hidrata no mount, persiste com debounce.
 - **Analytics:** AWS Athena (`customizador_events`). Builder em
   `src/lib/analytics-builder.ts` (com filtro de bots). Dashboard em
@@ -85,6 +85,8 @@ Portal em produção, funcional. Resumo do que foi construído (ordem cronológi
 - ✅ Pipeline analytics robusto: parquet ETL **diário** (mês corrente+anterior),
   analytics-compute dia 1º. Resolveu dashboards zerados.
 - ✅ ATT Instant: funil `/experimentar` (foto→3D IA) + plano Instant
+- ✅ BIM · Terceirizados: demandas de blocos ArchiCAD/Revit para Danilo e Raquel (perfil
+  `freelancer_bim`, tela própria só com as demandas deles) — espelho do Notion. PORTAL.md §6
 
 **Feedbacks recentes da Jessica (PM) — todos atendidos:** Arctefacto removido dos
 dashboards; dashboards zerados corrigidos (era o parquet ETL); bloco editável+excluível;
