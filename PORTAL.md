@@ -136,6 +136,17 @@ cima da tabela de produção.
 preset e navega; `BlocksListPage` monta com `initialStatus` (chave = status, então
 remonta ao trocar). Sair de "Blocos" limpa o preset.
 
+### Importação do Banco de Produtos do Notion (2026-09-02)
+
+O "Banco de Produtos" (`Acompanhamento interno` no Notion, 723 produtos com etapa `Tech`,
+checkboxes SKP/RVT/GSM, link do customizador e relação com o projeto/marca) foi importado
+para `att-blocks`: **395 blocos novos** e **327 atualizados**; 2 clientes criados a partir
+do Notion (**Dengo**, **Inkasa**) com contratos "Em definição"; 153 publicações criadas a
+partir do "Link atual". Script, regras e checklist de revisão em `scripts/notion-import/`.
+Regra-mãe: **nunca rebaixar bloco `published`** — 43 divergências ficaram registradas em
+`notionTech` para a Jessica revisar no "Editar bloco". Backups pré-importação em
+`s3://archtechtour-assets/backups/`.
+
 ## 6. Páginas do portal
 
 **Cliente:** Dashboard, Onboarding, Meus Blocos, Aprovações, Publicações, Analytics, Contratos.
