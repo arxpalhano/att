@@ -92,6 +92,40 @@ blocked, on_hold, archived.
 
 ---
 
+### Regras de integridade do estado (desde 2026-09-02 — auditoria do dashboard)
+
+**1. Tela nunca lê constante de seed.** `CLIENTS`, `CONTRACTS`, `USERS`, `TICKETS`
+são variáveis de módulo espelhadas do estado por efeito (uma renderização atrás);
+`ACTIVITIES`, `PUBLICATIONS` e `INITIAL_BLOCKS` são só o seed inicial e **nunca**
+acompanham o app. Componente que precisa de dado lê do `AppContext`
+(`blocks`, `activities`, `clients`, `contracts`, `publications`, `users`). Foi isso
+que congelava o dashboard: "Atividade recente" mostrava o seed de março enquanto o
+banco tinha movimentação de setembro.
+
+**2. Aprovação pendente = status do bloco.** Não existe tabela de aprovações. Um
+bloco em `awaiting_client_material_validation` ou `awaiting_client_final_validation`
+É a aprovação pendente (`isAwaitingClient`). Aprovar/pedir revisão muda o status
+(`APPROVAL_NEXT`: material → `approved_for_programming` / volta `in_modeling`;
+final → `approved` / volta `internal_review`) e grava atividade
+`approval_approved` / `approval_rejected`, que é o histórico das "resolvidas".
+Dashboard, badge da sidebar, tela de Aprovações e aba do detalhe do bloco usam o
+mesmo critério — por isso batem. Limite de 3 revisões (`MAX_CLIENT_REVISIONS`).
+
+**3. Blocos usados de um contrato = contagem real.** `usedBlocksOf(contractId, blocks)`
+em todos os pontos de leitura (dashboard do cliente, contratos, clientes, capacidade
+no "Novo Bloco"). O campo `usedBlocks` gravado ficou como legado — ninguém o
+atualiza ao criar/excluir bloco, e no formulário de contrato virou somente leitura.
+
+**4. Hidratação nunca semeia por cima de erro.** O carregamento inicial só faz POST
+do seed quando o GET respondeu OK com lista vazia. Com erro de rede/IAM, `hydrated`
+fica `false` (efeitos de persistência não rodam) e um banner avisa que nada será
+salvo. Antes, uma resposta `{error}` caía no "else" e fazia `replaceAll` do seed por
+cima da tabela de produção.
+
+**5. Card do dashboard abre a lista já filtrada.** `openBlocks(status)` guarda o
+preset e navega; `BlocksListPage` monta com `initialStatus` (chave = status, então
+remonta ao trocar). Sair de "Blocos" limpa o preset.
+
 ## 6. Páginas do portal
 
 **Cliente:** Dashboard, Onboarding, Meus Blocos, Aprovações, Publicações, Analytics, Contratos.

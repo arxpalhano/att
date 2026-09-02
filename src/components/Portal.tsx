@@ -21,7 +21,6 @@ import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
 type UserRole = "admin" | "internal_ops" | "internal_modeling" | "internal_programming" | "client";
 type ServiceType = "standard" | "plus" | "ultra";
 type Priority = "low" | "normal" | "high" | "urgent";
-type ApprovalStatusType = "pending" | "approved" | "rejected";
 type BlockStatus =
   | "draft" | "awaiting_client_files" | "client_files_under_review"
   | "ready_to_start" | "in_modeling" | "awaiting_client_material_validation"
@@ -76,11 +75,6 @@ interface SeedAsset {
   name: string; size: number; v: number; by: string;
   analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; notes?: string[]; };
   uploadedAt?: string;
-}
-interface SeedApproval {
-  id: string; blockId: string; type: string;
-  status: ApprovalStatusType; comment?: string;
-  by: string; decided?: string; at: string;
 }
 interface SeedActivity {
   id: string; blockId: string; userId: string;
@@ -300,14 +294,6 @@ const ASSETS: SeedAsset[] = [
   { id: "a19", blockId: "pb3", cat: "photos", name: "umma_ref.jpg", size: 340000, v: 1, by: "u8" },
 ];
 
-const APPROVALS: SeedApproval[] = [
-  { id: "ap1", blockId: "pb1", type: "material_validation", status: "approved", comment: "Materiais e acabamentos ok.", by: "u3", decided: "u8", at: "2025-05-20" },
-  { id: "ap2", blockId: "pb1", type: "final_validation", status: "approved", comment: "Aprovado pela marca. Publicar.", by: "u5", decided: "u8", at: "2025-07-15" },
-  { id: "ap3", blockId: "pb4", type: "material_validation", status: "pending", by: "u3", at: "2025-09-01" },
-  { id: "ap4", blockId: "pb7", type: "final_validation", status: "pending", comment: "Aguardando revisão da Acácia.", by: "u3", at: "2026-03-20" },
-  { id: "ap5", blockId: "pb14", type: "final_validation", status: "approved", comment: "Jantar Triz aprovado.", by: "u3", decided: "u9", at: "2025-12-15" },
-];
-
 const ACTIVITIES: SeedActivity[] = [
   { id: "al1", blockId: "pb1", userId: "u1", type: "block_created", desc: "Bloco criado: Banco Nub", at: "2025-03-15T10:00" },
   { id: "al2", blockId: "pb1", userId: "u8", type: "asset_uploaded", desc: "CAD enviado: banco_nub_v3.step", at: "2025-03-20T14:00" },
@@ -414,6 +400,27 @@ const getUserName = (id: string) => USERS.find((u) => u.id === id)?.name || "—
 const getClientName = (id: string) => CLIENTS.find((c) => c.id === id)?.name || "—";
 const getClientCode = (id: string) => CLIENTS.find((c) => c.id === id)?.code || "—";
 
+// ------------------------------------------------------------
+// Fontes de verdade derivadas (usadas por dashboard, sidebar, aprovações e contratos)
+// ------------------------------------------------------------
+// Não existe tabela de aprovações. "Aprovação pendente" É um bloco parado num
+// status que espera o cliente — é o que o BlockDetail muda quando aprova.
+// Derivar daqui garante que dashboard, badge da sidebar e tela de Aprovações
+// mostrem o mesmo número, e que ele mude na hora que o status mudar.
+const APPROVAL_STATUSES: readonly BlockStatus[] = ["awaiting_client_material_validation", "awaiting_client_final_validation"];
+const isAwaitingClient = (b: SeedBlock) => APPROVAL_STATUSES.includes(b.status);
+/** Próximo status quando o cliente aprova / status de volta quando pede revisão. */
+const APPROVAL_NEXT: Partial<Record<BlockStatus, { approve: BlockStatus; reject: BlockStatus; label: string }>> = {
+  awaiting_client_material_validation: { approve: "approved_for_programming", reject: "in_modeling", label: "Validação de Material" },
+  awaiting_client_final_validation: { approve: "approved", reject: "internal_review", label: "Validação Final" },
+};
+const MAX_CLIENT_REVISIONS = 3;
+
+// Blocos usados de um contrato = contagem REAL dos blocos, não o contador
+// gravado em usedBlocks — ninguém atualiza esse contador quando um bloco é
+// criado ou excluído, então ele descola da realidade no primeiro bloco novo.
+const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter((b) => b.contractId === contractId).length;
+
 function checkReadiness(blockId: string, serviceType: ServiceType) {
   const required = READINESS_RULES[serviceType] || [];
   const blockAssets = ASSETS.filter((a) => a.blockId === blockId);
@@ -430,6 +437,8 @@ function checkReadiness(blockId: string, serviceType: ServiceType) {
 interface AppState {
   currentUser: SeedUser | null;
   setCurrentUser: (u: SeedUser | null) => void;
+  /** true depois que o estado veio do DynamoDB — antes disso a tela mostra seed. */
+  hydrated: boolean;
   blocks: SeedBlock[];
   setBlocks: React.Dispatch<React.SetStateAction<SeedBlock[]>>;
   activities: SeedActivity[];
@@ -820,12 +829,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 }) {
   const { blocks } = useContext(AppContext);
   const isClient = user.role === "client";
-  const pendingApprovals = APPROVALS.filter((a) => {
-    if (a.status !== "pending") return false;
-    if (!isClient) return true;
-    const relatedBlock = blocks.find((b) => b.id === a.blockId);
-    return relatedBlock?.clientId === user.clientId;
-  }).length;
+  const pendingApprovals = blocks.filter((b) => isAwaitingClient(b) && (!isClient || b.clientId === user.clientId)).length;
 
   const todosItens = isClient
     ? [
@@ -926,27 +930,39 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 // ============================================================
 // DASHBOARD INTERNO
 // ============================================================
-function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
-  const { blocks } = useContext(AppContext);
+function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => void; openBlocks: (status: BlockStatus | "all") => void }) {
+  // Tudo aqui sai do estado vivo do app (hidratado do DynamoDB e atualizado
+  // por qualquer tela). Nada de constantes de seed: elas congelam o número.
+  const { blocks, activities, clients, hydrated } = useContext(AppContext);
   const byStatus: Record<string, number> = {};
   blocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
-  const pending = APPROVALS.filter((a) => a.status === "pending").length;
-  const recent = [...ACTIVITIES].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
-  const activeClients = CLIENTS.map((client) => ({
+  const pending = blocks.filter(isAwaitingClient).length;
+  const recent = [...activities].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
+  const activeClients = clients.map((client) => ({
     ...client,
     count: blocks.filter((b) => b.clientId === client.id).length,
   })).filter((client) => client.count > 0).sort((a, b) => b.count - a.count);
 
-  const pipeline = [
-    { s: "awaiting_client_files" as BlockStatus, icon: Clock, color: "text-amber-500" },
-    { s: "ready_to_start" as BlockStatus, icon: Play, color: "text-emerald-500" },
-    { s: "in_modeling" as BlockStatus, icon: Layers, color: "text-violet-500" },
-    { s: "in_programming" as BlockStatus, icon: Zap, color: "text-indigo-500" },
-    { s: "internal_review" as BlockStatus, icon: Eye, color: "text-fuchsia-500" },
-    { s: "awaiting_client_final_validation" as BlockStatus, icon: UserCheck, color: "text-amber-500" },
-    { s: "approved" as BlockStatus, icon: ThumbsUp, color: "text-emerald-600" },
-    { s: "published" as BlockStatus, icon: Globe, color: "text-emerald-600" },
+  // Esteira completa, na ordem das transições — antes faltavam 4 estágios
+  // (rascunho, arquivos em revisão, aprovado p/ programação, aguardando
+  // material), então um bloco recém-criado simplesmente não aparecia aqui.
+  const pipeline: { s: BlockStatus; icon: any; color: string }[] = [
+    { s: "draft", icon: FileText, color: "text-slate-400" },
+    { s: "awaiting_client_files", icon: Clock, color: "text-amber-500" },
+    { s: "client_files_under_review", icon: Search, color: "text-sky-500" },
+    { s: "ready_to_start", icon: Play, color: "text-emerald-500" },
+    { s: "in_modeling", icon: Layers, color: "text-violet-500" },
+    { s: "awaiting_client_material_validation", icon: UserCheck, color: "text-amber-500" },
+    { s: "approved_for_programming", icon: ThumbsUp, color: "text-emerald-500" },
+    { s: "in_programming", icon: Zap, color: "text-indigo-500" },
+    { s: "internal_review", icon: Eye, color: "text-fuchsia-500" },
+    { s: "awaiting_client_final_validation", icon: UserCheck, color: "text-amber-500" },
+    { s: "approved", icon: ThumbsUp, color: "text-emerald-600" },
+    { s: "published", icon: Globe, color: "text-emerald-600" },
   ];
+  const onPipeline = pipeline.reduce((n, p) => n + (byStatus[p.s] || 0), 0);
+  const paused = (byStatus["blocked"] || 0) + (byStatus["on_hold"] || 0) + (byStatus["archived"] || 0);
+  const inProduction = ["ready_to_start", "in_modeling", "approved_for_programming", "in_programming", "internal_review"].reduce((n, st) => n + (byStatus[st] || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -964,24 +980,30 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
           <div className="relative">
             <div className="flex flex-wrap items-center gap-2">
               <Badge className="border-white/10 bg-white/8 text-slate-100">Operações ArchTechTour</Badge>
-              <Badge className="border-cyan-400/15 bg-cyan-400/10 text-cyan-100">Produção + validação + publicação</Badge>
+              {hydrated
+                ? <Badge className="border-emerald-400/20 bg-emerald-400/10 text-emerald-200">Sincronizado com o banco</Badge>
+                : <Badge className="border-amber-400/20 bg-amber-400/10 text-amber-200">Carregando dados…</Badge>}
             </div>
-            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.25rem]">Toda a operação em uma interface mais editorial e menos genérica.</h2>
+            <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.25rem]">
+              {pending > 0 || (byStatus["blocked"] || 0) > 0
+                ? `${pending} aguardando o cliente · ${byStatus["blocked"] || 0} bloqueado${(byStatus["blocked"] || 0) === 1 ? "" : "s"} · ${inProduction} em produção.`
+                : `Nada travado. ${inProduction} bloco${inProduction === 1 ? "" : "s"} em produção agora.`}
+            </h2>
             <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-300">
-              O foco aqui é dar leitura rápida para bloqueios, aprovações, produção e publicações, sem cair na estética padrão de dashboard pronto.
+              Números lidos do estado atual do portal — mudam na hora que um bloco muda de status em qualquer tela.
             </p>
             <div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {[
-                { label: "Total de blocos", value: blocks.length, sub: "Base monitorada" },
-                { label: "Bloqueados", value: byStatus["blocked"] || 0, sub: "Pedem atenção" },
-                { label: "Aprovações", value: pending, sub: "Pendentes" },
-                { label: "Publicados", value: byStatus["published"] || 0, sub: "Ao vivo" },
+                { label: "Total de blocos", value: blocks.length, sub: "Base monitorada", onClick: () => openBlocks("all") },
+                { label: "Bloqueados", value: byStatus["blocked"] || 0, sub: "Pedem atenção", onClick: () => openBlocks("blocked") },
+                { label: "Aprovações", value: pending, sub: "Aguardando o cliente", onClick: () => setPage("approvals") },
+                { label: "Publicados", value: byStatus["published"] || 0, sub: "Ao vivo", onClick: () => openBlocks("published") },
               ].map((item) => (
-                <div key={item.label} className="rounded-[22px] border border-white/10 bg-white/6 p-4 backdrop-blur">
+                <button key={item.label} onClick={item.onClick} className="rounded-[22px] border border-white/10 bg-white/6 p-4 text-left backdrop-blur transition hover:bg-white/10">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
                   <p className="mt-3 text-3xl font-semibold text-white">{item.value}</p>
                   <p className="mt-2 text-sm text-slate-300">{item.sub}</p>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -1021,7 +1043,7 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
             value={byStatus["blocked"] || 0}
             sub="Itens que precisam de destravamento operacional ou retorno do cliente."
             color="text-rose-600"
-            onClick={() => setPage("queue")}
+            onClick={() => openBlocks("blocked")}
           />
         </div>
       </div>
@@ -1032,11 +1054,11 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pipeline</p>
             <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Produção em andamento</h3>
           </div>
-          <p className="max-w-xl text-sm leading-6 text-slate-500">Os estágios principais aparecem como uma esteira visual para priorização rápida do time.</p>
+          <p className="max-w-xl text-sm leading-6 text-slate-500">Todos os estágios, na ordem do fluxo. Clique num estágio para abrir só os blocos que estão nele.</p>
         </div>
         <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {pipeline.map(({ s, icon: Icon, color }) => (
-            <button key={s} onClick={() => setPage("blocks")} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
+            <button key={s} onClick={() => openBlocks(s)} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{STATUS_LABELS[s]}</p>
@@ -1047,11 +1069,18 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
                 </div>
               </div>
               <div className="mt-5 flex items-center justify-between text-sm text-slate-500">
-                <span>Ver detalhes</span>
+                <span>Ver blocos</span>
                 <ChevronRight className="h-4 w-4 transition group-hover:translate-x-0.5" />
               </div>
             </button>
           ))}
+        </div>
+        <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-slate-100 pt-4 text-sm text-slate-500">
+          <span><span className="font-semibold text-slate-700">{onPipeline}</span> na esteira</span>
+          <button onClick={() => openBlocks("blocked")} className="hover:text-slate-700"><span className="font-semibold text-rose-600">{byStatus["blocked"] || 0}</span> bloqueados</button>
+          <button onClick={() => openBlocks("on_hold")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{byStatus["on_hold"] || 0}</span> em espera</button>
+          <button onClick={() => openBlocks("archived")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{byStatus["archived"] || 0}</span> arquivados</button>
+          <span className="ml-auto text-xs text-slate-400">{onPipeline + paused} = {blocks.length} blocos</span>
         </div>
       </Card>
 
@@ -1066,7 +1095,7 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
           </div>
           <div className="mt-6 space-y-4">
             {activeClients.map((client) => {
-              const pct = Math.round((client.count / blocks.length) * 100);
+              const pct = blocks.length ? Math.round((client.count / blocks.length) * 100) : 0;
               return (
                 <div key={client.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/70 p-4">
                   <div className="flex items-center justify-between gap-3">
@@ -1097,6 +1126,7 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
             <button onClick={() => setPage("activity")} className="text-sm font-semibold text-cyan-700 transition hover:text-cyan-800">Ver tudo</button>
           </div>
           <div className="mt-6 space-y-3">
+            {recent.length === 0 && <p className="text-sm text-slate-400">Nenhuma movimentação registrada ainda.</p>}
             {recent.map((act) => {
               const block = blocks.find((b) => b.id === act.blockId);
               return (
@@ -1125,11 +1155,13 @@ function InternalDashboard({ setPage }: { setPage: (p: string) => void }) {
 // DASHBOARD CLIENTE
 // ============================================================
 function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
-  const { blocks } = useContext(AppContext);
+  const { blocks, contracts, publications } = useContext(AppContext);
   const cid = user.clientId!;
-  const ctrs = CONTRACTS.filter((c) => c.clientId === cid);
+  const ctrs = contracts.filter((c) => c.clientId === cid);
   const contracted = ctrs.reduce((s, c) => s + c.totalBlocks, 0);
-  const used = ctrs.reduce((s, c) => s + c.usedBlocks, 0);
+  // Contagem real dos blocos do contrato — o contador gravado não acompanha
+  // criação/exclusão, então "disponíveis" ficava errado no primeiro bloco novo.
+  const used = ctrs.reduce((s, c) => s + usedBlocksOf(c.id, blocks), 0);
   const myBlocks = blocks.filter((b) => b.clientId === cid);
   const awaiting = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).length;
   const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "approved_for_programming", "in_programming", "internal_review"].includes(b.status)).length;
@@ -1143,7 +1175,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
   // Onboarding steps — step 0 is always done (contract signed)
   const onboardingSteps = [
     { label: "Contrato assinado", done: true, desc: "Seu contrato está ativo e registrado." },
-    { label: "Reunião de onboarding agendada", done: !isNewClient || false, desc: "A equipe ATT entrará em contato em até 5 dias úteis para agendar." },
+    { label: "Reunião de onboarding agendada", done: !isNewClient, desc: "A equipe ATT entrará em contato em até 5 dias úteis para agendar." },
     { label: "Envio dos arquivos", done: myBlocks.some((b) => !["awaiting_client_files"].includes(b.status)), desc: "Envie blocos 3D, fotos, logo e desenhos técnicos para info@archtechtour.com." },
     { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
     { label: "Publicação no catálogo digital", done: publishedCount > 0, desc: "Seus blocos estarão disponíveis em 3D e RA na plataforma ArchTechTour." },
@@ -1206,7 +1238,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
           <div className="absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl" />
           <div className="relative">
             <div className="flex flex-wrap items-center gap-2">
-              <Badge className="border-white/10 bg-white/8 text-slate-100">Plano {latestContract?.title?.split("–")[0]?.trim() || "Ativo"}</Badge>
+              <Badge className="border-white/10 bg-white/8 text-slate-100">{latestContract?.title || "Contrato ativo"}</Badge>
               {awaiting > 0 && <Badge className="border-amber-400/20 bg-amber-400/15 text-amber-200">{awaiting} {awaiting === 1 ? "item pede" : "itens pedem"} sua atenção</Badge>}
             </div>
             <h2 className="mt-6 text-3xl font-semibold tracking-tight md:text-[2.1rem]">
@@ -1357,7 +1389,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
             </div>
             <div className="mt-5 space-y-3">
               {liveBlocks.length ? liveBlocks.map((block) => {
-                const publication = PUBLICATIONS.find((pub) => pub.blockId === block.id);
+                const publication = publications.find((pub) => pub.blockId === block.id);
                 return (
                   <div key={block.id} className="rounded-[22px] border border-emerald-100 bg-emerald-50/50 p-4">
                     <p className="text-sm font-semibold text-slate-800">{block.title}</p>
@@ -1400,10 +1432,10 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
 // ============================================================
 // BLOCKS LIST
 // ============================================================
-function BlocksListPage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
+function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all" }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void; initialStatus?: string }) {
   const { blocks, setBlocks, activities, setActivities, tickets, setTickets } = useContext(AppContext);
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterStatus, setFilterStatus] = useState(initialStatus);
   const [filterClient, setFilterClient] = useState("all");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const isClient = user.role === "client";
@@ -1882,7 +1914,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
   onClose: () => void;
   onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => string;
 }) {
-  const { assets, setAssets, activities, setActivities } = useContext(AppContext);
+  const { assets, setAssets, activities, setActivities, blocks } = useContext(AppContext);
   const isClient = user.role === "client";
   const [title, setTitle] = useState("");
   const [clientSku, setClientSku] = useState("");
@@ -1897,7 +1929,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
 
   const availableContracts = CONTRACTS.filter((c) => c.clientId === clientId && c.active);
   const selectedContract = CONTRACTS.find((c) => c.id === contractId);
-  const hasCapacity = selectedContract ? selectedContract.usedBlocks < selectedContract.totalBlocks : false;
+  const hasCapacity = selectedContract ? usedBlocksOf(selectedContract.id, blocks) < selectedContract.totalBlocks : false;
   const canSubmit = title.trim() && clientSku.trim() && clientId && contractId && hasCapacity;
   const requiredCats = READINESS_RULES[serviceType] || [];
 
@@ -1951,7 +1983,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
             <label className="block text-xs font-medium text-slate-500 mb-1">Contrato *</label>
             <select value={contractId} onChange={(e) => setContractId(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40" disabled={!clientId}>
               <option value="">{clientId ? "Selecione o contrato..." : "Selecione o cliente primeiro"}</option>
-              {availableContracts.map((c) => <option key={c.id} value={c.id}>{c.title} ({c.totalBlocks - c.usedBlocks} disponíveis)</option>)}
+              {availableContracts.map((c) => <option key={c.id} value={c.id}>{c.title} ({c.totalBlocks - usedBlocksOf(c.id, blocks)} disponíveis)</option>)}
             </select>
             {contractId && !hasCapacity && <p className="text-xs text-red-500 mt-1">Este contrato não tem blocos disponíveis.</p>}
           </div>
@@ -2187,10 +2219,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
 
   const contract = CONTRACTS.find((c) => c.id === block.contractId);
   const blockAssets = assets.filter((a) => a.blockId === block.id);
-  const blockApprovals = APPROVALS.filter((a) => a.blockId === block.id);
   const blockActivities = activities.filter((a) => a.blockId === block.id).sort((a, b) => b.at.localeCompare(a.at));
+  const approvalHistory = blockActivities.filter((a) => a.type === "approval_approved" || a.type === "approval_rejected");
+  const approvalRule = APPROVAL_NEXT[block.status];
   const readiness = checkReadiness(block.id, block.svc);
-  const publication = PUBLICATIONS.find((p) => p.blockId === block.id);
+  const publication = publications.find((p) => p.blockId === block.id);
   const validNext = VALID_TRANSITIONS[block.status] || [];
   const isClient = user.role === "client";
   const [confirmTransition, setConfirmTransition] = useState<BlockStatus | null>(null);
@@ -2213,7 +2246,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     setPage("blocks");
   };
 
-  const MAX_REVISIONS = 3;
+  const MAX_REVISIONS = MAX_CLIENT_REVISIONS;
   const revisions = block.clientRevisions ?? 0;
   const revisionLimitReached = revisions >= MAX_REVISIONS;
   const revisionWarning = revisions === MAX_REVISIONS - 1;
@@ -2231,16 +2264,19 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   };
 
   // Rejeição do cliente = 1 revisão consumida
-  const handleClientReject = (approvalId: string) => {
-    if (revisionLimitReached) return; // bloqueado — revisão paga
-    const updatedBlocks = blocks.map((b) =>
-      b.id === block.id ? { ...b, clientRevisions: revisions + 1 } : b
-    );
-    setBlocks(updatedBlocks);
+  const handleClientDecision = (action: "approve" | "reject") => {
+    if (!approvalRule) return;
+    if (action === "reject" && revisionLimitReached) return; // bloqueado — revisão paga
+    const next = action === "approve" ? approvalRule.approve : approvalRule.reject;
+    setBlocks(blocks.map((b) => b.id === block.id
+      ? { ...b, status: next, ...(action === "reject" ? { clientRevisions: revisions + 1 } : {}) }
+      : b));
     const act: SeedActivity = {
       id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
-      type: "approval_rejected",
-      desc: `Revisão ${revisions + 1}/${MAX_REVISIONS} solicitada pelo cliente`,
+      type: action === "approve" ? "approval_approved" : "approval_rejected",
+      desc: action === "approve"
+        ? `${approvalRule.label} aprovada pelo cliente → ${STATUS_LABELS[next]}`
+        : `Revisão ${revisions + 1}/${MAX_REVISIONS} solicitada pelo cliente (${approvalRule.label}) → ${STATUS_LABELS[next]}`,
       at: new Date().toISOString(),
     };
     setActivities([...activities, act]);
@@ -2440,26 +2476,23 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
       {tab === "approvals" && (
         <Card className="p-5">
           <h3 className="text-sm font-semibold text-slate-700 mb-4">Aprovações</h3>
-          {blockApprovals.length === 0 ? <EmptyState icon={CheckCircle} title="Nenhuma aprovação" /> : (
+          {!approvalRule && approvalHistory.length === 0 ? <EmptyState icon={CheckCircle} title="Nenhuma aprovação" desc="Quando o bloco entrar em validação de material ou final, a decisão aparece aqui." /> : (
             <div className="space-y-3">
-              {blockApprovals.map((ap) => (
-                <div key={ap.id} className={`border rounded-lg p-4 ${ap.status === "pending" ? "border-amber-200 bg-amber-50/50" : ap.status === "approved" ? "border-green-200 bg-green-50/50" : "border-red-200 bg-red-50/50"}`}>
+              {approvalRule && (
+                <div className="border rounded-lg p-4 border-amber-200 bg-amber-50/50">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-slate-700">{ap.type === "material_validation" ? "Validação de Material" : "Validação Final"}</span>
-                    <Badge className={ap.status === "pending" ? "bg-amber-100 text-amber-700 border-amber-200" : ap.status === "approved" ? "bg-green-100 text-green-700 border-green-200" : "bg-red-100 text-red-700 border-red-200"}>
-                      {ap.status === "pending" ? "Pendente" : ap.status === "approved" ? "Aprovado" : "Rejeitado"}
-                    </Badge>
+                    <span className="text-sm font-medium text-slate-700">{approvalRule.label}</span>
+                    <Badge className="bg-amber-100 text-amber-700 border-amber-200">Pendente</Badge>
                   </div>
-                  {ap.comment && <p className="text-sm text-slate-600 italic">&ldquo;{ap.comment}&rdquo;</p>}
-                  <p className="text-xs text-slate-400 mt-1">Solicitado em {fmtDate(ap.at)}{!isClient && ap.decided ? ` · Decidido por ${getUserName(ap.decided)}` : ""}</p>
-                  {ap.status === "pending" && isClient && (
+                  <p className="text-xs text-slate-400 mt-1">Aguardando decisão do cliente{revisions > 0 ? ` · ${revisions}/${MAX_REVISIONS} revisões usadas` : ""}</p>
+                  {isClient && (
                     <div className="space-y-2 mt-3">
                       <div className="flex gap-2">
-                        <button className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
+                        <button onClick={() => handleClientDecision("approve")} className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700">
                           <ThumbsUp className="w-3.5 h-3.5" /> Aprovar
                         </button>
                         <button
-                          onClick={() => handleClientReject(ap.id)}
+                          onClick={() => handleClientDecision("reject")}
                           disabled={revisionLimitReached}
                           className="flex items-center gap-1 px-3 py-1.5 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
@@ -2474,7 +2507,19 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                     </div>
                   )}
                 </div>
-              ))}
+              )}
+              {approvalHistory.map((act) => {
+                const approved = act.type === "approval_approved";
+                return (
+                  <div key={act.id} className={`border rounded-lg p-4 ${approved ? "border-green-200 bg-green-50/50" : "border-red-200 bg-red-50/50"}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm font-medium text-slate-700">{act.desc}</span>
+                      <Badge className={approved ? "bg-green-100 text-green-700 border-green-200" : "bg-red-100 text-red-700 border-red-200"}>{approved ? "Aprovado" : "Revisão"}</Badge>
+                    </div>
+                    <p className="text-xs text-slate-400">{getUserName(act.userId)} · {fmtDate(act.at)}</p>
+                  </div>
+                );
+              })}
             </div>
           )}
         </Card>
@@ -2523,10 +2568,12 @@ function ContractFormModal({ title, onClose, onSave, initial, clients }: {
   onSave: (d: { id?: string; clientId: string; title: string; totalBlocks: number; usedBlocks: number; startDate: string; active: boolean }) => void;
   initial?: SeedContract; clients: SeedClient[];
 }) {
+  const { blocks } = useContext(AppContext);
   const [clientId, setClientId] = useState(initial?.clientId ?? clients[0]?.id ?? "");
   const [t, setT] = useState(initial?.title ?? "");
   const [tb, setTb] = useState(String(initial?.totalBlocks ?? 10));
-  const [ub, setUb] = useState(String(initial?.usedBlocks ?? 0));
+  // Utilizados não é campo editável: é a contagem real dos blocos do contrato.
+  const ub = initial ? usedBlocksOf(initial.id, blocks) : 0;
   const [sd, setSd] = useState(initial?.startDate ?? new Date().toISOString().slice(0, 10));
   const [active, setActive] = useState(initial?.active ?? true);
   const canSave = t.trim() && clientId && Number(tb) > 0;
@@ -2546,7 +2593,7 @@ function ContractFormModal({ title, onClose, onSave, initial, clients }: {
           <div><label className="text-xs font-medium text-slate-500">Título *</label><input value={t} onChange={(e) => setT(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Contrato 2026 – Linha Completa" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="text-xs font-medium text-slate-500">Total Blocos *</label><input type="number" value={tb} onChange={(e) => setTb(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
-            <div><label className="text-xs font-medium text-slate-500">Já Utilizados</label><input type="number" value={ub} onChange={(e) => setUb(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-500">Já Utilizados</label><div className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-100 bg-slate-50 text-sm text-slate-600">{ub} <span className="text-xs text-slate-400">(contagem real dos blocos)</span></div></div>
           </div>
           <div><label className="text-xs font-medium text-slate-500">Data de Início</label><input type="date" value={sd} onChange={(e) => setSd(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
           <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Ativo</label>
@@ -2561,7 +2608,7 @@ function ContractFormModal({ title, onClose, onSave, initial, clients }: {
 }
 
 function ContractsPage({ user, setPage, setSelectedContract }: { user: SeedUser; setPage: (p: string) => void; setSelectedContract: (id: string) => void }) {
-  const { contracts, setContracts, clients, currentUser } = useContext(AppContext);
+  const { contracts, setContracts, clients, currentUser, blocks } = useContext(AppContext);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SeedContract | null>(null);
   const canEdit = currentUser?.role === "admin";
@@ -2585,7 +2632,8 @@ function ContractsPage({ user, setPage, setSelectedContract }: { user: SeedUser;
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {ctrs.map((ct) => {
           const cl = clients.find((c) => c.id === ct.clientId);
-          const pct = ct.totalBlocks > 0 ? Math.round((ct.usedBlocks / ct.totalBlocks) * 100) : 0;
+          const usedReal = usedBlocksOf(ct.id, blocks);
+          const pct = ct.totalBlocks > 0 ? Math.round((usedReal / ct.totalBlocks) * 100) : 0;
           return (
             <Card key={ct.id} className="p-5">
               <div className="flex items-start justify-between mb-3">
@@ -2599,7 +2647,7 @@ function ContractsPage({ user, setPage, setSelectedContract }: { user: SeedUser;
                 </div>
               </div>
               <div onClick={() => { setSelectedContract(ct.id); setPage("contract_detail"); }} className="cursor-pointer">
-                <div className="flex items-center justify-between text-sm mb-2"><span className="text-slate-500">{ct.usedBlocks} / {ct.totalBlocks} blocos</span><span className="font-bold text-slate-700">{pct}%</span></div>
+                <div className="flex items-center justify-between text-sm mb-2"><span className="text-slate-500">{usedReal} / {ct.totalBlocks} blocos</span><span className="font-bold text-slate-700">{pct}%</span></div>
                 <ProgressBar value={pct} />
                 <p className="text-xs text-slate-400 mt-3">Início: {fmtDate(ct.startDate)}</p>
               </div>
@@ -2619,14 +2667,15 @@ function ContractDetailPage({ contractId, user, setPage, setSelectedBlock }: { c
   if (!ct) return <EmptyState icon={FileText} title="Contrato não encontrado" />;
   const cl = CLIENTS.find((c) => c.id === ct.clientId);
   const ctBlocks = blocks.filter((b) => b.contractId === ct.id);
+  const usedReal = ctBlocks.length;
   return (
     <div className="space-y-4">
       <button onClick={() => setPage("contracts")} className="flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"><ArrowLeft className="w-4 h-4" /> Voltar</button>
       <div><h1 className="text-xl font-bold text-slate-800">{ct.title}</h1><p className="text-sm text-slate-500">{cl?.name} · Início: {fmtDate(ct.startDate)}</p></div>
       <div className="grid grid-cols-3 gap-4">
         <MetricCard icon={FileText} label="Contratados" value={ct.totalBlocks} />
-        <MetricCard icon={Package} label="Utilizados" value={ct.usedBlocks} />
-        <MetricCard icon={Box} label="Disponíveis" value={ct.totalBlocks - ct.usedBlocks} color="text-emerald-600" />
+        <MetricCard icon={Package} label="Utilizados" value={usedReal} />
+        <MetricCard icon={Box} label="Disponíveis" value={ct.totalBlocks - usedReal} color="text-emerald-600" />
       </div>
       <Card>
         <div className="p-4 border-b border-slate-100"><h3 className="text-sm font-semibold text-slate-700">Blocos ({ctBlocks.length})</h3></div>
@@ -2700,7 +2749,7 @@ function ClientsPage() {
         {clients.map((cl) => {
           const ctrs = contracts.filter((c) => c.clientId === cl.id);
           const total = ctrs.reduce((s, c) => s + c.totalBlocks, 0);
-          const used = ctrs.reduce((s, c) => s + c.usedBlocks, 0);
+          const used = ctrs.reduce((s, c) => s + usedBlocksOf(c.id, blocks), 0);
           const cnt = blocks.filter((b) => b.clientId === cl.id).length;
           return (
             <Card key={cl.id} className={`p-5 ${!cl.active ? "opacity-50" : ""}`}>
@@ -2733,39 +2782,94 @@ function ClientsPage() {
 }
 
 function ApprovalsPage({ user }: { user: SeedUser }) {
+  // Sem tabela de aprovações: pendente = bloco parado esperando o cliente;
+  // resolvida = registro de aprovação/revisão no log de atividades. É o mesmo
+  // critério do dashboard e do badge da sidebar — os três sempre batem.
   const isClient = user.role === "client";
   const [tab, setTab] = useState("pending");
-  const { blocks } = useContext(AppContext);
-  const relevant = isClient ? APPROVALS.filter((a) => blocks.find((b) => b.id === a.blockId)?.clientId === user.clientId) : APPROVALS;
-  const pending = relevant.filter((a) => a.status === "pending");
-  const resolved = relevant.filter((a) => a.status !== "pending");
-  const list = tab === "pending" ? pending : resolved;
+  const { blocks, setBlocks, activities, setActivities, clients } = useContext(AppContext);
+  const scope = isClient ? blocks.filter((b) => b.clientId === user.clientId) : blocks;
+  const pending = scope.filter(isAwaitingClient).sort((a, b) => (b.created || "").localeCompare(a.created || ""));
+  const scopeIds = new Set(scope.map((b) => b.id));
+  const resolved = activities
+    .filter((a) => (a.type === "approval_approved" || a.type === "approval_rejected") && scopeIds.has(a.blockId))
+    .sort((a, b) => b.at.localeCompare(a.at));
+
+  const decide = (block: SeedBlock, action: "approve" | "reject") => {
+    const rule = APPROVAL_NEXT[block.status];
+    if (!rule) return;
+    const revisions = block.clientRevisions ?? 0;
+    if (action === "reject" && revisions >= MAX_CLIENT_REVISIONS) return;
+    const next = action === "approve" ? rule.approve : rule.reject;
+    setBlocks(blocks.map((b) => b.id === block.id
+      ? { ...b, status: next, ...(action === "reject" ? { clientRevisions: revisions + 1 } : {}) }
+      : b));
+    setActivities([...activities, {
+      id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
+      type: action === "approve" ? "approval_approved" : "approval_rejected",
+      desc: action === "approve"
+        ? `${rule.label} aprovada pelo cliente → ${STATUS_LABELS[next]}`
+        : `Revisão ${revisions + 1}/${MAX_CLIENT_REVISIONS} solicitada pelo cliente (${rule.label}) → ${STATUS_LABELS[next]}`,
+      at: new Date().toISOString(),
+    }]);
+  };
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold text-slate-800">Aprovações</h1>
       <div className="flex gap-2"><TabBtn active={tab === "pending"} label="Pendentes" count={pending.length} onClick={() => setTab("pending")} /><TabBtn active={tab === "resolved"} label="Resolvidas" count={resolved.length} onClick={() => setTab("resolved")} /></div>
-      <div className="space-y-3">
-        {list.length === 0 ? <Card className="p-8"><EmptyState icon={CheckCircle} title={tab === "pending" ? "Nenhuma aprovação pendente" : "Nenhuma resolvida"} /></Card> : list.map((ap) => {
-          const block = blocks.find((b) => b.id === ap.blockId);
-          return (
-            <Card key={ap.id} className={`p-5 border-l-4 ${ap.status === "pending" ? "border-l-amber-400" : ap.status === "approved" ? "border-l-green-400" : "border-l-red-400"}`}>
-              <div className="flex items-start justify-between">
-                <div><p className="text-sm font-semibold text-slate-800">{block?.title || "—"}</p><p className="text-xs text-slate-400 mt-0.5">{ap.type === "material_validation" ? "Validação de Material" : "Validação Final"} · {block?.sku}</p></div>
-                <Badge className={ap.status === "pending" ? "bg-amber-100 text-amber-700 border-amber-200" : ap.status === "approved" ? "bg-green-100 text-green-700 border-green-200" : "bg-red-100 text-red-700 border-red-200"}>{ap.status === "pending" ? "Pendente" : ap.status === "approved" ? "Aprovado" : "Rejeitado"}</Badge>
-              </div>
-              {ap.comment && <p className="text-sm text-slate-600 mt-2 italic bg-slate-50 p-2 rounded">&ldquo;{ap.comment}&rdquo;</p>}
-              <p className="text-xs text-slate-400 mt-2">Solicitado por {getUserName(ap.by)} em {fmtDate(ap.at)}</p>
-              {ap.status === "pending" && isClient && (
-                <div className="flex gap-2 mt-3">
-                  <button className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700"><ThumbsUp className="w-3.5 h-3.5" /> Aprovar</button>
-                  <button className="flex items-center gap-1 px-4 py-2 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50"><ThumbsDown className="w-3.5 h-3.5" /> Rejeitar</button>
+
+      {tab === "pending" && (
+        <div className="space-y-3">
+          {pending.length === 0 ? <Card className="p-8"><EmptyState icon={CheckCircle} title="Nenhuma aprovação pendente" desc="Quando um bloco entrar em validação de material ou validação final, ele aparece aqui." /></Card> : pending.map((block) => {
+            const rule = APPROVAL_NEXT[block.status]!;
+            const revisions = block.clientRevisions ?? 0;
+            const limitReached = revisions >= MAX_CLIENT_REVISIONS;
+            const client = clients.find((c) => c.id === block.clientId);
+            return (
+              <Card key={block.id} className="p-5 border-l-4 border-l-amber-400">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">{block.title}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{rule.label} · {block.sku}{!isClient && client ? ` · ${client.name}` : ""}</p>
+                  </div>
+                  <Badge className="bg-amber-100 text-amber-700 border-amber-200">Pendente</Badge>
                 </div>
-              )}
-            </Card>
-          );
-        })}
-      </div>
+                <p className="text-xs text-slate-400 mt-2">Aguardando desde a última mudança de status{revisions > 0 ? ` · ${revisions} revisão${revisions > 1 ? "ões" : ""} já solicitada${revisions > 1 ? "s" : ""}` : ""}</p>
+                {isClient ? (
+                  <div className="space-y-2 mt-3">
+                    <div className="flex gap-2">
+                      <button onClick={() => decide(block, "approve")} className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700"><ThumbsUp className="w-3.5 h-3.5" /> Aprovar</button>
+                      <button onClick={() => decide(block, "reject")} disabled={limitReached} className="flex items-center gap-1 px-4 py-2 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"><ThumbsDown className="w-3.5 h-3.5" /> Solicitar revisão {!limitReached ? `(${MAX_CLIENT_REVISIONS - revisions} restantes)` : ""}</button>
+                    </div>
+                    {limitReached && <p className="text-xs text-red-600 font-medium flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Revisões gratuitas esgotadas — contate info@archtechtour.com para solicitar revisão adicional.</p>}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-3">O cliente decide aqui ou no detalhe do bloco. Para registrar uma aprovação recebida por fora, mude o status no detalhe do bloco.</p>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === "resolved" && (
+        <div className="space-y-3">
+          {resolved.length === 0 ? <Card className="p-8"><EmptyState icon={CheckCircle} title="Nenhuma resolvida" desc="Aprovações e pedidos de revisão feitos pelo cliente ficam registrados aqui." /></Card> : resolved.map((act) => {
+            const block = blocks.find((b) => b.id === act.blockId);
+            const approved = act.type === "approval_approved";
+            return (
+              <Card key={act.id} className={`p-5 border-l-4 ${approved ? "border-l-green-400" : "border-l-red-400"}`}>
+                <div className="flex items-start justify-between gap-3">
+                  <div><p className="text-sm font-semibold text-slate-800">{block?.title || "—"}</p><p className="text-xs text-slate-400 mt-0.5">{act.desc}{block?.sku ? ` · ${block.sku}` : ""}</p></div>
+                  <Badge className={approved ? "bg-green-100 text-green-700 border-green-200" : "bg-red-100 text-red-700 border-red-200"}>{approved ? "Aprovado" : "Revisão"}</Badge>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">{getUserName(act.userId)} em {fmtDate(act.at)}</p>
+              </Card>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -4973,6 +5077,11 @@ export default function Portal() {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState("");
   const [selectedContract, setSelectedContract] = useState("");
+  // Filtro de status pré-aplicado ao abrir "Blocos" a partir de um card do dashboard.
+  const [blocksPreset, setBlocksPreset] = useState<string>("all");
+  const openBlocks = (status: BlockStatus | "all") => { setBlocksPreset(status); setPage("blocks"); };
+  useEffect(() => { if (page !== "blocks" && blocksPreset !== "all") setBlocksPreset("all"); }, [page, blocksPreset]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
   const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
@@ -4984,42 +5093,45 @@ export default function Portal() {
   const [hydrated, setHydrated] = useState(false);
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
+  //
+  // ⚠️ Regra de segurança: só semeia uma tabela quando o GET respondeu OK com
+  // lista VAZIA. Antes, qualquer erro de rede/IAM (resposta {error} sem items)
+  // caía no "else" e fazia POST do seed — que é replaceAll — por cima da tabela
+  // de produção. Com erro, não escrevemos nada e avisamos na tela.
   useEffect(() => {
+    const load = async (path: string): Promise<unknown[]> => {
+      const r = await fetch(path);
+      if (!r.ok) throw new Error(`${path} → HTTP ${r.status}`);
+      const j = await r.json();
+      if (!Array.isArray(j.items)) throw new Error(`${path} → resposta sem lista`);
+      return j.items;
+    };
+    const seedIfEmpty = async (path: string, items: unknown[], seed: unknown[]) => {
+      if (items.length === 0) await fetch(path, { method: "POST", body: JSON.stringify(seed) });
+    };
     (async () => {
       try {
-        const [bRes, tRes, aRes, cRes, ctrRes, pubRes, uRes] = await Promise.all([
-          fetch("/api/state/blocks").then((r) => r.json()),
-          fetch("/api/state/tickets").then((r) => r.json()),
-          fetch("/api/state/activities").then((r) => r.json()),
-          fetch("/api/state/clients").then((r) => r.json()),
-          fetch("/api/state/contracts").then((r) => r.json()),
-          fetch("/api/state/publications").then((r) => r.json()),
-          fetch("/api/state/users").then((r) => r.json()),
+        const [b, t, a, c, ctr, pub, u] = await Promise.all([
+          load("/api/state/blocks"), load("/api/state/tickets"), load("/api/state/activities"),
+          load("/api/state/clients"), load("/api/state/contracts"), load("/api/state/publications"),
+          load("/api/state/users"),
         ]);
 
-        // Se DB tem dados → usa. Senão → seed inicial.
-        if (bRes.items?.length) setBlocks(bRes.items);
-        else { await fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(INITIAL_BLOCKS) }); }
+        if (b.length) setBlocks(b as SeedBlock[]); else await seedIfEmpty("/api/state/blocks", b, INITIAL_BLOCKS);
+        if (t.length) { setTickets(t as ProductionTicket[]); TICKETS = t as ProductionTicket[]; } else await seedIfEmpty("/api/state/tickets", t, TICKETS);
+        if (a.length) setActivities(a as SeedActivity[]); else await seedIfEmpty("/api/state/activities", a, ACTIVITIES);
+        if (c.length) { setClients(c as SeedClient[]); CLIENTS = c as SeedClient[]; } else await seedIfEmpty("/api/state/clients", c, CLIENTS);
+        if (ctr.length) { setContracts(ctr as SeedContract[]); CONTRACTS = ctr as SeedContract[]; } else await seedIfEmpty("/api/state/contracts", ctr, CONTRACTS);
+        if (pub.length) setPublications(pub as SeedPub[]); else await seedIfEmpty("/api/state/publications", pub, PUBLICATIONS);
+        if (u.length) { setUsers(u as SeedUser[]); USERS.length = 0; USERS.push(...(u as SeedUser[])); } else await seedIfEmpty("/api/state/users", u, USERS);
 
-        if (tRes.items?.length) { setTickets(tRes.items); TICKETS = tRes.items; }
-        else { await fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(TICKETS) }); }
-
-        if (aRes.items?.length) setActivities(aRes.items);
-        else { await fetch("/api/state/activities", { method: "POST", body: JSON.stringify(ACTIVITIES) }); }
-
-        if (cRes.items?.length) { setClients(cRes.items); CLIENTS = cRes.items; }
-        else { await fetch("/api/state/clients", { method: "POST", body: JSON.stringify(CLIENTS) }); }
-
-        if (ctrRes.items?.length) { setContracts(ctrRes.items); CONTRACTS = ctrRes.items; }
-        else { await fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(CONTRACTS) }); }
-
-        if (pubRes.items?.length) setPublications(pubRes.items);
-        else { await fetch("/api/state/publications", { method: "POST", body: JSON.stringify(PUBLICATIONS) }); }
-
-        if (uRes.items?.length) { setUsers(uRes.items); USERS.length = 0; USERS.push(...uRes.items); }
-        else { await fetch("/api/state/users", { method: "POST", body: JSON.stringify(USERS) }); }
-      } catch (e) { console.error("Failed to load state:", e); }
-      setHydrated(true);
+        setHydrated(true);
+      } catch (e) {
+        console.error("Failed to load state:", e);
+        // hydrated fica false de propósito: os efeitos de persistência não rodam,
+        // então nada do que o usuário fizer sobrescreve o banco com dado de seed.
+        setLoadError((e as Error).message);
+      }
     })();
   }, []);
 
@@ -5046,7 +5158,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -5069,9 +5181,9 @@ export default function Portal() {
       );
     }
     switch (page) {
-      case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} />;
+      case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} openBlocks={openBlocks} />;
       case "onboarding": return <OnboardingWizardPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
-      case "blocks": return <BlocksListPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
+      case "blocks": return <BlocksListPage key={blocksPreset} user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} initialStatus={blocksPreset} />;
       case "block_detail": return <BlockDetailPage blockId={selectedBlock} user={currentUser} setPage={setPage} />;
       case "contracts": return <ContractsPage user={currentUser} setPage={setPage} setSelectedContract={setSelectedContract} />;
       case "contract_detail": return <ContractDetailPage contractId={selectedContract} user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
@@ -5089,12 +5201,12 @@ export default function Portal() {
       case "agent_yoda_kanban": return <YodaKanbanPage setPage={setPage} />;
       case "agent_harvey_closer": return <HarveyCloserPage setPage={setPage} />;
       case "agent_argus_watchtower": return <ArgusWatchtowerPage setPage={setPage} />;
-      default: return <InternalDashboard setPage={setPage} />;
+      default: return <InternalDashboard setPage={setPage} openBlocks={openBlocks} />;
     }
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, users, setUsers }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
@@ -5112,6 +5224,15 @@ export default function Portal() {
               <PortalHeaderActions currentUser={currentUser} setCurrentUser={setCurrentUser} setPage={setPage} />
             </div>
           </header>
+          {loadError && (
+            <div className="mx-auto w-full max-w-[1400px] px-6 pt-4 lg:px-8">
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+                <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                <span className="flex-1"><b>Não foi possível carregar os dados do banco</b> — os números na tela são de exemplo e <b>nada que você alterar será salvo</b>. Recarregue a página; se persistir, avise a equipe. Detalhe: {loadError}</span>
+                <button onClick={() => window.location.reload()} className="rounded-xl bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700">Recarregar</button>
+              </div>
+            </div>
+          )}
           <main className="mx-auto w-full max-w-[1400px] px-6 py-8 lg:px-8">{renderPage()}</main>
         </div>
       </div>
