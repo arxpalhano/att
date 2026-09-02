@@ -24,9 +24,9 @@ type ServiceType = "standard" | "plus" | "ultra";
 type Priority = "low" | "normal" | "high" | "urgent";
 type BlockStatus =
   | "draft" | "awaiting_client_files" | "client_files_under_review"
-  | "ready_to_start" | "in_modeling" | "awaiting_client_material_validation"
+  | "ready_to_start" | "in_modeling" | "in_texturing" | "awaiting_client_material_validation"
   | "approved_for_programming" | "in_programming" | "internal_review"
-  | "awaiting_client_final_validation" | "approved" | "published"
+  | "awaiting_client_final_validation" | "approved" | "bim_conversion" | "published"
   | "blocked" | "on_hold" | "archived";
 type AssetCategory = "cad" | "finishing" | "photos" | "videos" | "technical_drawing" | "3d_block" | "extra_reference";
 type TicketStatus = "new" | "in_production" | "internal_review" | "delivered";
@@ -70,6 +70,15 @@ export interface SeedBlock {
   svc: ServiceType; status: BlockStatus; pri: Priority;
   owner?: string; backup?: string; created: string; published?: string;
   clientRevisions?: number; // número de revisões solicitadas pelo cliente
+  /** Arquivos BIM já entregues (espelho dos checkboxes SKP/RVT/GSM do Notion). */
+  bim?: { skp: boolean; rvt: boolean; gsm: boolean };
+  /** Modelador responsável (texto livre — no Notion era "pessoa"). */
+  modeler?: string;
+  /** Rastreabilidade da importação do Notion (Banco de Produtos). */
+  notionUrl?: string;
+  notionCode?: string;
+  notionTech?: string;
+  importedAt?: string;
 }
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
@@ -89,10 +98,10 @@ export interface SeedPub {
 const STATUS_LABELS: Record<BlockStatus, string> = {
   draft: "Rascunho", awaiting_client_files: "Aguardando Arquivos",
   client_files_under_review: "Arquivos em Revisão", ready_to_start: "Pronto p/ Iniciar",
-  in_modeling: "Em Modelagem", awaiting_client_material_validation: "Validação Material",
+  in_modeling: "Em Modelagem", in_texturing: "Em Texturização", awaiting_client_material_validation: "Validação Material",
   approved_for_programming: "Aprovado p/ Programação", in_programming: "Em Programação",
   internal_review: "Revisão Interna", awaiting_client_final_validation: "Validação Final",
-  approved: "Aprovado", published: "Publicado", blocked: "Bloqueado",
+  approved: "Aprovado", bim_conversion: "Conversão BIM", published: "Publicado", blocked: "Bloqueado",
   on_hold: "Em Espera", archived: "Arquivado",
 };
 
@@ -102,12 +111,14 @@ const STATUS_COLORS: Record<BlockStatus, string> = {
   client_files_under_review: "border-sky-200/80 bg-sky-50 text-sky-700",
   ready_to_start: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
   in_modeling: "border-violet-200/80 bg-violet-50 text-violet-700",
+  in_texturing: "border-pink-200/80 bg-pink-50 text-pink-700",
   awaiting_client_material_validation: "border-orange-200/80 bg-orange-50 text-orange-700",
   approved_for_programming: "border-cyan-200/80 bg-cyan-50 text-cyan-700",
   in_programming: "border-indigo-200/80 bg-indigo-50 text-indigo-700",
   internal_review: "border-fuchsia-200/80 bg-fuchsia-50 text-fuchsia-700",
   awaiting_client_final_validation: "border-amber-200/80 bg-amber-50 text-amber-700",
   approved: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+  bim_conversion: "border-teal-200/80 bg-teal-50 text-teal-700",
   published: "border-emerald-300/80 bg-emerald-500/10 text-emerald-700",
   blocked: "border-rose-200/80 bg-rose-50 text-rose-700",
   on_hold: "border-slate-200/80 bg-slate-100/70 text-slate-500",
@@ -148,16 +159,18 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
   awaiting_client_files: ["client_files_under_review", "blocked", "on_hold", "archived"],
   client_files_under_review: ["ready_to_start", "awaiting_client_files", "blocked", "on_hold"],
   ready_to_start: ["in_modeling", "blocked", "on_hold"],
-  in_modeling: ["awaiting_client_material_validation", "blocked", "on_hold"],
-  awaiting_client_material_validation: ["approved_for_programming", "in_modeling", "blocked", "on_hold"],
+  in_modeling: ["in_texturing", "awaiting_client_material_validation", "blocked", "on_hold"],
+  in_texturing: ["awaiting_client_material_validation", "in_modeling", "blocked", "on_hold"],
+  awaiting_client_material_validation: ["approved_for_programming", "in_texturing", "in_modeling", "blocked", "on_hold"],
   approved_for_programming: ["in_programming", "blocked", "on_hold"],
   in_programming: ["internal_review", "blocked", "on_hold"],
   internal_review: ["awaiting_client_final_validation", "in_programming", "blocked", "on_hold"],
   awaiting_client_final_validation: ["approved", "internal_review", "blocked", "on_hold"],
-  approved: ["published"],
-  published: ["archived"],
-  blocked: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_programming", "archived"],
-  on_hold: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_programming", "archived"],
+  approved: ["bim_conversion", "published"],
+  bim_conversion: ["published", "approved"],
+  published: ["bim_conversion", "archived"],
+  blocked: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_texturing", "in_programming", "archived"],
+  on_hold: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_texturing", "in_programming", "archived"],
   archived: [],
 };
 
@@ -965,17 +978,19 @@ function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => vo
     { s: "client_files_under_review", icon: Search, color: "text-sky-500" },
     { s: "ready_to_start", icon: Play, color: "text-emerald-500" },
     { s: "in_modeling", icon: Layers, color: "text-violet-500" },
+    { s: "in_texturing", icon: Sparkles, color: "text-pink-500" },
     { s: "awaiting_client_material_validation", icon: UserCheck, color: "text-amber-500" },
     { s: "approved_for_programming", icon: ThumbsUp, color: "text-emerald-500" },
     { s: "in_programming", icon: Zap, color: "text-indigo-500" },
     { s: "internal_review", icon: Eye, color: "text-fuchsia-500" },
     { s: "awaiting_client_final_validation", icon: UserCheck, color: "text-amber-500" },
     { s: "approved", icon: ThumbsUp, color: "text-emerald-600" },
+    { s: "bim_conversion", icon: Box, color: "text-teal-600" },
     { s: "published", icon: Globe, color: "text-emerald-600" },
   ];
   const onPipeline = pipeline.reduce((n, p) => n + (byStatus[p.s] || 0), 0);
   const paused = (byStatus["blocked"] || 0) + (byStatus["on_hold"] || 0) + (byStatus["archived"] || 0);
-  const inProduction = ["ready_to_start", "in_modeling", "approved_for_programming", "in_programming", "internal_review"].reduce((n, st) => n + (byStatus[st] || 0), 0);
+  const inProduction = ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "bim_conversion"].reduce((n, st) => n + (byStatus[st] || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -1185,7 +1200,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
   const used = ctrs.reduce((s, c) => s + usedBlocksOf(c.id, blocks), 0);
   const myBlocks = blocks.filter((b) => b.clientId === cid);
   const awaiting = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).length;
-  const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "approved_for_programming", "in_programming", "internal_review"].includes(b.status)).length;
+  const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "bim_conversion"].includes(b.status)).length;
   const publishedCount = myBlocks.filter((b) => b.status === "published").length;
   const contractUsage = contracted ? Math.round((used / contracted) * 100) : 0;
   const latestContract = [...ctrs].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
@@ -1198,7 +1213,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
     { label: "Contrato assinado", done: true, desc: "Seu contrato está ativo e registrado." },
     { label: "Reunião de onboarding agendada", done: !isNewClient, desc: "A equipe ATT entrará em contato em até 5 dias úteis para agendar." },
     { label: "Envio dos arquivos", done: myBlocks.some((b) => !["awaiting_client_files"].includes(b.status)), desc: "Envie blocos 3D, fotos, logo e desenhos técnicos para info@archtechtour.com." },
-    { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
+    { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "bim_conversion", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
     { label: "Publicação no catálogo digital", done: publishedCount > 0, desc: "Seus blocos estarão disponíveis em 3D e RA na plataforma ArchTechTour." },
   ];
   const onboardingProgress = onboardingSteps.filter((s) => s.done).length;
@@ -2186,13 +2201,16 @@ function AssetRow({ asset }: { asset: SeedAsset }) {
 
 // BLOCK DETAIL
 // ============================================================
+type BlockEditData = { title: string; sku: string; csku: string; modeler?: string; bim?: { skp: boolean; rvt: boolean; gsm: boolean } };
 function BlockEditModal({ initial, onClose, onSave }: {
   initial: SeedBlock; onClose: () => void;
-  onSave: (d: { title: string; sku: string; csku: string }) => void;
+  onSave: (d: BlockEditData) => void;
 }) {
   const [title, setTitle] = useState(initial.title);
   const [sku, setSku] = useState(initial.sku);
   const [csku, setCsku] = useState(initial.csku);
+  const [modeler, setModeler] = useState(initial.modeler ?? "");
+  const [bim, setBim] = useState(initial.bim ?? { skp: false, rvt: false, gsm: false });
   const canSave = title.trim().length > 0;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -2205,10 +2223,20 @@ function BlockEditModal({ initial, onClose, onSave }: {
           <div><label className="text-xs font-medium text-slate-500">Nome do produto *</label><input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Sofá Caraíva" /></div>
           <div><label className="text-xs font-medium text-slate-500">SKU interno</label><input value={sku} onChange={(e) => setSku(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="2024-TIDELLI-01" /></div>
           <div><label className="text-xs font-medium text-slate-500">SKU do cliente</label><input value={csku} onChange={(e) => setCsku(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="Código da marca" /></div>
+          <div><label className="text-xs font-medium text-slate-500">Modelador</label><input value={modeler} onChange={(e) => setModeler(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Quem modelou" /></div>
+          <div>
+            <label className="text-xs font-medium text-slate-500">Arquivos BIM entregues</label>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {([["skp", "SketchUp"], ["rvt", "Revit"], ["gsm", "GSM (ArchiCAD)"]] as const).map(([k, label]) => (
+                <button key={k} type="button" onClick={() => setBim({ ...bim, [k]: !bim[k] })} className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${bim[k] ? "bg-teal-600 text-white border-teal-600" : "bg-white text-slate-500 border-slate-200"}`}>{bim[k] ? "✓ " : ""}{label}</button>
+              ))}
+            </div>
+          </div>
+          {initial.notionUrl && <p className="text-xs text-slate-400">Importado do Notion{initial.notionTech ? ` (etapa lá: ${initial.notionTech})` : ""} · <a href={initial.notionUrl} target="_blank" rel="noreferrer" className="text-cyan-700 hover:underline">abrir no Notion</a></p>}
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
-          <button onClick={() => onSave({ title: title.trim(), sku: sku.trim(), csku: csku.trim() })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+          <button onClick={() => onSave({ title: title.trim(), sku: sku.trim(), csku: csku.trim(), modeler: modeler.trim() || undefined, bim })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
         </div>
       </div>
     </div>
@@ -2250,8 +2278,8 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const [confirmTransition, setConfirmTransition] = useState<BlockStatus | null>(null);
   const [showEdit, setShowEdit] = useState(false);
 
-  const handleEditSave = (d: { title: string; sku: string; csku: string }) => {
-    setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku } : b));
+  const handleEditSave = (d: BlockEditData) => {
+    setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku, modeler: d.modeler, bim: d.bim } : b));
     setActivities([...activities, { id: `al_${Date.now()}`, blockId: block.id, userId: user.id, type: "block_edited", desc: `Dados do bloco editados`, at: new Date().toISOString() }]);
     setShowEdit(false);
   };

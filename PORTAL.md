@@ -87,9 +87,18 @@ Se vazias, faz seed inicial (de `src/data/seed.ts` + `wj-seed.ts` + hardcoded).
 Mudanças persistem com debounce de 800ms. Estado compartilhado entre admin e cliente.
 
 **Status de bloco (`BlockStatus`):** draft, awaiting_client_files, client_files_under_review,
-ready_to_start, in_modeling, awaiting_client_material_validation, approved_for_programming,
-in_programming, internal_review, awaiting_client_final_validation, approved, published,
+ready_to_start, in_modeling, **in_texturing**, awaiting_client_material_validation, approved_for_programming,
+in_programming, internal_review, awaiting_client_final_validation, approved, **bim_conversion**, published,
 blocked, on_hold, archived.
+
+`in_texturing` (Em Texturização) e `bim_conversion` (Conversão BIM) entraram em 2026-09-02 para
+espelhar o "Banco de Produtos" do Notion, onde são estágios com dezenas de produtos cada. Fluxo:
+`in_modeling → in_texturing → validação material`; `approved → bim_conversion → published`
+(e `published ↔ bim_conversion`, porque o BIM pode ser feito depois de publicar).
+
+**Campos de bloco vindos do Notion (todos editáveis no "Editar bloco"):** `bim {skp,rvt,gsm}`
+(arquivos BIM entregues), `modeler` (modelador, texto livre), e rastreabilidade `notionUrl`,
+`notionCode`, `notionTech` (etapa que estava lá), `importedAt`.
 
 ---
 
