@@ -253,6 +253,33 @@ Tipos e helpers em `src/lib/bim.ts`; API `GET/POST /api/state/bim-demands`
 (`bimDemands` no `AppContext`). O dashboard interno tem o card "BIM com terceirizados"
 (produtos em aberto + atrasadas), que abre a tela.
 
+### Acabamentos (desde 2026-09-03)
+
+Espelho do "Cadastro de Produtos - <Marca>" do Notion — onde o cliente diz o que vai em cada
+parte do produto. Tabela `att-finishes` com dois tipos de registro (`src/lib/finishes.ts`):
+**catálogo da marca** (`cat_<clientId>`: grupos como Tecidos / Madeiras / Pintura Metálica,
+cada um com suas opções — cada marca tem os seus) e **cadastro do produto** (`blk_<blockId>`:
+opções marcadas por grupo, variações, categoria, descrição da peça e "onde vai cada material").
+
+| Onde | Quem | O que faz |
+|---|---|---|
+| Aba **Acabamentos** no detalhe do bloco | cliente e equipe | marca as opções de cada grupo (opção nova entra no catálogo ali mesmo), variações, textos; salva explicitamente |
+| Tela **Acabamentos** (sidebar) | cliente vê a própria marca; equipe escolhe a marca | edita o catálogo (grupos/opções, sugestões prontas) e vê a situação por produto (Cadastrado / Pendente) com atalho para o bloco |
+
+Importação inicial em 2026-09-03 a partir das bases do Notion (script e regras em
+`scripts/notion-import/import_finishes.py`); registros importados têm `updatedBy: import-notion`
+e `notionUrl`. Reimportar **não** sobrescreve o que foi editado no portal.
+
+### Notificações (desde 2026-09-03)
+
+O sino do cabeçalho é um menu **derivado do estado** (sem tabela), por perfil:
+equipe — blocos aguardando cliente, bloqueados, tickets com SLA ≤ 3 dias ou sem responsável,
+entregas BIM a aprovar, demandas BIM atrasadas ou com pedido de informação, movimentações
+de outras pessoas nas últimas 24 h; cliente — blocos que esperam ação dele, produtos sem
+acabamentos, publicações dos últimos 14 dias; terceirizado — demandas novas e atrasadas.
+Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`); abrir o menu
+marca tudo como visto; clicar navega direto.
+
 ## 7. Analytics
 
 **Pipeline (própria, SEM Google/GA4):**
