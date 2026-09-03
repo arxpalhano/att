@@ -42,7 +42,7 @@ Backups pré-importação em `s3://archtechtour-assets/backups/` (`att-blocks-pr
 
 # Importação dos "Cadastro de Produtos - <Marca>" (acabamentos) → att-finishes
 
-Executada em **2026-09-03**: 8 catálogos de marca e 270 cadastros de produto
+Executada em **2026-09-03**: 8 catálogos de marca e 269 cadastros de produto (duas linhas do Notion no mesmo bloco viram um registro só)
 (Escal 36, Wentz 38, Tidelli 20, estudiobola 110, Riccó 51, Green House 13, DEXCO 1, Persol 1).
 
 ## Como rodar de novo

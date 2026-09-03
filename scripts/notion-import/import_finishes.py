@@ -171,6 +171,20 @@ def main():
             if r.get("notes"): rec["applicationNotes"] = r["notes"]
             records.append(rec); report[f"produtos: {brand}"] += 1
 
+    # dois produtos do Notion no mesmo bloco (variantes) → um registro só, com a união
+    merged = {}
+    for rec in records:
+        if rec["id"] not in merged: merged[rec["id"]] = rec; continue
+        m = merged[rec["id"]]
+        for g, opts in rec["selections"].items():
+            m["selections"][g] = list(dict.fromkeys(m["selections"].get(g, []) + opts))
+        m["variations"] = list(dict.fromkeys(m["variations"] + rec["variations"]))
+        for f in ("category", "pieceDescription", "applicationNotes"):
+            a, b = m.get(f), rec.get(f)
+            if b and not a: m[f] = b
+            elif a and b and b not in a: m[f] = f"{a}\n\n{b}"
+        report["produtos fundidos (2 linhas do Notion → 1 bloco)"] += 1
+    records = list(merged.values())
     print("== Resultado =="); [print(f"  {v:4d}  {k}") for k, v in sorted(report.items())]
     print("== Pulados =="); [print(f"  {len(v):4d}  {k}  ex.: {v[:3]}") for k, v in skipped.items()]
     json.dump({"catalogs": catalogs, "records": records}, open(os.path.join(HERE, "finishes-plan.json"), "w"), ensure_ascii=False, indent=1)
