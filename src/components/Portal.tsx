@@ -3,6 +3,7 @@ import React, { useState, useMemo, useEffect, createContext, useContext, useCall
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useT } from "@/lib/i18n";
 import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug } from "@/lib/bim";
+import { FinishCatalog, BlockFinishes, FinishRecord, FinishGroup, catalogId, blockFinishesId, slugId, SUGGESTED_GROUPS, emptyCatalog, emptyBlockFinishes, isFilled } from "@/lib/finishes";
 import LanguageSwitcher from "./LanguageSwitcher";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
@@ -468,6 +469,8 @@ interface AppState {
   publications: SeedPub[];
   bimDemands: BimDemand[];
   setBimDemands: React.Dispatch<React.SetStateAction<BimDemand[]>>;
+  finishes: FinishRecord[];
+  setFinishes: React.Dispatch<React.SetStateAction<FinishRecord[]>>;
   setPublications: React.Dispatch<React.SetStateAction<SeedPub[]>>;
   users: SeedUser[];
   setUsers: React.Dispatch<React.SetStateAction<SeedUser[]>>;
@@ -562,6 +565,7 @@ const PAGINAS_CLIENTE: Array<{ id: string; label: string }> = [
   { id: "dashboard", label: "Dashboard" },
   { id: "onboarding", label: "Onboarding" },
   { id: "blocks", label: "Meus Blocos" },
+  { id: "finishes", label: "Acabamentos" },
   { id: "approvals", label: "Aprovações" },
   { id: "publications", label: "Publicações" },
   { id: "analytics", label: "Analytics" },
@@ -860,6 +864,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "blocks", icon: Package, label: "Meus Blocos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
         { id: "publications", icon: Globe, label: "Publicações" },
+        { id: "finishes", icon: Filter, label: "Acabamentos" },
         { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "contracts", icon: FileText, label: "Contratos" },
       ]
@@ -871,6 +876,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "blocks", icon: Package, label: "Todos os Blocos" },
         { id: "approvals", icon: CheckCircle, label: "Aprovações", badge: pendingApprovals },
         { id: "publications", icon: Globe, label: "Publicações" },
+        { id: "finishes", icon: Filter, label: "Acabamentos" },
         { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "clients", icon: Users, label: "Clientes" },
         { id: "contracts", icon: FileText, label: "Contratos" },
@@ -2374,8 +2380,8 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
       </div>
 
       <div className="flex gap-2 flex-wrap">
-        {(["overview", "assets", "approvals", "activity", "publication"] as const).map((t) => (
-          <TabBtn key={t} active={tab === t} label={{ overview: "Visão Geral", assets: "Arquivos", approvals: "Aprovações", activity: "Atividade", publication: "Publicação" }[t]} onClick={() => setTab(t)} />
+        {(["overview", "finishes", "assets", "approvals", "activity", "publication"] as const).map((t) => (
+          <TabBtn key={t} active={tab === t} label={{ overview: "Visão Geral", finishes: "Acabamentos", assets: "Arquivos", approvals: "Aprovações", activity: "Atividade", publication: "Publicação" }[t]} onClick={() => setTab(t)} />
         ))}
       </div>
 
@@ -2573,6 +2579,8 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
           )}
         </Card>
       )}
+
+      {tab === "finishes" && <BlockFinishesTab block={block} user={user} setPage={setPage} />}
 
       {tab === "activity" && (
         <Card className="p-5">
@@ -4250,6 +4258,320 @@ function BimMinhasDemandasPage({ user }: { user: SeedUser }) {
 }
 
 // ============================================================
+// ACABAMENTOS — catálogo por marca + cadastro por produto (espelho do Notion)
+// ============================================================
+function useFinishes() {
+  const { finishes, setFinishes } = useContext(AppContext);
+  const catalogFor = (clientId: string): FinishCatalog =>
+    (finishes.find((f) => f.kind === "catalog" && f.clientId === clientId) as FinishCatalog | undefined) ?? emptyCatalog(clientId);
+  const forBlock = (blockId: string): BlockFinishes | undefined =>
+    finishes.find((f) => f.kind === "block" && (f as BlockFinishes).blockId === blockId) as BlockFinishes | undefined;
+  const upsert = (rec: FinishRecord) =>
+    setFinishes((prev) => (prev.some((f) => f.id === rec.id) ? prev.map((f) => (f.id === rec.id ? rec : f)) : [...prev, rec]));
+  return { finishes, catalogFor, forBlock, upsert };
+}
+
+function Chip({ active, onClick, children, tone = "slate" }: { active: boolean; onClick: () => void; children: ReactNode; tone?: "slate" | "teal" }) {
+  const on = tone === "teal" ? "bg-teal-600 text-white border-teal-600" : "bg-slate-900 text-white border-slate-900";
+  return (
+    <button type="button" onClick={onClick} className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition ${active ? on : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}>
+      {active ? "✓ " : ""}{children}
+    </button>
+  );
+}
+
+/** Aba "Acabamentos" do detalhe do bloco: o cliente diz o que vai em cada parte do produto. */
+function BlockFinishesTab({ block, user, setPage }: { block: SeedBlock; user: SeedUser; setPage: (p: string) => void }) {
+  const { catalogFor, forBlock, upsert } = useFinishes();
+  const catalog = catalogFor(block.clientId);
+  const saved = forBlock(block.id);
+  const [draft, setDraft] = useState<BlockFinishes>(saved ?? emptyBlockFinishes(block.clientId, block.id));
+  const [newVar, setNewVar] = useState("");
+  const [newOpt, setNewOpt] = useState<Record<string, string>>({});
+  useEffect(() => { setDraft(saved ?? emptyBlockFinishes(block.clientId, block.id)); }, [saved?.id, saved?.updatedAt, block.id, block.clientId]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = JSON.stringify({ ...draft, updatedAt: "", updatedBy: "" }) !== JSON.stringify({ ...(saved ?? emptyBlockFinishes(block.clientId, block.id)), updatedAt: "", updatedBy: "" });
+
+  const toggle = (gid: string, oid: string) => {
+    const cur = draft.selections[gid] || [];
+    setDraft({ ...draft, selections: { ...draft.selections, [gid]: cur.includes(oid) ? cur.filter((x) => x !== oid) : [...cur, oid] } });
+  };
+  const addOption = (g: FinishGroup) => {
+    const name = (newOpt[g.id] || "").trim(); if (!name) return;
+    const oid = `${slugId(name)}-${Date.now().toString(36)}`;
+    upsert({ ...catalog, groups: catalog.groups.map((x) => (x.id === g.id ? { ...x, options: [...x.options, { id: oid, name }] } : x)), updatedAt: new Date().toISOString(), updatedBy: user.name });
+    setDraft({ ...draft, selections: { ...draft.selections, [g.id]: [...(draft.selections[g.id] || []), oid] } });
+    setNewOpt({ ...newOpt, [g.id]: "" });
+  };
+  const save = () => upsert({ ...draft, updatedAt: new Date().toISOString(), updatedBy: user.name });
+
+  return (
+    <div className="space-y-4">
+      <Card className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700">O que vai em cada parte do produto</h3>
+            <p className="text-xs text-slate-500 mt-1">Marque, em cada grupo, os acabamentos que este produto aceita. Se faltar uma opção, adicione ali mesmo — ela entra no catálogo da marca.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {isFilled(saved) ? <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Cadastrado</Badge> : <Badge className="bg-amber-50 text-amber-700 border-amber-200">Pendente</Badge>}
+            <button onClick={save} disabled={!dirty} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+          </div>
+        </div>
+        {catalog.groups.length === 0 && (
+          <div className="mt-4 rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+            A marca ainda não tem grupos de acabamento cadastrados (Tecidos, Madeiras, Pinturas…).
+            <button onClick={() => setPage("finishes")} className="ml-2 font-semibold text-cyan-700 hover:underline">Cadastrar catálogo da marca</button>
+          </div>
+        )}
+        <div className="mt-4 space-y-4">
+          {catalog.groups.map((g) => (
+            <div key={g.id}>
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">{g.name} <span className="normal-case tracking-normal font-normal text-slate-400">· {(draft.selections[g.id] || []).length} de {g.options.length}</span></p>
+              <div className="flex flex-wrap gap-1.5 items-center">
+                {g.options.map((o) => <Chip key={o.id} active={(draft.selections[g.id] || []).includes(o.id)} onClick={() => toggle(g.id, o.id)} tone="teal">{o.name}</Chip>)}
+                <input value={newOpt[g.id] || ""} onChange={(e) => setNewOpt({ ...newOpt, [g.id]: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") addOption(g); }} placeholder="+ nova opção" className="px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-xs w-36 focus:outline-none focus:border-teal-400" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Variações do produto</p>
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {draft.variations.map((v) => (
+              <span key={v} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-xs font-medium text-slate-700">{v}<button onClick={() => setDraft({ ...draft, variations: draft.variations.filter((x) => x !== v) })} className="text-slate-400 hover:text-rose-600"><X className="w-3 h-3" /></button></span>
+            ))}
+            <input value={newVar} onChange={(e) => setNewVar(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && newVar.trim()) { setDraft({ ...draft, variations: [...draft.variations, newVar.trim()] }); setNewVar(""); } }} placeholder="Ex: Com braço, Sem braço, Banqueta…" className="px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-xs w-56 focus:outline-none focus:border-teal-400" />
+          </div>
+          <p className="text-xs font-medium text-slate-500 mt-4">Categoria / local de uso</p>
+          <input value={draft.category || ""} onChange={(e) => setDraft({ ...draft, category: e.target.value })} placeholder="Ex: Colaborativo, Assentos, Outdoor…" className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+        </Card>
+        <Card className="p-5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Descrição da peça</p>
+          <textarea value={draft.pieceDescription || ""} onChange={(e) => setDraft({ ...draft, pieceDescription: e.target.value })} rows={4} placeholder="Texto de apresentação do produto, como aparece no site da marca." className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+        </Card>
+      </div>
+      <Card className="p-5">
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Onde vai cada material</p>
+        <textarea value={draft.applicationNotes || ""} onChange={(e) => setDraft({ ...draft, applicationNotes: e.target.value })} rows={4} placeholder='Ex: "Base sempre preto fosco. Parte externa em pintura gofrato, tampo em melamina, interior nos tecidos."' className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
+        {saved?.updatedAt && new Date(saved.updatedAt).getTime() > 0 && <p className="text-xs text-slate-400 mt-2">Última alteração: {new Date(saved.updatedAt).toLocaleString("pt-BR")}{saved.updatedBy ? ` por ${saved.updatedBy}` : ""}{saved.notionUrl ? <> · <a href={saved.notionUrl} target="_blank" rel="noreferrer" className="text-cyan-700 hover:underline">origem no Notion</a></> : null}</p>}
+      </Card>
+      {dirty && <div className="sticky bottom-4 flex justify-end"><button onClick={save} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold shadow-lg hover:bg-slate-800">Salvar acabamentos</button></div>}
+    </div>
+  );
+}
+
+/** Tela "Acabamentos": catálogo da marca (grupos e opções) + situação por produto. */
+function FinishesPage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
+  const { blocks, clients } = useContext(AppContext);
+  const { catalogFor, forBlock, upsert } = useFinishes();
+  const isClient = user.role === "client";
+  const brands = isClient ? clients.filter((c) => c.id === user.clientId) : clients.filter((c) => blocks.some((b) => b.clientId === c.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const [clientId, setClientId] = useState(isClient ? user.clientId || "" : brands[0]?.id || "");
+  const catalog = catalogFor(clientId);
+  const [draft, setDraft] = useState<FinishCatalog>(catalog);
+  const [newGroup, setNewGroup] = useState("");
+  const [newOpt, setNewOpt] = useState<Record<string, string>>({});
+  const [filter, setFilter] = useState<"all" | "pending" | "done">("all");
+  useEffect(() => { setDraft(catalogFor(clientId)); }, [clientId, catalog.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = JSON.stringify({ ...draft, updatedAt: "" }) !== JSON.stringify({ ...catalog, updatedAt: "" });
+
+  const products = blocks.filter((b) => b.clientId === clientId && b.status !== "archived").sort((a, b) => a.title.localeCompare(b.title));
+  const done = products.filter((b) => isFilled(forBlock(b.id)));
+  const listed = products.filter((b) => (filter === "all" ? true : filter === "done" ? isFilled(forBlock(b.id)) : !isFilled(forBlock(b.id))));
+
+  const addGroup = (name: string) => {
+    const n = name.trim(); if (!n || draft.groups.some((g) => g.name.toLowerCase() === n.toLowerCase())) return;
+    setDraft({ ...draft, groups: [...draft.groups, { id: `${slugId(n)}-${Date.now().toString(36)}`, name: n, options: [] }] }); setNewGroup("");
+  };
+  const addOption = (gid: string) => {
+    const n = (newOpt[gid] || "").trim(); if (!n) return;
+    setDraft({ ...draft, groups: draft.groups.map((g) => (g.id === gid ? { ...g, options: [...g.options, { id: `${slugId(n)}-${Date.now().toString(36)}`, name: n }] } : g)) });
+    setNewOpt({ ...newOpt, [gid]: "" });
+  };
+  const save = () => upsert({ ...draft, id: catalogId(clientId), kind: "catalog", clientId, updatedAt: new Date().toISOString(), updatedBy: user.name });
+
+  return (
+    <div className="space-y-6">
+      <SectionHeader
+        eyebrow={isClient ? "Portal do cliente" : "Produção · Acabamentos"}
+        title="Acabamentos"
+        description="O catálogo de acabamentos da marca (tecidos, madeiras, pinturas…) e, produto a produto, o que vai em cada parte. É o que a equipe usa para texturizar e programar o customizador."
+        action={
+          <div className="flex items-center gap-2 flex-wrap">
+            {!isClient && (
+              <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600">
+                {brands.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            )}
+            <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{done.length} de {products.length} produtos cadastrados</Badge>
+          </div>
+        }
+      />
+
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Catálogo da marca</p>
+            <p className="text-sm text-slate-500 mt-1">Grupos e opções disponíveis. Cada produto marca, dentro destes grupos, o que aceita.</p>
+          </div>
+          <div className="flex gap-2">
+            {dirty && <button onClick={() => setDraft(catalog)} className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100">Descartar</button>}
+            <button onClick={save} disabled={!dirty} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar catálogo</button>
+          </div>
+        </div>
+        <div className="mt-4 space-y-3">
+          {draft.groups.map((g) => (
+            <div key={g.id} className="rounded-xl border border-slate-200 p-3">
+              <div className="flex items-center gap-2">
+                <input value={g.name} onChange={(e) => setDraft({ ...draft, groups: draft.groups.map((x) => (x.id === g.id ? { ...x, name: e.target.value } : x)) })} className="flex-1 px-2 py-1 rounded-lg border border-transparent hover:border-slate-200 focus:border-slate-300 text-sm font-semibold text-slate-800 bg-transparent" />
+                <span className="text-xs text-slate-400">{g.options.length} opç{g.options.length === 1 ? "ão" : "ões"}</span>
+                <button onClick={() => { if (confirm(`Remover o grupo "${g.name}"? Os produtos perdem as marcações desse grupo.`)) setDraft({ ...draft, groups: draft.groups.filter((x) => x.id !== g.id) }); }} className="p-1 text-slate-400 hover:text-rose-600"><X className="w-4 h-4" /></button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5 items-center">
+                {g.options.map((o) => (
+                  <span key={o.id} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 text-xs font-medium text-slate-700">{o.name}<button onClick={() => setDraft({ ...draft, groups: draft.groups.map((x) => (x.id === g.id ? { ...x, options: x.options.filter((y) => y.id !== o.id) } : x)) })} className="text-slate-400 hover:text-rose-600"><X className="w-3 h-3" /></button></span>
+                ))}
+                <input value={newOpt[g.id] || ""} onChange={(e) => setNewOpt({ ...newOpt, [g.id]: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") addOption(g.id); }} placeholder="+ opção (Enter)" className="px-2.5 py-1 rounded-lg border border-dashed border-slate-300 text-xs w-40 focus:outline-none focus:border-teal-400" />
+              </div>
+            </div>
+          ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <input value={newGroup} onChange={(e) => setNewGroup(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") addGroup(newGroup); }} placeholder="Novo grupo (Enter)" className="px-3 py-2 rounded-xl border border-slate-200 text-sm w-56" />
+            {SUGGESTED_GROUPS.filter((sg) => !draft.groups.some((g) => g.name.toLowerCase() === sg.toLowerCase())).map((sg) => (
+              <button key={sg} onClick={() => addGroup(sg)} className="text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 text-slate-500 hover:border-teal-400 hover:text-teal-700">+ {sg}</button>
+            ))}
+          </div>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Produtos</p>
+          <div className="flex gap-2">
+            {([["all", "Todos", products.length], ["pending", "Pendentes", products.length - done.length], ["done", "Cadastrados", done.length]] as const).map(([id, label, n]) => (
+              <TabBtn key={id} active={filter === id} label={label} count={n} onClick={() => setFilter(id)} />
+            ))}
+          </div>
+        </div>
+        {listed.length === 0 ? <EmptyState icon={Filter} title="Nenhum produto aqui" /> : (
+          <div className="divide-y divide-slate-100">
+            {listed.map((b) => {
+              const bf = forBlock(b.id); const filled = isFilled(bf);
+              const nSel = bf ? Object.values(bf.selections).reduce((n, v) => n + v.length, 0) : 0;
+              return (
+                <button key={b.id} onClick={() => { setSelectedBlock(b.id); setPage("block_detail"); }} className="flex w-full items-center gap-3 py-2.5 text-left hover:bg-slate-50 rounded-lg px-2">
+                  <Badge className={filled ? "bg-emerald-50 text-emerald-700 border-emerald-200 text-xs" : "bg-amber-50 text-amber-700 border-amber-200 text-xs"}>{filled ? "Cadastrado" : "Pendente"}</Badge>
+                  <div className="min-w-0 flex-1"><p className="text-sm font-medium text-slate-800 truncate">{b.title}</p><p className="text-xs text-slate-400 truncate">{b.sku}{bf?.variations.length ? ` · ${bf.variations.join(", ")}` : ""}</p></div>
+                  <span className="text-xs text-slate-400 whitespace-nowrap">{nSel} opç{nSel === 1 ? "ão" : "ões"}</span>
+                  <StatusBadge status={b.status} />
+                  <ChevronRight className="w-4 h-4 text-slate-300" />
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ============================================================
+// NOTIFICAÇÕES — derivadas do estado, por perfil (sem tabela)
+// ============================================================
+interface Notif { key: string; title: string; desc?: string; tone: "info" | "warn" | "danger" | "ok"; go: () => void }
+
+function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { currentUser: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
+  const { blocks, tickets, activities, publications, bimDemands, finishes } = useContext(AppContext);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const seenKey = `att_notif_seen_${currentUser.id}`;
+  const [seen, setSeen] = useState<string[]>(() => { try { return JSON.parse(localStorage.getItem(seenKey) || "[]"); } catch { return []; } });
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc); return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const goBlock = (id: string) => { setSelectedBlock(id); setPage("block_detail"); };
+  const dayMs = 86400000; const now = Date.now();
+  const items: Notif[] = [];
+  const role = currentUser.role;
+
+  if (role === "freelancer_bim") {
+    const mine = bimDemands.filter((d) => d.freelancerId === currentUser.id && bimIsOpen(d));
+    mine.filter((d) => bimDaysLeft(d) < 0).forEach((d) => items.push({ key: `bim-late:${d.id}:${d.dueAt}`, title: `Atrasada: ${d.title}`, desc: `Prazo era ${fmtDate(d.dueAt)}`, tone: "danger", go: () => setPage("bim_minhas") }));
+    mine.filter((d) => d.status === "not_started").forEach((d) => items.push({ key: `bim-new:${d.id}`, title: `Nova demanda: ${d.title}`, desc: `${d.productCount} produto${d.productCount === 1 ? "" : "s"} · prazo ${fmtDate(d.dueAt)}`, tone: "info", go: () => setPage("bim_minhas") }));
+  } else if (role === "client") {
+    const mine = blocks.filter((b) => b.clientId === currentUser.clientId);
+    mine.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).forEach((b) =>
+      items.push({ key: `await:${b.id}:${b.status}`, title: b.status === "awaiting_client_files" ? `Envie os arquivos: ${b.title}` : `Aguardando sua aprovação: ${b.title}`, desc: STATUS_LABELS[b.status], tone: "warn", go: () => goBlock(b.id) }));
+    const noFin = mine.filter((b) => b.status !== "archived" && !isFilled(finishes.find((f) => f.kind === "block" && (f as BlockFinishes).blockId === b.id) as BlockFinishes | undefined));
+    if (noFin.length) items.push({ key: `fin:${noFin.length}`, title: `${noFin.length} produto${noFin.length === 1 ? "" : "s"} sem acabamentos cadastrados`, desc: "Diga o que vai em cada parte do produto", tone: "info", go: () => setPage("finishes") });
+    publications.filter((p) => { const b = mine.find((x) => x.id === p.blockId); return b?.published && now - new Date(b.published).getTime() < 14 * dayMs; })
+      .forEach((p) => { const b = mine.find((x) => x.id === p.blockId)!; items.push({ key: `pub:${p.id}`, title: `Publicado: ${b.title}`, desc: `No ar desde ${fmtDate(b.published!)}`, tone: "ok", go: () => setPage("publications") }); });
+  } else {
+    const awaiting = blocks.filter(isAwaitingClient);
+    if (awaiting.length) items.push({ key: `approvals:${awaiting.length}`, title: `${awaiting.length} bloco${awaiting.length === 1 ? "" : "s"} aguardando o cliente`, desc: "Validação de material ou final pendente", tone: "warn", go: () => setPage("approvals") });
+    const blocked = blocks.filter((b) => b.status === "blocked");
+    if (blocked.length) items.push({ key: `blocked:${blocked.length}`, title: `${blocked.length} bloco${blocked.length === 1 ? "" : "s"} bloqueado${blocked.length === 1 ? "" : "s"}`, tone: "danger", go: () => setPage("blocks") });
+    const risky = tickets.filter((t) => t.status !== "delivered" && (new Date(t.slaDate).getTime() - now) / dayMs <= 3);
+    if (risky.length) items.push({ key: `sla:${risky.map((t) => t.id).join(",")}`, title: `${risky.length} ticket${risky.length === 1 ? "" : "s"} com SLA em risco`, desc: risky.slice(0, 2).map((t) => t.title).join(" · "), tone: "danger", go: () => setPage("tickets") });
+    const unassigned = tickets.filter((t) => t.status !== "delivered" && !t.assignedTo);
+    if (unassigned.length) items.push({ key: `unassigned:${unassigned.length}`, title: `${unassigned.length} ticket${unassigned.length === 1 ? "" : "s"} sem responsável`, tone: "warn", go: () => setPage("tickets") });
+    const delivered = bimDemands.filter((d) => d.status === "delivered");
+    if (delivered.length) items.push({ key: `bim-deliv:${delivered.map((d) => d.id).join(",")}`, title: `${delivered.length} entrega${delivered.length === 1 ? "" : "s"} BIM aguardando aprovação`, desc: delivered.slice(0, 2).map((d) => d.title).join(" · "), tone: "ok", go: () => setPage("bim") });
+    const late = bimDemands.filter((d) => bimIsOpen(d) && bimDaysLeft(d) < 0);
+    if (late.length) items.push({ key: `bim-late:${late.map((d) => d.id).join(",")}`, title: `${late.length} demanda${late.length === 1 ? "" : "s"} BIM atrasada${late.length === 1 ? "" : "s"}`, tone: "danger", go: () => setPage("bim") });
+    const waiting = bimDemands.filter((d) => d.status === "waiting_info");
+    if (waiting.length) items.push({ key: `bim-wait:${waiting.map((d) => d.id).join(",")}`, title: `Terceirizado pediu informação em ${waiting.length} demanda${waiting.length === 1 ? "" : "s"}`, desc: waiting.slice(0, 2).map((d) => d.title).join(" · "), tone: "warn", go: () => setPage("bim") });
+    [...activities].filter((a) => a.userId !== currentUser.id && now - new Date(a.at).getTime() < dayMs).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 5)
+      .forEach((a) => { const b = blocks.find((x) => x.id === a.blockId); items.push({ key: `act:${a.id}`, title: a.desc, desc: `${getUserName(a.userId)}${b ? ` · ${b.title}` : ""}`, tone: "info", go: () => (b ? goBlock(b.id) : setPage("activity")) }); });
+  }
+
+  const unread = items.filter((i) => !seen.includes(i.key)).length;
+  const openMenu = () => {
+    const next = !open; setOpen(next);
+    if (next) { const all = Array.from(new Set([...seen, ...items.map((i) => i.key)])).slice(-300); setSeen(all); try { localStorage.setItem(seenKey, JSON.stringify(all)); } catch { /* ignore */ } }
+  };
+  const toneCls = { info: "bg-sky-500", warn: "bg-amber-500", danger: "bg-rose-500", ok: "bg-emerald-500" } as const;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button onClick={openMenu} title="Notificações" className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm transition hover:text-slate-700">
+        <Bell className="h-[18px] w-[18px]" />
+        {unread > 0 && <span className="absolute -right-1 -top-1 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-500 text-[10px] font-bold text-white flex items-center justify-center">{unread > 9 ? "9+" : unread}</span>}
+      </button>
+      {open && (
+        <div className="absolute right-0 mt-2 w-[380px] max-w-[92vw] rounded-2xl border border-slate-200 bg-white shadow-xl z-50 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+            <p className="text-sm font-semibold text-slate-800">Notificações</p>
+            <span className="text-xs text-slate-400">{items.length === 0 ? "nada pendente" : `${items.length} item${items.length === 1 ? "" : "s"}`}</span>
+          </div>
+          <div className="max-h-[70vh] overflow-y-auto">
+            {items.length === 0 ? (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">Tudo em dia. Quando algo precisar de você, aparece aqui.</div>
+            ) : items.map((i) => (
+              <button key={i.key} onClick={() => { setOpen(false); i.go(); }} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50 border-b border-slate-50 last:border-0">
+                <span className={`mt-1.5 h-2 w-2 rounded-full flex-shrink-0 ${toneCls[i.tone]}`} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-800 leading-snug">{i.title}</p>
+                  {i.desc && <p className="text-xs text-slate-500 mt-0.5 truncate">{i.desc}</p>}
+                </div>
+                <ChevronRight className="w-4 h-4 text-slate-300 mt-0.5" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================
 // FASE 7 — PUBLICAÇÕES
 // ============================================================
 function PublicationFormModal({ title, onClose, onSave, initial, blocks }: {
@@ -5498,10 +5820,12 @@ function PortalHeaderActions({
   currentUser,
   setCurrentUser,
   setPage,
+  setSelectedBlock,
 }: {
   currentUser: SeedUser;
   setCurrentUser: (u: SeedUser | null) => void;
   setPage: (p: string) => void;
+  setSelectedBlock: (id: string) => void;
 }) {
   const t = useT();
   return (
@@ -5516,10 +5840,7 @@ function PortalHeaderActions({
         </div>
       </div>
       <LanguageSwitcher theme="light" />
-      <button className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/80 text-slate-500 shadow-sm transition hover:text-slate-700">
-        <Bell className="h-[18px] w-[18px]" />
-        <span className="absolute right-3 top-3 h-2 w-2 rounded-full bg-rose-500" />
-      </button>
+      <NotificationsMenu currentUser={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />
       <button
         onClick={() => {
           setCurrentUser(null);
@@ -5569,6 +5890,7 @@ export default function Portal() {
   const [publications, setPublications] = useState<SeedPub[]>(PUBLICATIONS);
   const [users, setUsers] = useState<SeedUser[]>(USERS);
   const [bimDemands, setBimDemands] = useState<BimDemand[]>([]);
+  const [finishes, setFinishes] = useState<FinishRecord[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
@@ -5590,17 +5912,17 @@ export default function Portal() {
     };
     (async () => {
       try {
-        const [b, t, a, c, ctr, pub, u, bd] = await Promise.all([
+        const [b, t, a, c, ctr, pub, u, bd, fin] = await Promise.all([
           load("/api/state/blocks"), load("/api/state/tickets"), load("/api/state/activities"),
           load("/api/state/clients"), load("/api/state/contracts"), load("/api/state/publications"),
-          load("/api/state/users"), load("/api/state/bim-demands"),
+          load("/api/state/users"), load("/api/state/bim-demands"), load("/api/state/finishes"),
         ]);
 
         hydratedSnapshot.current = {
           blocks: JSON.stringify(b.length ? b : INITIAL_BLOCKS), tickets: JSON.stringify(t.length ? t : TICKETS),
           activities: JSON.stringify(a.length ? a : ACTIVITIES), clients: JSON.stringify(c.length ? c : CLIENTS),
           contracts: JSON.stringify(ctr.length ? ctr : CONTRACTS), publications: JSON.stringify(pub.length ? pub : PUBLICATIONS),
-          users: JSON.stringify(u.length ? u : USERS), bimDemands: JSON.stringify(bd),
+          users: JSON.stringify(u.length ? u : USERS), bimDemands: JSON.stringify(bd), finishes: JSON.stringify(fin),
         };
         if (b.length) setBlocks(b as SeedBlock[]); else await seedIfEmpty("/api/state/blocks", b, INITIAL_BLOCKS);
         if (t.length) { setTickets(t as ProductionTicket[]); TICKETS = t as ProductionTicket[]; } else await seedIfEmpty("/api/state/tickets", t, TICKETS);
@@ -5610,6 +5932,7 @@ export default function Portal() {
         if (pub.length) setPublications(pub as SeedPub[]); else await seedIfEmpty("/api/state/publications", pub, PUBLICATIONS);
         if (u.length) { setUsers(u as SeedUser[]); USERS.length = 0; USERS.push(...(u as SeedUser[])); } else await seedIfEmpty("/api/state/users", u, USERS);
         setBimDemands(bd as BimDemand[]); // sem seed: começa vazio mesmo
+        setFinishes(fin as FinishRecord[]);
 
         setHydrated(true);
       } catch (e) {
@@ -5629,6 +5952,7 @@ export default function Portal() {
   useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; if (unchangedSinceHydration("contracts", contracts)) return; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
   useEffect(() => { if (!hydrated || unchangedSinceHydration("publications", publications)) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
   useEffect(() => { if (!hydrated || unchangedSinceHydration("bimDemands", bimDemands)) return; const t = setTimeout(() => { fetch("/api/state/bim-demands", { method: "POST", body: JSON.stringify(bimDemands) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [bimDemands, hydrated]);
+  useEffect(() => { if (!hydrated || unchangedSinceHydration("finishes", finishes)) return; const t = setTimeout(() => { fetch("/api/state/finishes", { method: "POST", body: JSON.stringify(finishes) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [finishes, hydrated]);
   useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); if (unchangedSinceHydration("users", users)) return; const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
 
   // Ao logar, cai na primeira página permitida. Sem isso um cliente restrito a
@@ -5645,7 +5969,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, users, setUsers }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -5683,6 +6007,7 @@ export default function Portal() {
       case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage />;
       case "users": return <UsersPage />;
+      case "finishes": return <FinishesPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "bim": return <BimPage user={currentUser} />;
       case "bim_minhas": return <BimMinhasDemandasPage user={currentUser} />;
       case "agents": return <AgentsPage setPage={setPage} />;
@@ -5696,7 +6021,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, users, setUsers }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
@@ -5711,7 +6036,7 @@ export default function Portal() {
                   <span className="text-slate-500">{todayLabel}</span>
                 </div>
               </div>
-              <PortalHeaderActions currentUser={currentUser} setCurrentUser={setCurrentUser} setPage={setPage} />
+              <PortalHeaderActions currentUser={currentUser} setCurrentUser={setCurrentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />
             </div>
           </header>
           {loadError && (
