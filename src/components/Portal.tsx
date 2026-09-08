@@ -5,6 +5,9 @@ import { useT } from "@/lib/i18n";
 import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug } from "@/lib/bim";
 import { FinishCatalog, BlockFinishes, FinishRecord, FinishGroup, catalogId, blockFinishesId, slugId, SUGGESTED_GROUPS, emptyCatalog, emptyBlockFinishes, isFilled } from "@/lib/finishes";
 import LanguageSwitcher from "./LanguageSwitcher";
+import KnowledgeBase from "./KnowledgeBase";
+import { KbRecord, KbBase, canViewBase, isKbBase } from "@/lib/kb";
+import { KB_SEED } from "@/data/kb-seed";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
@@ -12,7 +15,7 @@ import {
   AlertTriangle, Eye, ChevronDown, ArrowLeft, Copy, Check, Layers,
   Settings, UserCheck, Clipboard, Box, FileUp, ExternalLink, Zap,
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
-  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw
+  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw, BookOpen
 } from "lucide-react";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
@@ -474,6 +477,10 @@ interface AppState {
   setPublications: React.Dispatch<React.SetStateAction<SeedPub[]>>;
   users: SeedUser[];
   setUsers: React.Dispatch<React.SetStateAction<SeedUser[]>>;
+  /** Base de Conhecimento: bases + artigos. Gravação por item (não passa pelo persist com debounce). */
+  kb: KbRecord[];
+  setKb: React.Dispatch<React.SetStateAction<KbRecord[]>>;
+  kbError: string | null;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -596,6 +603,10 @@ function paginasPermitidas(user: SeedUser): string[] | "all" {
  * direto, então esconder o item do menu não impediria de chegar na tela.
  */
 function podeAcessar(user: SeedUser, page: string): boolean {
+  // Base de Conhecimento: a trava é POR BASE (perfis/usuários liberados em cada
+  // uma), dentro da própria tela. Quem não tem base liberada vê a tela vazia e
+  // nem enxerga o item no menu (Sidebar filtra por temBaseLiberada).
+  if (page === "kb") return true;
   const permitidas = paginasPermitidas(user);
   if (permitidas === "all") return true;
   return permitidas.includes(PAGINA_PAI[page] ?? page);
@@ -855,8 +866,12 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   const pendingApprovals = blocks.filter((b) => isAwaitingClient(b) && (!isClient || b.clientId === user.clientId)).length;
 
   const isFreelancer = user.role === "freelancer_bim";
+  const { kb } = useContext(AppContext);
+  // Item "Base de Conhecimento" só aparece para quem tem ao menos uma base liberada (admin sempre).
+  const temBaseLiberada = user.role === "admin" || kb.some((r) => isKbBase(r) && canViewBase(r as KbBase, user));
+  const itemKb: Array<{ id: string; icon: any; label: string; badge?: number }> = temBaseLiberada ? [{ id: "kb", icon: BookOpen, label: "Base de Conhecimento" }] : [];
   const todosItens = isFreelancer
-    ? [{ id: "bim_minhas", icon: Box, label: "Minhas demandas" }]
+    ? [{ id: "bim_minhas", icon: Box, label: "Minhas demandas" }, ...itemKb]
     : isClient
     ? [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -867,6 +882,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "finishes", icon: Filter, label: "Acabamentos" },
         { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "contracts", icon: FileText, label: "Contratos" },
+        ...itemKb,
       ]
     : [
         { id: "dashboard", icon: LayoutDashboard, label: "Dashboard" },
@@ -882,6 +898,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "activity", icon: Activity, label: "Atividade" },
         { id: "users", icon: Settings, label: "Usuários" },
+        ...itemKb,
         ...(user.role === "admin" ? [{ id: "agents", icon: Sparkles, label: "Agentes AI" }] : []),
       ];
 
@@ -5891,6 +5908,8 @@ export default function Portal() {
   const [users, setUsers] = useState<SeedUser[]>(USERS);
   const [bimDemands, setBimDemands] = useState<BimDemand[]>([]);
   const [finishes, setFinishes] = useState<FinishRecord[]>([]);
+  const [kb, setKb] = useState<KbRecord[]>([]);
+  const [kbError, setKbError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
@@ -5944,6 +5963,31 @@ export default function Portal() {
     })();
   }, []);
 
+  // Base de Conhecimento: carga separada e tolerante a falha — se a tabela
+  // att-kb não existir ou faltar permissão IAM, só a KB fica indisponível
+  // (com aviso na tela), sem derrubar a hidratação das outras tabelas.
+  // Seed só quando o GET respondeu OK com lista vazia (mesma regra das outras).
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/state/kb");
+        if (!r.ok) throw new Error(`/api/state/kb → HTTP ${r.status}`);
+        const j = await r.json();
+        if (!Array.isArray(j.items)) throw new Error(j.error || "/api/state/kb → resposta sem lista");
+        if (j.items.length === 0) {
+          const s = await fetch("/api/state/kb", { method: "POST", body: JSON.stringify(KB_SEED) });
+          if (!s.ok) throw new Error(`seed da KB → HTTP ${s.status}`);
+          setKb(KB_SEED);
+        } else {
+          setKb(j.items as KbRecord[]);
+        }
+      } catch (e) {
+        console.error("Failed to load KB:", e);
+        setKbError((e as Error).message);
+      }
+    })();
+  }, []);
+
   // Persistência DynamoDB com debounce 800ms (anti-flood)
   useEffect(() => { if (!hydrated || unchangedSinceHydration("blocks", blocks)) return; const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [blocks, hydrated]);
   useEffect(() => { if (!hydrated) return; TICKETS = tickets; if (unchangedSinceHydration("tickets", tickets)) return; const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [tickets, hydrated]);
@@ -5969,7 +6013,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -6010,6 +6054,7 @@ export default function Portal() {
       case "finishes": return <FinishesPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "bim": return <BimPage user={currentUser} />;
       case "bim_minhas": return <BimMinhasDemandasPage user={currentUser} />;
+      case "kb": return <KnowledgeBase user={currentUser} users={users} records={kb} setRecords={setKb} loadError={kbError} />;
       case "agents": return <AgentsPage setPage={setPage} />;
       case "agent_sherlock_codes": return <SherlockCodesPage setPage={setPage} />;
       case "agent_monk_lighthouse": return <MonkLighthousePage setPage={setPage} />;
@@ -6021,7 +6066,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />

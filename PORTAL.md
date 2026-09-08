@@ -67,7 +67,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 
 ## 5. Modelo de dados (DynamoDB)
 
-10 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
+12 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
 
 | Tabela | Conteúdo |
 |--------|----------|
@@ -81,6 +81,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 | `att-agent-routines` | Rotinas dos agentes automáticos (hoje só `argus-watchtower`: horários, destinatários, sites monitorados) |
 | `att-agent-checks` | Histórico de verificações do Argus Watchtower (TTL 90 dias via `expiresAt`) |
 | `att-bim-demands` | Demandas de blocos BIM para terceirizados (lote por marca: produtos, arquivos ArchiCAD/Revit/SketchUp, prazo, entrega, status) |
+| `att-kb` | Base de Conhecimento: bases (acesso por perfil/usuário) e artigos (Markdown + anexos no S3 `kb/`) |
 
 **Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`.
 Se vazias, faz seed inicial (de `src/data/seed.ts` + `wj-seed.ts` + hardcoded).
@@ -161,7 +162,7 @@ Regra-mãe: **nunca rebaixar bloco `published`** — 43 divergências ficaram re
 **Cliente:** Dashboard, Onboarding, Meus Blocos, Aprovações, Publicações, Analytics, Contratos.
 
 **Admin/interno:** Dashboard, Tickets, Fila de Trabalho, Todos os Blocos, Aprovações,
-Publicações, Analytics, Clientes, Contratos, Atividade, Usuários, **Agentes AI**.
+Publicações, Analytics, Clientes, Contratos, Atividade, Usuários, **Base de Conhecimento**, **Agentes AI**.
 
 **CRUD admin (tudo gerenciável pela UI, persiste em DynamoDB):**
 - Clientes — criar/editar/desativar
@@ -279,6 +280,52 @@ de outras pessoas nas últimas 24 h; cliente — blocos que esperam ação dele,
 acabamentos, publicações dos últimos 14 dias; terceirizado — demandas novas e atrasadas.
 Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`); abrir o menu
 marca tudo como visto; clicar navega direto.
+
+
+### Base de Conhecimento (desde 2026-09-08)
+
+Tela **Base de Conhecimento** (`kb`, sidebar de todos os perfis) — o KB da ArchTechTour, com
+**bases** liberadas por grupo (perfil) e/ou por pessoa: Comercial, Marketing, Tech e TI nascem
+no seed (`src/data/kb-seed.ts`); a **Base de TI** já vem preenchida com o contexto técnico
+(portal, AWS, deploy, dados, analytics, agentes, site WordPress/Cloudflare do repo `att-site`,
+ATT Instant, repositórios e pastas do SharePoint); Tech ganha o pipeline de produção, as 10
+dores da programação, o checklist de 12 itens e a automação BIM (repo `att-agents` + manual
+do OneDrive); Comercial recebe o Blueprint Estratégico; Marketing, a lista de ferramentas
+(**sem senhas** — só "onde está o acesso") e onde vive o brandbook.
+
+**Manuais de processos importados (2026-09-08):** da pasta OneDrive ARX LIMITED → Documentos →
+`3 - Archtechtour` → `11 - Manual de processos` entraram como artigos **com o PDF/DOCX original
+anexado** (objetos já em `kb/`, chaves fixas em `KB_ATTACHMENTS` no seed): manual do modelador
+(Victor/Igor/Ezequiel), manual do desenvolvedor (Verge3D), padrões de texturização, nomenclatura de
+materiais/texturas, limpeza antes da exportação, infraestrutura dos customizadores na AWS (manual +
+runbook + documentação técnica → Base de TI), rotina comercial/administrativa (→ Base Comercial) e o
+setup da Automação BIM; na segunda leva (pasta baixada em Downloads) entraram o front-end do
+customizador (estrutura de código, regra de ouro Verge3D × JS), otimização de malhas/arquivos para
+web e AR, colaboração Blender + 3ds Max, procedimentos para modelagem de móveis, plugin SimLab
+(FBX → SketchUp) e o histórico da integração do tracking (jul/2025 → Base de TI). Os 21 documentos
+da pasta estão importados (20 anexos; o "Padrões (1)" é cópia).
+
+| Conceito | Como funciona |
+|---|---|
+| **Base** | `kind: "base"` — nome, descrição, ícone, cor, `access` (quem vê) e `editors` (quem edita), cada lista com `roles` (grupos) e `userIds`. **Admin sempre vê e edita.** Só admin cria/configura/exclui base (botão "Configurar base") |
+| **Artigo** | `kind: "article"` — `baseId`, `title`, `section` (agrupador), `body` em Markdown (subconjunto: `#`, listas, `**negrito**`, `` `código` ``, blocos ```, links, `>` citação, tabelas `|`), `tags`, `attachments` |
+| **Anexos** | PDF, imagens, planilhas, apresentações, arquivos de design, vídeos, modelos 3D (lista em `KB_ALLOWED_EXTENSIONS`, até 200 MB). Upload direto do browser para `s3://archtechtour-assets/kb/<base>/<artigo>/<ts>_<nome>` via URL pré-assinada (`POST /api/kb/upload`); download por `GET /api/kb/file?key=…` (redireciona para URL assinada de 15 min — o link do portal é estável); `DELETE /api/kb/file?key=…` remove o objeto |
+| **Busca** | Campo no topo procura título, corpo, tags e nomes de anexo em todas as bases que o usuário pode ver |
+| **Menu** | O item só aparece para quem tem ao menos uma base liberada (`temBaseLiberada` na Sidebar). `podeAcessar()` libera `kb` para todo perfil — a trava real é por base, dentro da tela |
+
+**Persistência diferente das outras tabelas:** `att-kb` grava **por item** (`POST /api/state/kb`
+com objeto = upsert; `DELETE /api/state/kb?id=`), não pelo persist com debounce/`replaceAll` —
+o corpo dos artigos é grande e dois editores gravando a tabela inteira se sobrescreveriam.
+A carga é **separada e tolerante a falha**: se `att-kb` não existir ou faltar IAM, só a KB fica
+indisponível (aviso na própria tela) e o resto do portal hidrata normal. Seed só com GET OK e
+lista vazia. Tipos e helpers (`canViewBase`, `canEditBase`) em `src/lib/kb.ts`; tela em
+`src/components/KnowledgeBase.tsx` (auto-contida: recebe `user`, `users`, `records`, `setRecords`).
+
+**Infra necessária** (script `scripts/kb-infra.sh`, profile `att-admin`): tabela `att-kb`
+(criada em 2026-09-08), `att-kb` na policy `DynamoDBPortalAccess` + `s3:DeleteObject` em
+`archtechtour-assets/kb/*`, e a origem `https://app.archtechtour.com` no CORS do bucket
+`archtechtour-assets` (até então só liberava `archtechtour.com` e localhost — o upload de
+arquivos de bloco em produção também dependia disso).
 
 ## 7. Analytics
 
@@ -427,7 +474,7 @@ destinatário novo fora do domínio, verificar antes:
 
 ## 9. Endpoints da API
 
-**Estado (DynamoDB):** `GET/POST /api/state/{blocks,tickets,activities,clients,contracts,publications,users,bim-demands}`
+**Estado (DynamoDB):** `GET/POST /api/state/{blocks,tickets,activities,clients,contracts,publications,users,bim-demands,finishes,kb}`
 (POST aceita item único ou array; array = replaceAll).
 
 **Manutenção (admin, server-side):**
@@ -448,6 +495,8 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 `GET/PUT /api/agents/argus-watchtower/routine` (rotina editável).
 
 **Auth:** `/api/auth/[...nextauth]`. **Outros:** `/api/upload`, `/api/analyze`.
+
+**Base de Conhecimento:** `DELETE /api/state/kb?id=`, `POST /api/kb/upload` (URL pré-assinada), `GET/DELETE /api/kb/file?key=` (anexos em `archtechtour-assets/kb/`).
 
 ---
 

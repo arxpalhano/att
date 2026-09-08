@@ -72,4 +72,5 @@ export const TABLES = {
   AGENT_CHECKS: "att-agent-checks",
   BIM_DEMANDS: "att-bim-demands",
   FINISHES: "att-finishes",
+  KB: "att-kb",
 } as const;

@@ -1,0 +1,52 @@
+/**
+ * Base de Conhecimento — bases e artigos (tabela att-kb).
+ * Mesmo contrato das outras rotas de estado: GET lista tudo; POST com array =
+ * replaceAll (só o seed usa), com objeto = upsert de um item; DELETE ?id= remove.
+ *
+ * A KB grava POR ITEM de propósito: o corpo dos artigos é grande e dois editores
+ * gravando a tabela inteira (replaceAll) se sobrescreveriam.
+ */
+import { NextRequest, NextResponse } from "next/server";
+import { bootstrapAmplifyCredentials } from "@/lib/amplify-credentials";
+import { scanAll, putItem, replaceAll, deleteItem, TABLES } from "@/lib/dynamo";
+
+bootstrapAmplifyCredentials();
+
+export const dynamic = "force-dynamic";
+
+export async function GET() {
+  try {
+    const items = await scanAll(TABLES.KB);
+    return NextResponse.json({ items });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json();
+    if (Array.isArray(body)) {
+      await replaceAll(TABLES.KB, body);
+      return NextResponse.json({ ok: true, count: body.length });
+    }
+    if (!body?.id || (body.kind !== "base" && body.kind !== "article")) {
+      return NextResponse.json({ error: "Registro inválido: precisa de id e kind (base|article)" }, { status: 400 });
+    }
+    await putItem(TABLES.KB, body);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const id = req.nextUrl.searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "id obrigatório" }, { status: 400 });
+    await deleteItem(TABLES.KB, id);
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  }
+}
