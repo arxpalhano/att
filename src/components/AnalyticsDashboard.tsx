@@ -13,7 +13,7 @@ import {
 // TYPES
 // ============================================================
 export interface AnalyticsData {
-  _meta?: { is_sample?: boolean; note?: string };
+  _meta?: { is_demo?: boolean; is_sample?: boolean; note?: string };
   cliente: string;
   alias: string;
   periodo: { inicio: string; fim: string; label: string };

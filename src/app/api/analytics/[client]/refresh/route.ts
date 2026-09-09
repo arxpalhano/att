@@ -14,6 +14,7 @@ bootstrapAmplifyCredentials();
 import { NextRequest, NextResponse } from "next/server";
 import { buildAnalytics, saveAnalytics } from "@/lib/analytics-builder";
 import { runAthenaQuery, sqlEscape } from "@/lib/athena";
+import { buildDemoAnalytics, isDemoAlias } from "@/lib/analytics-demo";
 
 export const maxDuration = 60; // segundos (Vercel hobby limit é 10s — pro/enterprise OK)
 
@@ -44,6 +45,12 @@ export async function POST(
   }
   if (inicio > fim) {
     return NextResponse.json({ error: "inicio > fim" }, { status: 400 });
+  }
+
+  // Demo comercial (alias `archtechtour`): gera dados fictícios pro período
+  // pedido, sem Athena e sem gravar no S3 — o seletor de período funciona igual.
+  if (isDemoAlias(alias)) {
+    return NextResponse.json(buildDemoAnalytics(inicio, fim));
   }
 
   // Busca o nome do cliente pela dim

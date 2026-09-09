@@ -7,6 +7,8 @@ import { runAthenaQuery, sqlEscape } from "./athena";
 const DB = process.env.ATHENA_DB || "customizador_events";
 
 export interface AnalyticsJSON {
+  /** Só o dashboard de demonstração (analytics-demo.ts) preenche isso. */
+  _meta?: { is_demo?: boolean; is_sample?: boolean; note?: string };
   cliente: string;
   alias: string;
   periodo: { inicio: string; fim: string; label: string };

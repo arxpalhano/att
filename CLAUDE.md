@@ -34,6 +34,10 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
 2. **Nunca inventar dados.** Números de analytics vêm SÓ do Athena (reais). Não há
    dados fictícios no dashboard. Planos/preços do portal ainda não estão em prática
    comercial. Fonte de verdade institucional = archtechtour.com.
+   Única exceção: o cliente **"ArchTechTour"** (alias `archtechtour`) no seletor de
+   analytics é um dashboard de **demonstração** com números fictícios, usado em
+   vídeos comerciais — `src/lib/analytics-demo.ts`, isolado dos clientes reais
+   (PORTAL.md §7).
 3. **Env vars do Amplify SSR** precisam estar em `next.config.js` (`env: {...}`) —
    o Amplify SSR Lambda NÃO injeta env vars em runtime; só o que estiver ali chega.
 

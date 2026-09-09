@@ -7,6 +7,10 @@
  *
  * Em produção (Amplify): IAM Role injeta credenciais → SDK resolve sozinho.
  * Em dev local: usa AWS_ACCESS_KEY_ID/SECRET do .env.local.
+ *
+ * Exceção única: alias `archtechtour` = dashboard de DEMONSTRAÇÃO (dados
+ * fictícios gerados em src/lib/analytics-demo.ts, sem Athena/S3). Serve
+ * para vídeos comerciais; nunca se mistura com clientes reais.
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +21,7 @@ bootstrapAmplifyCredentials();
 import { NextRequest, NextResponse } from "next/server";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getS3 } from "@/lib/aws-clients";
+import { buildDemoAnalytics, demoDefaultRange, isDemoAlias } from "@/lib/analytics-demo";
 
 const ANALYTICS_BUCKET = process.env.ANALYTICS_S3_BUCKET || "archtechtour-assets";
 
@@ -25,6 +30,14 @@ export async function GET(
   { params }: { params: { client: string } }
 ) {
   const alias = params.client.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  // Demo comercial: nunca consulta S3/Athena.
+  if (isDemoAlias(alias)) {
+    const { inicio, fim } = demoDefaultRange();
+    return NextResponse.json(buildDemoAnalytics(inicio, fim), {
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
 
   // ÚNICA fonte: S3 analytics-cache (gerado pelo refresh → Athena → S3).
   // SEM fallback local: dados precisam ser 100% reais do Athena.

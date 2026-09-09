@@ -23,6 +23,7 @@ import {
   S3Client,
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
+import { DEMO_ALIAS, DEMO_CLIENTE } from "@/lib/analytics-demo";
 
 export const maxDuration = 30;
 
@@ -112,7 +113,18 @@ export async function GET(request: NextRequest) {
         || (c.has_data === atual.has_data && c.alias.length < atual.alias.length);
       if (melhor) canonico.set(c.cliente, c);
     }
-    return NextResponse.json({ clients: Array.from(canonico.values()) });
+    // Dashboard de demonstração (dados fictícios, ver src/lib/analytics-demo.ts):
+    // entra só no seletor do dashboard — NÃO no modo ?todos=1, que espelha a
+    // tabela real do Athena. Vai por último pra não confundir com cliente real.
+    const lista = Array.from(canonico.values()).filter((c) => c.alias !== DEMO_ALIAS);
+    lista.push({
+      alias: DEMO_ALIAS,
+      cliente: DEMO_CLIENTE,
+      has_data: true,
+      last_updated: new Date().toISOString(),
+      periodo: null,
+    });
+    return NextResponse.json({ clients: lista });
   } catch (err) {
     const e = err as Error;
     // Debug: chamar listener Amplify direto

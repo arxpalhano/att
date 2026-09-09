@@ -394,6 +394,26 @@ Só some do gráfico depois de rodar o refresh do cliente (o dashboard lê o JSO
 **Insights AI** (`/api/analytics/[client]/insights`): botão no dashboard que gera
 interpretação amigável dos números para o cliente (Claude Haiku).
 
+**Dashboard de demonstração — cliente "ArchTechTour" (desde 2026-09-09):**
+única exceção à regra "nunca inventar dados". Existe para gravar vídeos e
+apresentações comerciais mostrando a ferramenta sem expor números de clientes
+reais. Como funciona:
+- Alias fixo `archtechtour` (`src/lib/analytics-demo.ts`). Os números são
+  fictícios, gerados de forma **determinística a partir do período** (mesmo
+  período → mesmos números; o seletor de período e o botão "Atualizar" funcionam
+  normalmente, só que sem Athena). Sessões diárias com padrão útil/fim de semana e
+  tendência de alta; 8 produtos fictícios da "marca" ArchTechTour; origens,
+  cidades e eventos com os mesmos rótulos reais (`botao_ar`, `sketchup`, …).
+- As três rotas interceptam o alias ANTES de qualquer query: `GET /api/analytics/
+  archtechtour` (últimos 30 dias), `POST .../refresh` (período pedido, **não grava
+  no S3**) e `GET /api/analytics/clients` (entra por último no seletor do admin;
+  **não** aparece em `?todos=1`, que espelha a tabela real do Athena).
+- Isolamento: o alias não existe na `dim_client_alias`, então `refresh-all`,
+  `analytics-compute` e o Harvey nunca o enxergam. Usuário `client` nunca cai nele
+  (o alias dele é resolvido pelo nome no dim). O JSON leva `_meta.is_demo = true`;
+  o dashboard não mostra aviso de propósito (o vídeo precisa ficar limpo).
+- Para tirar do ar: remover o `push` do demo em `/api/analytics/clients`.
+
 **`dim_client_alias`** (Athena, S3 `explorar.archtechtour.com/dim/dim_client_alias/`):
 mapeia alias→nome do cliente. Para adicionar cliente novo ao analytics, incluir
 linha aqui (CSV com header, `skip.header.line.count=1`). ⚠️ Cada arquivo no prefixo
