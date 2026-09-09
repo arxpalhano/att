@@ -54,6 +54,14 @@ export interface KbBase {
   access: KbAccessList;
   /** Quem cria/edita artigos e anexos (admin sempre edita). */
   editors: KbAccessList;
+  /**
+   * Senha da base (opcional). No banco fica só `passwordHash` (scrypt + salt);
+   * a API de estado nunca devolve o hash — devolve `locked: true`. Para definir
+   * ou trocar, o admin manda `password` no POST; `clearPassword: true` remove.
+   * Quem tem acesso digita a senha uma vez por sessão (`POST /api/kb/unlock`).
+   */
+  locked?: boolean;
+  passwordHash?: string;
   createdAt: string;
   updatedAt: string;
   updatedBy: string;

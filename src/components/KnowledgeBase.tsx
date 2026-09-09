@@ -80,6 +80,17 @@ async function apiUpload(file: File, baseId: string, articleId: string, onProgre
   onProgress(100);
   return { key };
 }
+async function apiUnlock(baseId: string, password: string): Promise<boolean> {
+  const r = await fetch("/api/kb/unlock", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ baseId, password }) });
+  if (r.status === 401) return false;
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+  return true;
+}
+/** Bases destravadas nesta sessão do navegador (a senha não é guardada). */
+const UNLOCK_KEY = "att_kb_unlocked";
+const readUnlocked = (): Set<string> => { try { return new Set(JSON.parse(sessionStorage.getItem(UNLOCK_KEY) || "[]")); } catch { return new Set(); } };
+const writeUnlocked = (s: Set<string>) => { try { sessionStorage.setItem(UNLOCK_KEY, JSON.stringify(Array.from(s))); } catch { /* sem storage */ } };
+
 const fileUrl = (a: KbAttachment, inline = false) => `/api/kb/file?key=${encodeURIComponent(a.key)}&name=${encodeURIComponent(a.name)}${inline ? "&inline=1" : ""}`;
 
 // ------------------------------------------------------------
@@ -246,8 +257,14 @@ function AccessEditor({ label, hint, value, onChange, users }: {
 // ------------------------------------------------------------
 // Formulário de base (admin)
 // ------------------------------------------------------------
+type BaseFormData = Omit<KbBase, "id" | "kind" | "createdAt" | "updatedAt" | "updatedBy" | "locked" | "passwordHash"> & {
+  /** Nova senha (define ou troca). Vazio = mantém a atual. */
+  password?: string;
+  /** Remove a senha da base. */
+  clearPassword?: boolean;
+};
 function BaseFormModal({ initial, users, onClose, onSave, onDelete, saving }: {
-  initial?: KbBase; users: Props["users"]; onClose: () => void; onSave: (b: Omit<KbBase, "id" | "kind" | "createdAt" | "updatedAt" | "updatedBy">) => void; onDelete?: () => void; saving: boolean;
+  initial?: KbBase; users: Props["users"]; onClose: () => void; onSave: (b: BaseFormData) => void; onDelete?: () => void; saving: boolean;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
@@ -256,6 +273,9 @@ function BaseFormModal({ initial, users, onClose, onSave, onDelete, saving }: {
   const [order, setOrder] = useState(String(initial?.order ?? 99));
   const [access, setAccess] = useState<KbAccessList>(initial?.access ?? emptyAccess());
   const [editors, setEditors] = useState<KbAccessList>(initial?.editors ?? emptyAccess());
+  const [password, setPassword] = useState("");
+  const [showPw, setShowPw] = useState(false);
+  const [clearPassword, setClearPassword] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const Icon = ICONS[icon];
   return (
@@ -277,6 +297,20 @@ function BaseFormModal({ initial, users, onClose, onSave, onDelete, saving }: {
         </div>
         <AccessEditor label="Quem pode ver" hint="Grupos inteiros e/ou pessoas específicas. Quem não estiver aqui nem sabe que a base existe." value={access} onChange={setAccess} users={users} />
         <AccessEditor label="Quem pode editar" hint="Cria e edita artigos e anexos. Editor precisa também estar em 'quem pode ver' (ou ser de um grupo liberado)." value={editors} onChange={setEditors} users={users} />
+        <div className="rounded-2xl border border-slate-200 p-4">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-slate-800"><Lock className="h-4 w-4 text-slate-400" /> Senha da base <span className="font-normal text-slate-400">(opcional)</span></p>
+          <p className="mt-0.5 text-xs text-slate-500">Além da liberação por perfil/pessoa, quem abrir a base precisa digitar esta senha uma vez por sessão. Fica guardada só como hash — ninguém consegue lê-la depois.</p>
+          {initial?.locked && !clearPassword && <p className="mt-2 text-xs font-semibold text-amber-700">Esta base já tem senha. Deixe em branco para manter.</p>}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <input type={showPw ? "text" : "password"} value={password} onChange={(e) => { setPassword(e.target.value); if (e.target.value) setClearPassword(false); }} placeholder={initial?.locked ? "Nova senha (opcional)" : "Definir senha"} autoComplete="new-password" className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-slate-400" />
+            <button type="button" onClick={() => setShowPw(!showPw)} className={btnGhost}><Eye className="h-3.5 w-3.5" /> {showPw ? "Ocultar" : "Mostrar"}</button>
+          </div>
+          {initial?.locked && (
+            <label className="mt-2 flex cursor-pointer items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={clearPassword} onChange={(e) => { setClearPassword(e.target.checked); if (e.target.checked) setPassword(""); }} className="h-4 w-4 rounded border-slate-300" /> Remover a senha desta base
+            </label>
+          )}
+        </div>
         <div className="flex items-center justify-between gap-3 pt-2">
           <div>
             {initial && onDelete && (confirm
@@ -285,7 +319,7 @@ function BaseFormModal({ initial, users, onClose, onSave, onDelete, saving }: {
           </div>
           <div className="flex gap-2">
             <button onClick={onClose} className={btnGhost}>Cancelar</button>
-            <button disabled={!name.trim() || saving} onClick={() => onSave({ name: name.trim(), description: description.trim(), icon, color, order: Number(order) || 99, access, editors })} className={btnPrimary}><Save className="h-3.5 w-3.5" /> {saving ? "Salvando…" : "Salvar"}</button>
+            <button disabled={!name.trim() || saving} onClick={() => onSave({ name: name.trim(), description: description.trim(), icon, color, order: Number(order) || 99, access, editors, ...(password ? { password } : {}), ...(clearPassword ? { clearPassword: true } : {}) })} className={btnPrimary}><Save className="h-3.5 w-3.5" /> {saving ? "Salvando…" : "Salvar"}</button>
           </div>
         </div>
       </div>
@@ -412,6 +446,41 @@ function Attachments({ article, canEdit, user, onChange }: { article: KbArticle;
 }
 
 // ------------------------------------------------------------
+// Senha da base
+// ------------------------------------------------------------
+function PasswordGate({ base, onUnlocked }: { base: KbBase; onUnlocked: () => void }) {
+  const [pw, setPw] = useState("");
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const Icon = ICONS[base.icon];
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault(); if (!pw || busy) return;
+    setBusy(true); setErr("");
+    try { (await apiUnlock(base.id, pw)) ? onUnlocked() : setErr("Senha incorreta."); }
+    catch (ex) { setErr((ex as Error).message); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className={`rounded-[28px] border p-8 ${COLORS[base.color].soft}`}>
+      <div className="mx-auto max-w-md text-center">
+        <span className={`mx-auto flex h-14 w-14 items-center justify-center rounded-2xl ${COLORS[base.color].tile}`}><Icon className="h-7 w-7" /></span>
+        <h2 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">{base.name}</h2>
+        <p className="mt-1 text-sm leading-6 text-slate-600">{base.description}</p>
+        <p className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-slate-800"><Lock className="h-4 w-4 text-slate-400" /> Esta base é protegida por senha</p>
+        <form onSubmit={submit} className="mt-3 flex items-center gap-2">
+          <input type={show ? "text" : "password"} value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Senha da base" autoFocus autoComplete="off" className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-slate-400" />
+          <button type="button" onClick={() => setShow(!show)} className="rounded-xl border border-slate-200 bg-white p-2.5 text-slate-400 hover:text-slate-700" title={show ? "Ocultar" : "Mostrar"}><Eye className="h-4 w-4" /></button>
+          <button type="submit" disabled={!pw || busy} className={btnPrimary}>{busy ? "Conferindo…" : "Abrir"}</button>
+        </form>
+        {err && <p className="mt-2 text-xs font-semibold text-rose-600">{err}</p>}
+        <p className="mt-3 text-[11px] text-slate-400">Vale até você fechar o navegador. Não sabe a senha? Fale com o admin da base.</p>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------
 // Página
 // ------------------------------------------------------------
 interface Props {
@@ -433,6 +502,10 @@ export default function KnowledgeBase({ user, users, records, setRecords, loadEr
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [unlocked, setUnlocked] = useState<Set<string>>(new Set());
+  useEffect(() => { setUnlocked(readUnlocked()); }, []);
+  const isOpen = (b: KbBase) => !b.locked || unlocked.has(b.id);
+  const markUnlocked = (id: string) => setUnlocked((prev) => { const n = new Set(prev); n.add(id); writeUnlocked(n); return n; });
   const isAdmin = user.role === "admin";
 
   const base = bases.find((b) => b.id === baseId) || null;
@@ -447,9 +520,10 @@ export default function KnowledgeBase({ user, users, records, setRecords, loadEr
   // Busca global (só no que o usuário pode ver)
   const results = useMemo(() => {
     const s = q.trim().toLowerCase(); if (s.length < 2) return [];
-    const visible = new Set(bases.map((b) => b.id));
+    const visible = new Set(bases.filter(isOpen).map((b) => b.id));
     return articles.filter((a) => visible.has(a.baseId) && (a.title.toLowerCase().includes(s) || a.body.toLowerCase().includes(s) || a.tags?.some((t) => t.toLowerCase().includes(s)) || a.attachments?.some((x) => x.name.toLowerCase().includes(s)))).slice(0, 30);
-  }, [q, articles, bases]);
+  }, [q, articles, bases, unlocked]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lockedCount = bases.filter((b) => !isOpen(b)).length;
 
   const run = async (fn: () => Promise<void>) => {
     setSaving(true); setError("");
@@ -457,11 +531,17 @@ export default function KnowledgeBase({ user, users, records, setRecords, loadEr
   };
   const upsertLocal = (rec: KbRecord) => setRecords((prev) => (prev.some((r) => r.id === rec.id) ? prev.map((r) => (r.id === rec.id ? rec : r)) : [...prev, rec]));
 
-  const saveBase = (data: Omit<KbBase, "id" | "kind" | "createdAt" | "updatedAt" | "updatedBy">) => run(async () => {
+  const saveBase = (data: BaseFormData) => run(async () => {
     const now = new Date().toISOString();
     const existing = baseModal === "edit" ? base : null;
-    const rec: KbBase = { ...(existing ?? { id: kbId("kb"), kind: "base", createdAt: now }), ...data, kind: "base", updatedAt: now, updatedBy: user.name } as KbBase;
-    await apiSave(rec); upsertLocal(rec); setBaseModal(null); setBaseId(rec.id);
+    const { password, clearPassword, ...fields } = data;
+    const rec: KbBase = { ...(existing ?? { id: kbId("kb"), kind: "base", createdAt: now }), ...fields, kind: "base", updatedAt: now, updatedBy: user.name } as KbBase;
+    // O servidor transforma `password` em hash e devolve `locked`; a tela nunca guarda a senha.
+    const r = await fetch("/api/state/kb", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...rec, ...(password ? { password } : {}), ...(clearPassword ? { clearPassword: true } : {}) }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    const { locked } = await r.json();
+    const saved: KbBase = { ...rec, locked: !!locked, passwordHash: undefined };
+    upsertLocal(saved); if (password) markUnlocked(saved.id); setBaseModal(null); setBaseId(saved.id);
   });
   const deleteBase = () => run(async () => {
     if (!base) return;
@@ -519,7 +599,7 @@ export default function KnowledgeBase({ user, users, records, setRecords, loadEr
 
       {q.trim().length >= 2 ? (
         <div className="rounded-[28px] border border-slate-200/80 bg-white/85 p-5">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{results.length} resultado{results.length === 1 ? "" : "s"} para “{q}”</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{results.length} resultado{results.length === 1 ? "" : "s"} para “{q}”{lockedCount > 0 && <span className="ml-2 normal-case tracking-normal text-slate-400">· {lockedCount} base{lockedCount === 1 ? "" : "s"} com senha fora da busca até ser aberta</span>}</p>
           <div className="mt-3 divide-y divide-slate-100">
             {results.map((a) => {
               const b = bases.find((x) => x.id === a.baseId)!; const Icon = ICONS[b.icon];
@@ -556,7 +636,7 @@ export default function KnowledgeBase({ user, users, records, setRecords, loadEr
                 <button key={b.id} onClick={() => { setBaseId(b.id); setArticleId(""); setMode("view"); }} className={`flex w-full items-center gap-3 rounded-2xl border px-3.5 py-3 text-left transition ${active ? `border-transparent bg-white shadow-[0_18px_40px_-28px_rgba(15,23,42,0.5)] ring-2 ${COLORS[b.color].ring}` : "border-slate-200/80 bg-white/70 hover:border-slate-300"}`}>
                   <span className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${COLORS[b.color].tile}`}><Icon className="h-5 w-5" /></span>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-semibold text-slate-800">{b.name}</span>
+                    <span className="flex items-center gap-1.5 truncate text-sm font-semibold text-slate-800">{b.name}{b.locked && <Lock className={`h-3.5 w-3.5 flex-shrink-0 ${isOpen(b) ? "text-emerald-500" : "text-slate-400"}`} />}</span>
                     <span className="block text-[11px] text-slate-400">{n} artigo{n === 1 ? "" : "s"}{canEditBase(b, user) ? " · editor" : ""}</span>
                   </span>
                 </button>
@@ -573,13 +653,15 @@ export default function KnowledgeBase({ user, users, records, setRecords, loadEr
                   return (
                     <button key={b.id} onClick={() => setBaseId(b.id)} className={`rounded-[28px] border p-6 text-left transition hover:-translate-y-0.5 hover:shadow-lg ${COLORS[b.color].soft}`}>
                       <span className={`flex h-12 w-12 items-center justify-center rounded-2xl ${COLORS[b.color].tile}`}><Icon className="h-6 w-6" /></span>
-                      <p className="mt-4 text-lg font-semibold text-slate-900">{b.name}</p>
+                      <p className="mt-4 flex items-center gap-2 text-lg font-semibold text-slate-900">{b.name}{b.locked && <Lock className="h-4 w-4 text-slate-400" />}</p>
                       <p className="mt-1 text-sm leading-6 text-slate-600">{b.description}</p>
                       <p className={`mt-3 text-xs font-semibold ${COLORS[b.color].text}`}>{list.length} artigo{list.length === 1 ? "" : "s"} · {Array.from(new Set(list.map((a) => a.section))).length} seções</p>
                     </button>
                   );
                 })}
               </div>
+            ) : !isOpen(base) ? (
+              <PasswordGate base={base} onUnlocked={() => markUnlocked(base.id)} />
             ) : mode === "new" ? (
               <div className="rounded-[28px] border border-slate-200/80 bg-white/85 p-6">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{base.name}</p>

@@ -313,6 +313,15 @@ da pasta estão importados (20 anexos; o "Padrões (1)" é cópia).
 | **Busca** | Campo no topo procura título, corpo, tags e nomes de anexo em todas as bases que o usuário pode ver |
 | **Menu** | O item só aparece para quem tem ao menos uma base liberada (`temBaseLiberada` na Sidebar). `podeAcessar()` libera `kb` para todo perfil — a trava real é por base, dentro da tela |
 
+**Senha por base (desde 2026-09-08):** além da liberação por perfil/pessoa, a base pode ter uma
+senha (Configurar base → "Senha da base"). No banco fica só `passwordHash` (scrypt + salt,
+`src/lib/kb-password.ts`); o `GET /api/state/kb` nunca devolve o hash, só `locked: true`. Para
+definir/trocar, o admin manda `password` no POST da base; `clearPassword: true` remove; POST sem
+nenhum dos dois preserva o hash existente. Quem abre uma base travada digita a senha uma vez por
+sessão do navegador (`POST /api/kb/unlock` → 200/401; ids destravados em `sessionStorage`), e
+bases travadas ficam fora da busca até serem abertas. **Base de TI e Base Tech têm senha** (definida
+pelo Palhano; não está no repo — o repo `att` é público, então o hash também não entra no seed).
+
 **Persistência diferente das outras tabelas:** `att-kb` grava **por item** (`POST /api/state/kb`
 com objeto = upsert; `DELETE /api/state/kb?id=`), não pelo persist com debounce/`replaceAll` —
 o corpo dos artigos é grande e dois editores gravando a tabela inteira se sobrescreveriam.
@@ -496,7 +505,7 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 
 **Auth:** `/api/auth/[...nextauth]`. **Outros:** `/api/upload`, `/api/analyze`.
 
-**Base de Conhecimento:** `DELETE /api/state/kb?id=`, `POST /api/kb/upload` (URL pré-assinada), `GET/DELETE /api/kb/file?key=` (anexos em `archtechtour-assets/kb/`).
+**Base de Conhecimento:** `DELETE /api/state/kb?id=`, `POST /api/kb/upload` (URL pré-assinada), `GET/DELETE /api/kb/file?key=` (anexos em `archtechtour-assets/kb/`), `POST /api/kb/unlock` (senha da base).
 
 ---
 
