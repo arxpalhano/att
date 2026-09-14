@@ -3597,6 +3597,15 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
   const internalUsers = USERS.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
   const clientBlocks = blocks.filter((b) => b.clientId === clientId);
   const selectedBlock = blocks.find((b) => b.id === blockId);
+  // Busca do bloco: marcas grandes têm 100+ blocos, e o <select> puro obriga a
+  // rolar a lista inteira. Filtra por número, título, SKU ou CSKU; o bloco já
+  // escolhido continua na lista mesmo que não bata com o texto digitado.
+  const [blockQuery, setBlockQuery] = useState("");
+  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const q = norm(blockQuery.trim());
+  const filteredBlocks = clientBlocks
+    .filter((b) => !q || b.id === blockId || norm(`#${b.n} ${b.title} ${b.sku ?? ""} ${b.csku ?? ""}`).includes(q))
+    .sort((a, b) => (a.n ?? 0) - (b.n ?? 0));
 
   const canSave = title.trim() && clientId && slaDate;
 
@@ -3631,17 +3640,28 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Cliente *</label>
-              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setBlockId(""); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setBlockId(""); setBlockQuery(""); }} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
                 <option value="">Selecionar...</option>
                 {CLIENTS.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Bloco</label>
-              <select value={blockId} onChange={(e) => setBlockId(e.target.value)} disabled={!clientId} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition disabled:opacity-50">
+              <div className="relative mb-1.5">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input
+                  value={blockQuery}
+                  onChange={(e) => setBlockQuery(e.target.value)}
+                  disabled={!clientId}
+                  placeholder={clientId ? `Buscar entre ${clientBlocks.length} blocos (nº, nome, SKU)…` : "Escolha o cliente primeiro"}
+                  className="w-full rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-3 text-sm text-slate-900 outline-none focus:border-cyan-400 transition disabled:opacity-50"
+                />
+              </div>
+              <select value={blockId} onChange={(e) => setBlockId(e.target.value)} disabled={!clientId} size={q ? Math.min(8, filteredBlocks.length + 1) : undefined} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition disabled:opacity-50">
                 <option value="">Nenhum</option>
-                {clientBlocks.map((b) => <option key={b.id} value={b.id}>#{b.n} · {b.title}</option>)}
+                {filteredBlocks.map((b) => <option key={b.id} value={b.id}>#{b.n} · {b.title}</option>)}
               </select>
+              {q && <p className="mt-1 text-[11px] text-slate-400">{filteredBlocks.length} de {clientBlocks.length} blocos{filteredBlocks.length === 0 ? " — nada com esse texto" : ""}</p>}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
