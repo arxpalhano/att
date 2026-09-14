@@ -3063,6 +3063,7 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
         <div>
           <h1 className="text-xl font-bold text-slate-800">Atividade Global</h1>
           <p className="mt-1 text-sm text-slate-500">Tudo que foi feito no portal, registrado pelo servidor no momento da gravação · {periodLabel}.</p>
+          <p className="mt-1 text-xs text-amber-700">Registro completo (logins, telas abertas, tickets, BIM, acabamentos, KB) só existe a partir de <b>14/09/2026 às 14:46</b>. Antes disso o portal gravava apenas edições e mudanças de status de blocos — quem só mexeu em tickets ou navegou aparece zerado no período anterior.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button onClick={load} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:border-slate-300 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar</button>
