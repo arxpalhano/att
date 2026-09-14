@@ -8,6 +8,8 @@ import LanguageSwitcher from "./LanguageSwitcher";
 import KnowledgeBase from "./KnowledgeBase";
 import { KbRecord, KbBase, canViewBase, isKbBase } from "@/lib/kb";
 import { KB_SEED } from "@/data/kb-seed";
+import { ActivityRecord, BLOCK_STATUS_LABELS, TICKET_STATUS_LABELS as SHARED_TICKET_STATUS_LABELS, ENTITY_LABELS, TYPE_LABELS, PAGE_LABELS, isNavigation } from "@/lib/activity";
+import { setActivityActor, actorHeaders, logActivity } from "@/lib/activity-client";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
@@ -90,24 +92,15 @@ interface SeedAsset {
   analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; notes?: string[]; };
   uploadedAt?: string;
 }
-interface SeedActivity {
-  id: string; blockId: string; userId: string;
-  type: string; desc: string; at: string;
-}
+/** Registro do log de atividades — gravado pelo servidor (src/lib/activity.ts). */
+type SeedActivity = ActivityRecord;
 export interface SeedPub {
   id: string; blockId: string; url: string;
   embed: string; env: string; v: number;
 }
 
-const STATUS_LABELS: Record<BlockStatus, string> = {
-  draft: "Rascunho", awaiting_client_files: "Aguardando Arquivos",
-  client_files_under_review: "Arquivos em Revisão", ready_to_start: "Pronto p/ Iniciar",
-  in_modeling: "Em Modelagem", in_texturing: "Em Texturização", awaiting_client_material_validation: "Validação Material",
-  approved_for_programming: "Aprovado p/ Programação", in_programming: "Em Programação",
-  internal_review: "Revisão Interna", awaiting_client_final_validation: "Validação Final",
-  approved: "Aprovado", bim_conversion: "Conversão BIM", published: "Publicado", blocked: "Bloqueado",
-  on_hold: "Em Espera", archived: "Arquivado",
-};
+// Rótulos vivem em src/lib/activity.ts (o servidor usa os mesmos para descrever o log).
+const STATUS_LABELS = BLOCK_STATUS_LABELS as Record<BlockStatus, string>;
 
 const STATUS_COLORS: Record<BlockStatus, string> = {
   draft: "border-slate-200/80 bg-slate-100/90 text-slate-600",
@@ -312,20 +305,9 @@ const ASSETS: SeedAsset[] = [
   { id: "a19", blockId: "pb3", cat: "photos", name: "umma_ref.jpg", size: 340000, v: 1, by: "u8" },
 ];
 
-const ACTIVITIES: SeedActivity[] = [
-  { id: "al1", blockId: "pb1", userId: "u1", type: "block_created", desc: "Bloco criado: Banco Nub", at: "2025-03-15T10:00" },
-  { id: "al2", blockId: "pb1", userId: "u8", type: "asset_uploaded", desc: "CAD enviado: banco_nub_v3.step", at: "2025-03-20T14:00" },
-  { id: "al3", blockId: "pb1", userId: "u3", type: "status_changed", desc: "Status: Em Modelagem → Concluído", at: "2025-05-15T10:00" },
-  { id: "al4", blockId: "pb1", userId: "u8", type: "approval_approved", desc: "Material aprovado pela Escal", at: "2025-05-20T16:00" },
-  { id: "al5", blockId: "pb1", userId: "u5", type: "publication_updated", desc: "Publicação v11 configurada", at: "2025-07-23T14:10" },
-  { id: "al6", blockId: "pb7", userId: "u2", type: "block_created", desc: "Bloco criado: Poltrona Acácia", at: "2024-08-01T10:00" },
-  { id: "al7", blockId: "pb7", userId: "u9", type: "asset_uploaded", desc: "CAD v4 enviado: poltrona_acacia_v4.step", at: "2025-06-10T10:00" },
-  { id: "al8", blockId: "pb22", userId: "u1", type: "status_changed", desc: "Bloqueado: Informações insuficientes do cliente", at: "2025-10-05T10:00" },
-  { id: "al9", blockId: "pb2", userId: "u5", type: "status_changed", desc: "Status: Modelagem → Em Programação", at: "2025-08-20T10:00" },
-  { id: "al10", blockId: "pb13", userId: "u6", type: "status_changed", desc: "Status: Pronto para iniciar (urgente)", at: "2025-11-15T10:00" },
-  { id: "al11", blockId: "pb11", userId: "u5", type: "status_changed", desc: "Cadeira Cota em programação", at: "2025-10-01T10:00" },
-  { id: "al12", blockId: "pb20", userId: "u2", type: "block_created", desc: "Bloco criado: Produto Validação Dexco", at: "2026-03-02T17:00" },
-];
+// Sem seed: o log de atividades só tem registros reais, gravados pelo servidor.
+// Um log de exemplo aqui voltaria a poluir a tela de Atividade (regra: não inventar dados).
+const ACTIVITIES: SeedActivity[] = [];
 
 const PUBLICATIONS: SeedPub[] = [
   { id: "pub1", blockId: "pb1", url: "https://explorar.archtechtour.com/escal/ver-11/banco-nub/index.html", embed: '<iframe src="https://explorar.archtechtour.com/escal/ver-11/banco-nub/index.html" width="100%" height="600"></iframe>', env: "production", v: 11 },
@@ -415,6 +397,40 @@ PUBLICATIONS.push(..._validPubs);
 const fmtDate = (d: string | undefined) => d ? new Date(d).toLocaleDateString("pt-BR") : "—";
 const fmtSize = (b: number) => b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
 const getUserName = (id: string) => USERS.find((u) => u.id === id)?.name || "—";
+/** Nome de quem fez uma atividade: o registro carrega o nome (vale mesmo para usuário excluído). */
+const actorName = (a: Pick<SeedActivity, "userId" | "userName">) => a.userName || getUserName(a.userId);
+/**
+ * Para onde uma atividade leva ao ser clicada (tela Atividade e feed do dashboard).
+ * Devolve null quando não há destino (ex.: usuário excluído).
+ */
+interface ActivityNav { setPage: (p: string) => void; setSelectedBlock?: (id: string) => void; setSelectedContract?: (id: string) => void }
+function activityTarget(a: SeedActivity, blocks: SeedBlock[], nav: ActivityNav): { label: string; go: () => void } | null {
+  const block = a.blockId ? blocks.find((b) => b.id === a.blockId) : undefined;
+  if (block && nav.setSelectedBlock) {
+    const sel = nav.setSelectedBlock;
+    return { label: `Abrir bloco ${block.sku}`, go: () => { sel(block.id); nav.setPage("block_detail"); } };
+  }
+  const entity = a.entity || "blocks";
+  const simple = (label: string, page: string) => ({ label, go: () => nav.setPage(page) });
+  switch (entity) {
+    case "tickets": return simple("Abrir tickets", "tickets");
+    case "clients": return simple("Abrir clientes", "clients");
+    case "contracts":
+      if (a.entityId && nav.setSelectedContract) { const sel = nav.setSelectedContract; const id = a.entityId; return { label: "Abrir contrato", go: () => { sel(id); nav.setPage("contract_detail"); } }; }
+      return simple("Abrir contratos", "contracts");
+    case "publications": return simple("Abrir publicações", "publications");
+    case "users": return simple("Abrir usuários", "users");
+    case "bim-demands": return simple("Abrir BIM · Terceirizados", "bim");
+    case "finishes": return simple("Abrir acabamentos", "finishes");
+    case "kb": return simple("Abrir Base de Conhecimento", "kb");
+    case "agents": return simple("Abrir agente", a.entityId ? `agent_${a.entityId.replace(/-/g, "_")}` : "agents");
+    case "analytics": return simple("Abrir analytics", "analytics");
+    case "session": return a.type === "page_view" && a.page && a.page !== "block_detail" ? simple(`Abrir ${PAGE_LABELS[a.page] ?? a.page}`, a.page) : null;
+    case "blocks": return a.type === "block_deleted" ? null : simple("Abrir blocos", "blocks");
+    default: return null;
+  }
+}
+const fmtDateTime = (d: string | undefined) => d ? new Date(d).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
 const getClientName = (id: string) => CLIENTS.find((c) => c.id === id)?.name || "—";
 const getClientCode = (id: string) => CLIENTS.find((c) => c.id === id)?.code || "—";
 
@@ -699,26 +715,38 @@ function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const { data: session } = useSession();
+  // O NextAuth pode reentregar a mesma sessão (refetch); o "login" vai ao log uma vez por e-mail.
+  const loginLogged = useRef<string | null>(null);
 
   // Auto-login when Microsoft SSO session arrives
   useEffect(() => {
     if (!session?.user?.email) return;
     const msEmail = (session.user.email as string).toLowerCase();
+    const logLogin = (who: SeedUser, how: string) => {
+      if (loginLogged.current === msEmail) return;
+      loginLogged.current = msEmail;
+      logActivity({ type: "login", entity: "session", desc: how }, { id: who.id, name: who.name, role: who.role, email: who.email, clientId: who.clientId });
+    };
     // Match against seed users by email
     const user = USERS.find((u) => u.email.toLowerCase() === msEmail);
     if (user) {
       setCurrentUser(user);
+      logLogin(user, "Entrou no portal (conta Microsoft)");
     } else {
-      // Auto-create a temporary session for any @archtechtour.com Microsoft user
+      // Auto-create a temporary session for any @archtechtour.com Microsoft user.
+      // O id é derivado do e-mail (estável): assim o log de atividades agrupa
+      // as ações da pessoa entre sessões, mesmo sem cadastro em Usuários.
       if (msEmail.endsWith("@archtechtour.com")) {
-        setCurrentUser({
-          id: `ms_${Date.now()}`,
+        const temp: SeedUser = {
+          id: `ms_${msEmail.replace(/[^a-z0-9]+/g, "_")}`,
           email: msEmail,
           password: "",
           name: (session.user.name as string | null | undefined) ?? msEmail,
           role: "admin",
           active: true,
-        });
+        };
+        setCurrentUser(temp);
+        logLogin(temp, "Entrou no portal (conta Microsoft, sem cadastro em Usuários)");
       } else {
         setError("Conta Microsoft não autorizada para este portal.");
       }
@@ -749,6 +777,7 @@ function LoginPage() {
       }
       if (user) {
         setCurrentUser(user);
+        logActivity({ type: "login", entity: "session", desc: "Entrou no portal (e-mail e senha)" }, { id: user.id, name: user.name, role: user.role, email: user.email, clientId: user.clientId });
       } else {
         setError("E-mail ou senha incorretos. Tente novamente.");
       }
@@ -976,7 +1005,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 // ============================================================
 // DASHBOARD INTERNO
 // ============================================================
-function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => void; openBlocks: (status: BlockStatus | "all") => void }) {
+function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedContract }: { setPage: (p: string) => void; openBlocks: (status: BlockStatus | "all") => void; setSelectedBlock: (id: string) => void; setSelectedContract: (id: string) => void }) {
   // Tudo aqui sai do estado vivo do app (hidratado do DynamoDB e atualizado
   // por qualquer tela). Nada de constantes de seed: elas congelam o número.
   const { blocks, activities, clients, hydrated, bimDemands } = useContext(AppContext);
@@ -986,7 +1015,7 @@ function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => vo
   const byStatus: Record<string, number> = {};
   blocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
   const pending = blocks.filter(isAwaitingClient).length;
-  const recent = [...activities].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
+  const recent = activities.filter((a) => !isNavigation(a)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
   const activeClients = clients.map((client) => ({
     ...client,
     count: blocks.filter((b) => b.clientId === client.id).length,
@@ -1188,16 +1217,17 @@ function InternalDashboard({ setPage, openBlocks }: { setPage: (p: string) => vo
             {recent.length === 0 && <p className="text-sm text-slate-400">Nenhuma movimentação registrada ainda.</p>}
             {recent.map((act) => {
               const block = blocks.find((b) => b.id === act.blockId);
+              const target = activityTarget(act, blocks, { setPage, setSelectedBlock, setSelectedContract });
               return (
-                <div key={act.id} className="rounded-[22px] border border-slate-200/80 bg-slate-50/75 p-4">
+                <div key={act.id} onClick={target?.go} title={target?.label} className={`rounded-[22px] border border-slate-200/80 bg-slate-50/75 p-4 transition ${target ? "cursor-pointer hover:border-cyan-300 hover:bg-white" : ""}`}>
                   <div className="flex gap-3">
                     <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl bg-white shadow-sm">
                       <Activity className="h-4 w-4 text-slate-400" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-slate-800">{act.desc}</p>
-                      <p className="mt-1 text-sm text-slate-500">{getUserName(act.userId)}</p>
-                      <p className="mt-2 text-xs text-slate-400">{block?.sku ? `${block.sku} · ` : ""}{fmtDate(act.at)}</p>
+                      <p className="mt-1 text-sm text-slate-500">{actorName(act)}</p>
+                      <p className="mt-2 text-xs text-slate-400">{block?.sku ? `${block.sku} · ` : ""}{fmtDateTime(act.at)}{target && <span className="ml-2 font-semibold text-cyan-700">{target.label} →</span>}</p>
                     </div>
                   </div>
                 </div>
@@ -1532,13 +1562,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
       title: data.title, svc: data.serviceType, status: "draft",
       pri: data.priority, created: new Date().toISOString().slice(0, 10),
     };
-    setBlocks([...blocks, newBlock]);
-    const newAct: SeedActivity = {
-      id: `al_${Date.now()}`, blockId: newBlock.id, userId: user.id,
-      type: "block_created", desc: `Bloco criado: ${data.title}`,
-      at: new Date().toISOString(),
-    };
-    setActivities([...activities, newAct]);
+    setBlocks([...blocks, newBlock]); // o servidor registra "Bloco criado" ao gravar
 
     // Auto-cria ticket inicial na fila — Jessica (admin) atribui responsável depois
     const slaDate = new Date();
@@ -1973,7 +1997,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
   onClose: () => void;
   onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => string;
 }) {
-  const { assets, setAssets, activities, setActivities, blocks } = useContext(AppContext);
+  const { assets, setAssets, setActivities, blocks } = useContext(AppContext);
   const isClient = user.role === "client";
   const [title, setTitle] = useState("");
   const [clientSku, setClientSku] = useState("");
@@ -2002,12 +2026,9 @@ function CreateBlockModal({ user, onClose, onCreate }: {
         onClose={onClose}
         onUploaded={(asset) => {
           setAssets([...assets, asset]);
-          const act: SeedActivity = {
-            id: `al_${Date.now()}`, blockId: uploadBlockId, userId: user.id,
-            type: "asset_uploaded", desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
-            at: new Date().toISOString(),
-          };
-          setActivities([...activities, act]);
+          // Arquivos vão direto ao S3 (sem tabela de estado): o log é enviado na hora.
+          logActivity({ type: "asset_uploaded", entity: "assets", blockId: uploadBlockId, clientId, entityId: asset.id, desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})` })
+            .then((a) => { if (a) setActivities((prev) => [...prev, a]); });
         }}
       />
     );
@@ -2291,7 +2312,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
 
   const contract = CONTRACTS.find((c) => c.id === block.contractId);
   const blockAssets = assets.filter((a) => a.blockId === block.id);
-  const blockActivities = activities.filter((a) => a.blockId === block.id).sort((a, b) => b.at.localeCompare(a.at));
+  const blockActivities = activities.filter((a) => a.blockId === block.id && !isNavigation(a)).sort((a, b) => b.at.localeCompare(a.at));
   const approvalHistory = blockActivities.filter((a) => a.type === "approval_approved" || a.type === "approval_rejected");
   const approvalRule = APPROVAL_NEXT[block.status];
   const readiness = checkReadiness(block.id, block.svc);
@@ -2303,7 +2324,6 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
 
   const handleEditSave = (d: BlockEditData) => {
     setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku, modeler: d.modeler, bim: d.bim } : b));
-    setActivities([...activities, { id: `al_${Date.now()}`, blockId: block.id, userId: user.id, type: "block_edited", desc: `Dados do bloco editados`, at: new Date().toISOString() }]);
     setShowEdit(false);
   };
 
@@ -2314,7 +2334,6 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     setPublications(publications.filter((p) => p.blockId !== block.id));
     setTickets(tickets.filter((t) => t.blockId !== block.id));
     setBlocks(blocks.filter((b) => b.id !== block.id));
-    setActivities([...activities, { id: `al_${Date.now()}`, blockId: block.id, userId: user.id, type: "block_deleted", desc: `Bloco excluído: ${block.title}`, at: new Date().toISOString() }]);
     setPage("blocks");
   };
 
@@ -2325,13 +2344,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
 
   const handleTransition = (newStatus: BlockStatus) => {
     const updated = blocks.map((b) => b.id === block.id ? { ...b, status: newStatus, ...(newStatus === "published" ? { published: new Date().toISOString().slice(0, 10) } : {}) } : b);
-    setBlocks(updated);
-    const newAct: SeedActivity = {
-      id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
-      type: "status_changed", desc: `Status: ${STATUS_LABELS[block.status]} → ${STATUS_LABELS[newStatus]}`,
-      at: new Date().toISOString(),
-    };
-    setActivities([...activities, newAct]);
+    setBlocks(updated); // o servidor descreve "Status: A → B" ao gravar
     setConfirmTransition(null);
   };
 
@@ -2342,16 +2355,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     const next = action === "approve" ? approvalRule.approve : approvalRule.reject;
     setBlocks(blocks.map((b) => b.id === block.id
       ? { ...b, status: next, ...(action === "reject" ? { clientRevisions: revisions + 1 } : {}) }
-      : b));
-    const act: SeedActivity = {
-      id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
-      type: action === "approve" ? "approval_approved" : "approval_rejected",
-      desc: action === "approve"
-        ? `${approvalRule.label} aprovada pelo cliente → ${STATUS_LABELS[next]}`
-        : `Revisão ${revisions + 1}/${MAX_REVISIONS} solicitada pelo cliente (${approvalRule.label}) → ${STATUS_LABELS[next]}`,
-      at: new Date().toISOString(),
-    };
-    setActivities([...activities, act]);
+      : b)); // o servidor registra aprovação/revisão do cliente ao gravar
   };
 
   const copyEmbed = () => {
@@ -2481,7 +2485,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Atividade</h3>
               <div className="space-y-2">
                 {blockActivities.slice(0, 5).map((act) => (
-                  <div key={act.id} className="flex items-start gap-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" /><div><p className="text-slate-600">{act.desc}</p><p className="text-slate-400">{isClient ? fmtDate(act.at) : `${getUserName(act.userId)} · ${fmtDate(act.at)}`}</p></div></div>
+                  <div key={act.id} className="flex items-start gap-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-slate-300 mt-1.5 flex-shrink-0" /><div><p className="text-slate-600">{act.desc}</p><p className="text-slate-400">{isClient ? fmtDateTime(act.at) : `${actorName(act)} · ${fmtDateTime(act.at)}`}</p></div></div>
                 ))}
               </div>
             </Card>
@@ -2535,12 +2539,8 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
           onUploaded={(asset) => {
             // Functional updates avoid stale-closure bugs when multiple files are uploaded in sequence
             setAssets((prev) => [...prev, asset]);
-            setActivities((prev) => [...prev, {
-              id: `al_${Date.now()}_${asset.id}`, blockId: block.id, userId: user.id,
-              type: "asset_uploaded" as const,
-              desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})`,
-              at: new Date().toISOString(),
-            }]);
+            logActivity({ type: "asset_uploaded", entity: "assets", blockId: block.id, clientId: block.clientId, entityId: asset.id, desc: `Arquivo enviado: ${asset.name} (${CATEGORY_LABELS[asset.cat]})` })
+              .then((a) => { if (a) setActivities((prev) => [...prev, a]); });
           }}
         />
       )}
@@ -2606,7 +2606,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
             <div className="relative pl-6 space-y-4">
               <div className="absolute left-[7px] top-2 bottom-2 w-px bg-slate-200" />
               {blockActivities.map((act) => (
-                <div key={act.id} className="relative"><div className="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-slate-300" /><p className="text-sm text-slate-700">{act.desc}</p><p className="text-xs text-slate-400 mt-0.5">{getUserName(act.userId)} · {fmtDate(act.at)}</p></div>
+                <div key={act.id} className="relative"><div className="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-slate-300" /><p className="text-sm text-slate-700">{act.desc}</p><p className="text-xs text-slate-400 mt-0.5">{actorName(act)} · {fmtDateTime(act.at)}</p></div>
               ))}
             </div>
           )}
@@ -2861,7 +2861,7 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
   // critério do dashboard e do badge da sidebar — os três sempre batem.
   const isClient = user.role === "client";
   const [tab, setTab] = useState("pending");
-  const { blocks, setBlocks, activities, setActivities, clients } = useContext(AppContext);
+  const { blocks, setBlocks, activities, clients } = useContext(AppContext);
   const scope = isClient ? blocks.filter((b) => b.clientId === user.clientId) : blocks;
   const pending = scope.filter(isAwaitingClient).sort((a, b) => (b.created || "").localeCompare(a.created || ""));
   const scopeIds = new Set(scope.map((b) => b.id));
@@ -2877,15 +2877,7 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
     const next = action === "approve" ? rule.approve : rule.reject;
     setBlocks(blocks.map((b) => b.id === block.id
       ? { ...b, status: next, ...(action === "reject" ? { clientRevisions: revisions + 1 } : {}) }
-      : b));
-    setActivities([...activities, {
-      id: `al_${Date.now()}`, blockId: block.id, userId: user.id,
-      type: action === "approve" ? "approval_approved" : "approval_rejected",
-      desc: action === "approve"
-        ? `${rule.label} aprovada pelo cliente → ${STATUS_LABELS[next]}`
-        : `Revisão ${revisions + 1}/${MAX_CLIENT_REVISIONS} solicitada pelo cliente (${rule.label}) → ${STATUS_LABELS[next]}`,
-      at: new Date().toISOString(),
-    }]);
+      : b)); // o servidor registra aprovação/revisão do cliente ao gravar
   };
 
   return (
@@ -2977,26 +2969,219 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
   );
 }
 
-function ActivityPage() {
-  const { activities } = useContext(AppContext);
-  const { blocks } = useContext(AppContext);
-  const sorted = [...activities].sort((a, b) => b.at.localeCompare(a.at));
+function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setPage: (p: string) => void; setSelectedBlock: (id: string) => void; setSelectedContract: (id: string) => void }) {
+  const { users, blocks, clients } = useContext(AppContext);
+  const nav: ActivityNav = { setPage, setSelectedBlock, setSelectedContract };
+  const [days, setDays] = useState(30);
+  const [items, setItems] = useState<SeedActivity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [person, setPerson] = useState("all");
+  const [entity, setEntity] = useState("all");
+  const [group, setGroup] = useState<"team" | "all">("team");
+  const [q, setQ] = useState("");
+  const [showNav, setShowNav] = useState(false);
+  const [limit, setLimit] = useState(150);
+
+  // Sempre lê do servidor (não do estado em memória): o que está aqui é o que está no banco.
+  const load = useCallback(async () => {
+    setLoading(true); setError("");
+    try {
+      const r = await fetch(`/api/activity?days=${days}`);
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !Array.isArray(j.items)) throw new Error(j.error || `HTTP ${r.status}`);
+      setItems(j.items as SeedActivity[]);
+    } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
+  }, [days]);
+  useEffect(() => { load(); }, [load]);
+
+  const roleOf = (a: SeedActivity) => a.userRole || users.find((u) => u.id === a.userId)?.role || "";
+  const entityOf = (a: SeedActivity) => a.entity || "blocks"; // registros antigos (pré set/2026) não têm entidade
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return items.filter((a) =>
+      (showNav || !isNavigation(a)) &&
+      (person === "all" || a.userId === person) &&
+      (entity === "all" || entityOf(a) === entity) &&
+      (!needle || `${a.desc} ${actorName(a)} ${a.entityLabel ?? ""} ${blocks.find((b) => b.id === a.blockId)?.sku ?? ""}`.toLowerCase().includes(needle)),
+    );
+  }, [items, person, entity, q, showNav, blocks]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Resumo por pessoa. Parte da lista de usuários (não do log): quem não tem
+  // linha de atividade aparece com zero — é exatamente quem não está usando.
+  type Row = { id: string; name: string; role: string; actions: number; views: number; logins: number; last: string };
+  const summary = useMemo(() => {
+    const map = new Map<string, Row>();
+    users.filter((u) => u.active !== false).forEach((u) => map.set(u.id, { id: u.id, name: u.name, role: u.role, actions: 0, views: 0, logins: 0, last: "" }));
+    items.forEach((a) => {
+      let r = map.get(a.userId);
+      if (!r) { r = { id: a.userId, name: actorName(a), role: roleOf(a), actions: 0, views: 0, logins: 0, last: "" }; map.set(a.userId, r); }
+      if (a.type === "page_view") r.views++;
+      else if (a.type === "login") r.logins++;
+      else if (a.type !== "logout") r.actions++;
+      if (a.at > r.last) r.last = a.at;
+    });
+    const isTeam = (r: Row) => r.role !== "client";
+    return Array.from(map.values())
+      .filter((r) => group === "all" || isTeam(r))
+      .sort((x, y) => y.actions - x.actions || y.views - x.views || x.name.localeCompare(y.name));
+  }, [items, users, group]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totals = useMemo(() => ({
+    actions: items.filter((a) => !isNavigation(a)).length,
+    views: items.filter((a) => a.type === "page_view").length,
+    people: new Set(items.map((a) => a.userId)).size,
+    idle: summary.filter((r) => r.actions + r.views + r.logins === 0).length,
+  }), [items, summary]);
+
+  const exportCsv = () => {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const rows = [["data_hora", "usuario", "perfil", "email", "tipo", "entidade", "descricao", "bloco_sku", "cliente"].join(";")];
+    filtered.forEach((a) => rows.push([
+      new Date(a.at).toLocaleString("pt-BR"), actorName(a), ROLE_LABELS[roleOf(a) as UserRole] ?? roleOf(a), a.userEmail ?? "",
+      TYPE_LABELS[a.type] ?? a.type, ENTITY_LABELS[entityOf(a)] ?? entityOf(a), a.desc,
+      blocks.find((b) => b.id === a.blockId)?.sku ?? "", clients.find((c) => c.id === a.clientId)?.name ?? "",
+    ].map(esc).join(";")));
+    const blob = new Blob(["﻿" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("a"); el.href = url; el.download = `atividade-portal-${new Date().toISOString().slice(0, 10)}.csv`; el.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  };
+
+  const periodLabel = days === 0 ? "todo o histórico" : `últimos ${days} dias`;
+  const selectCls = "rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-cyan-500/30";
+  const typeTone = (t: string) =>
+    t === "login" || t === "logout" || t === "page_view" ? "bg-slate-100 text-slate-500 border-slate-200"
+    : t.endsWith("_deleted") || t === "approval_rejected" ? "bg-rose-50 text-rose-700 border-rose-200"
+    : t.endsWith("_created") || t === "approval_approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+    : "bg-cyan-50 text-cyan-700 border-cyan-200";
+
   return (
-    <div className="space-y-4">
-      <h1 className="text-xl font-bold text-slate-800">Atividade Global</h1>
-      <Card className="p-5">
-        <div className="relative pl-6 space-y-4">
-          <div className="absolute left-[7px] top-2 bottom-2 w-px bg-slate-200" />
-          {sorted.map((act) => {
-            const block = blocks.find((b) => b.id === act.blockId);
-            return (
-              <div key={act.id} className="relative"><div className="absolute -left-[17px] top-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-slate-300" />
-                <p className="text-sm text-slate-700">{act.desc}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{getUserName(act.userId)} · <span className="font-mono">{block?.sku}</span> · {fmtDate(act.at)}</p>
-              </div>
-            );
-          })}
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-800">Atividade Global</h1>
+          <p className="mt-1 text-sm text-slate-500">Tudo que foi feito no portal, registrado pelo servidor no momento da gravação · {periodLabel}.</p>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={load} disabled={loading} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:border-slate-300 disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Atualizar</button>
+          <button onClick={exportCsv} disabled={!filtered.length} className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"><FileText className="h-4 w-4" /> Exportar CSV</button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: "Ações registradas", value: totals.actions, hint: "criações, edições, status, aprovações, uploads…" },
+          { label: "Telas abertas", value: totals.views, hint: "navegação dentro do portal" },
+          { label: "Pessoas ativas", value: totals.people, hint: `com ao menos um registro (${periodLabel})` },
+          { label: "Sem uso no período", value: totals.idle, hint: group === "team" ? "equipe e terceirizados sem nenhum registro" : "usuários sem nenhum registro", tone: totals.idle ? "text-rose-600" : "text-emerald-600" },
+        ].map((k) => (
+          <Card key={k.label} className="p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{k.label}</p>
+            <p className={`mt-2 text-2xl font-bold ${k.tone ?? "text-slate-900"}`}>{loading ? "…" : k.value}</p>
+            <p className="mt-1 text-xs text-slate-400">{k.hint}</p>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-700">Uso por pessoa</h3>
+            <p className="text-xs text-slate-400">Clique numa linha para ver só as atividades da pessoa. Linhas em vermelho não têm nenhum registro no período.</p>
+          </div>
+          <div className="flex gap-2">
+            <TabBtn active={group === "team"} label="Equipe + terceirizados" onClick={() => setGroup("team")} />
+            <TabBtn active={group === "all"} label="Todos (inclui clientes)" onClick={() => setGroup("all")} />
+          </div>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead><tr className="text-left text-[11px] uppercase tracking-wider text-slate-400">
+              <th className="py-2 pr-3 font-semibold">Pessoa</th><th className="py-2 pr-3 font-semibold">Perfil</th>
+              <th className="py-2 pr-3 text-right font-semibold">Ações</th><th className="py-2 pr-3 text-right font-semibold">Telas</th>
+              <th className="py-2 pr-3 text-right font-semibold">Logins</th><th className="py-2 font-semibold">Última atividade</th>
+            </tr></thead>
+            <tbody>
+              {summary.map((r) => {
+                const idle = r.actions + r.views + r.logins === 0;
+                const selected = person === r.id;
+                return (
+                  <tr key={r.id} onClick={() => setPerson(selected ? "all" : r.id)} className={`cursor-pointer border-t border-slate-100 transition hover:bg-slate-50 ${selected ? "bg-cyan-50/60" : ""} ${idle ? "text-rose-600" : "text-slate-700"}`}>
+                    <td className="py-2 pr-3 font-semibold">{r.name}</td>
+                    <td className="py-2 pr-3 text-xs">{ROLE_LABELS[r.role as UserRole] ?? r.role ?? "—"}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{r.actions}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{r.views}</td>
+                    <td className="py-2 pr-3 text-right font-mono">{r.logins}</td>
+                    <td className="py-2 text-xs">{r.last ? fmtDateTime(r.last) : "nunca no período"}</td>
+                  </tr>
+                );
+              })}
+              {!summary.length && <tr><td colSpan={6} className="py-6 text-center text-slate-400">Nenhum usuário.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+
+      <Card className="p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={selectCls}>
+            <option value={7}>Últimos 7 dias</option><option value={30}>Últimos 30 dias</option><option value={90}>Últimos 90 dias</option><option value={0}>Todo o histórico</option>
+          </select>
+          <select value={person} onChange={(e) => setPerson(e.target.value)} className={selectCls}>
+            <option value="all">Todas as pessoas</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+          <select value={entity} onChange={(e) => setEntity(e.target.value)} className={selectCls}>
+            <option value="all">Todas as áreas</option>
+            {Object.entries(ENTITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+          </select>
+          <div className="relative min-w-[220px] flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar na descrição, pessoa, SKU…" className={`${selectCls} w-full pl-9`} />
+          </div>
+          <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={showNav} onChange={(e) => setShowNav(e.target.checked)} className="h-4 w-4 rounded border-slate-300" />
+            Mostrar navegação (telas abertas, login, logout)
+          </label>
+        </div>
+
+        {error && <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">Não foi possível carregar o log: {error}</p>}
+        <p className="mt-4 text-xs text-slate-400">{filtered.length} registro(s){person !== "all" ? ` · ${users.find((u) => u.id === person)?.name ?? person}` : ""}</p>
+
+        {!loading && !filtered.length && !error ? <EmptyState icon={Activity} title="Nenhuma atividade com esses filtros" /> : (
+          <div className="relative mt-3 space-y-4 pl-6">
+            <div className="absolute left-[7px] top-2 bottom-2 w-px bg-slate-200" />
+            {filtered.slice(0, limit).map((act) => {
+              const block = blocks.find((b) => b.id === act.blockId);
+              const client = clients.find((c) => c.id === act.clientId);
+              const target = activityTarget(act, blocks, nav);
+              return (
+                <div key={act.id} className={`relative rounded-xl -mx-2 px-2 py-1 transition ${target ? "cursor-pointer hover:bg-slate-50" : ""}`} onClick={target?.go} title={target?.label}>
+                  <div className={`absolute -left-[9px] top-2.5 h-2.5 w-2.5 rounded-full border-2 bg-white ${isNavigation(act) ? "border-slate-200" : "border-cyan-400"}`} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${typeTone(act.type)}`}>{TYPE_LABELS[act.type] ?? ENTITY_LABELS[entityOf(act)] ?? act.type}</span>
+                    <p className="text-sm text-slate-700">{act.desc}</p>
+                  </div>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    <span className="font-semibold text-slate-500">{actorName(act)}</span>
+                    {roleOf(act) ? ` · ${ROLE_LABELS[roleOf(act) as UserRole] ?? roleOf(act)}` : ""}
+                    {` · ${ENTITY_LABELS[entityOf(act)] ?? entityOf(act)}`}
+                    {block?.sku ? <> · <span className="font-mono">{block.sku}</span></> : null}
+                    {client ? ` · ${client.name}` : ""}
+                    {` · ${fmtDateTime(act.at)}`}
+                    {act.sessionEmail && act.sessionEmail !== act.userEmail ? ` · sessão ${act.sessionEmail}` : ""}
+                    {target && <> · <span className="font-semibold text-cyan-700 hover:underline">{target.label} →</span></>}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {filtered.length > limit && (
+          <button onClick={() => setLimit((n) => n + 150)} className="mt-5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-600 hover:border-slate-300">Mostrar mais ({filtered.length - limit} restantes)</button>
+        )}
       </Card>
     </div>
   );
@@ -3576,7 +3761,7 @@ function OnboardingWizardPage({ user, setPage, setSelectedBlock }: { user: SeedU
 // ============================================================
 // FASE 5 — TICKETS DE PRODUÇÃO
 // ============================================================
-const TICKET_STATUS_LABELS: Record<TicketStatus, string> = { new: "Novo", in_production: "Em Produção", internal_review: "Revisão Interna", delivered: "Entregue" };
+const TICKET_STATUS_LABELS = SHARED_TICKET_STATUS_LABELS as Record<TicketStatus, string>;
 const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
   new: "border-slate-200/80 bg-slate-100/90 text-slate-600",
   in_production: "border-violet-200/80 bg-violet-50 text-violet-700",
@@ -4565,8 +4750,8 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
     if (late.length) items.push({ key: `bim-late:${late.map((d) => d.id).join(",")}`, title: `${late.length} demanda${late.length === 1 ? "" : "s"} BIM atrasada${late.length === 1 ? "" : "s"}`, tone: "danger", go: () => setPage("bim") });
     const waiting = bimDemands.filter((d) => d.status === "waiting_info");
     if (waiting.length) items.push({ key: `bim-wait:${waiting.map((d) => d.id).join(",")}`, title: `Terceirizado pediu informação em ${waiting.length} demanda${waiting.length === 1 ? "" : "s"}`, desc: waiting.slice(0, 2).map((d) => d.title).join(" · "), tone: "warn", go: () => setPage("bim") });
-    [...activities].filter((a) => a.userId !== currentUser.id && now - new Date(a.at).getTime() < dayMs).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 5)
-      .forEach((a) => { const b = blocks.find((x) => x.id === a.blockId); items.push({ key: `act:${a.id}`, title: a.desc, desc: `${getUserName(a.userId)}${b ? ` · ${b.title}` : ""}`, tone: "info", go: () => (b ? goBlock(b.id) : setPage("activity")) }); });
+    activities.filter((a) => !isNavigation(a) && a.userId !== currentUser.id && now - new Date(a.at).getTime() < dayMs).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 5)
+      .forEach((a) => { const b = blocks.find((x) => x.id === a.blockId); items.push({ key: `act:${a.id}`, title: a.desc, desc: `${actorName(a)}${b ? ` · ${b.title}` : ""}`, tone: "info", go: () => (b ? goBlock(b.id) : setPage("activity")) }); });
   }
 
   const unread = items.filter((i) => !seen.includes(i.key)).length;
@@ -4907,6 +5092,7 @@ function SherlockCodesPage({ setPage }: { setPage: (p: string) => void }) {
         tokens: data.tokens,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      logActivity({ type: "agent_run", entity: "agents", entityId: "sherlock-codes", desc: `Rodou o agente Sherlock Codes${userPrompt ? ` · "${userPrompt.slice(0, 80)}"` : ""}` });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -5054,6 +5240,7 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
         tokens: data.tokens,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      logActivity({ type: "agent_run", entity: "agents", entityId: "monk-lighthouse", clientId: scopeClient || undefined, desc: `Rodou o agente Monk Lighthouse · ${scopeLabel}` });
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
   };
 
@@ -5209,6 +5396,7 @@ function YodaKanbanPage({ setPage }: { setPage: (p: string) => void }) {
         tokens: data.tokens,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      logActivity({ type: "agent_run", entity: "agents", entityId: "yoda-kanban", clientId: scopeClient || undefined, desc: `Rodou o agente Yoda Kanban · ${scopeLabel}` });
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
   };
 
@@ -5353,6 +5541,7 @@ function HarveyCloserPage({ setPage }: { setPage: (p: string) => void }) {
         tokens: data.tokens,
       };
       setMessages((prev) => [...prev, assistantMsg]);
+      logActivity({ type: "agent_run", entity: "agents", entityId: "harvey-closer", clientId: scopeClient, desc: `Rodou o agente Harvey Closer · ${nome}` });
     } catch (e) { setError((e as Error).message); } finally { setLoading(false); }
   };
 
@@ -5505,6 +5694,7 @@ function ArgusWatchtowerPage({ setPage }: { setPage: (p: string) => void }) {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       const check: WatchCheck = data.check;
       setHistory((prev) => [check, ...prev]);
+      logActivity({ type: "agent_run", entity: "agents", entityId: "argus-watchtower", desc: `Rodou o Argus Watchtower agora${sendEmail ? " (com e-mail)" : ""} · ${check.overallOk ? "tudo no ar" : "há alvo fora do ar"}` });
       if (sendEmail) {
         setOkMsg(check.emailSent
           ? `Verificação concluída e e-mail enviado para ${(check.recipients || []).join(", ")}.`
@@ -5526,6 +5716,7 @@ function ArgusWatchtowerPage({ setPage }: { setPage: (p: string) => void }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       setRoutine(data.routine); setDraft(data.routine);
+      logActivity({ type: "agent_config", entity: "agents", entityId: "argus-watchtower", desc: `Salvou a rotina do Argus Watchtower · horários ${(data.routine?.hours || []).join("h, ")}h` });
       setOkMsg("Rotina salva. A partir de agora a Lambda usa estes horários e destinatários.");
     } catch (e) { setError((e as Error).message); } finally { setSaving(false); }
   };
@@ -5880,6 +6071,9 @@ function PortalHeaderActions({
       <NotificationsMenu currentUser={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />
       <button
         onClick={() => {
+          // keepalive: o registro chega mesmo com o redirect do signOut logo em seguida.
+          logActivity({ type: "logout", entity: "session", desc: "Saiu do portal" });
+          setActivityActor(null);
           setCurrentUser(null);
           setPage("dashboard");
           // Encerra TAMBÉM a sessão do NextAuth. Sem isso o logout não acontecia:
@@ -5898,6 +6092,64 @@ function PortalHeaderActions({
 }
 
 // ============================================================
+// PERSISTÊNCIA POR DELTA
+// ============================================================
+/**
+ * Manda ao servidor só o que mudou desde a última gravação confirmada
+ * (`{ upsert, delete }`), com debounce de 800ms. Em falha, desfaz o retrato
+ * otimista e tenta de novo em 5s. `pending[key]` guarda um envio imediato com
+ * keepalive para o `pagehide` (fechar a aba não perde a gravação).
+ */
+function useDeltaPersist<T extends { id: string }>(opts: {
+  key: string; path: string; items: T[]; hydrated: boolean;
+  snapshots: React.MutableRefObject<Record<string, Map<string, string>>>;
+  pending: React.MutableRefObject<Record<string, (() => void) | undefined>>;
+  retryTick: number; bumpRetry: () => void;
+  onActivities: (acts: SeedActivity[]) => void;
+}) {
+  const { key, path, items, hydrated, snapshots, pending, retryTick, bumpRetry, onActivities } = opts;
+  useEffect(() => {
+    if (!hydrated) return;
+    const snap = snapshots.current[key];
+    if (!snap) return;
+    const upsert: T[] = [];
+    const del: string[] = [];
+    const seen = new Set<string>();
+    for (const it of items) {
+      seen.add(it.id);
+      if (snap.get(it.id) !== JSON.stringify(it)) upsert.push(it);
+    }
+    snap.forEach((_, id) => { if (!seen.has(id)) del.push(id); });
+    if (!upsert.length && !del.length) { pending.current[key] = undefined; return; }
+
+    const send = async (keepalive: boolean) => {
+      pending.current[key] = undefined;
+      // Retrato otimista: evita reenviar o mesmo item enquanto o request está no ar.
+      const previous = new Map<string, string | undefined>();
+      for (const it of upsert) { previous.set(it.id, snap.get(it.id)); snap.set(it.id, JSON.stringify(it)); }
+      for (const id of del) { previous.set(id, snap.get(id)); snap.delete(id); }
+      try {
+        const r = await fetch(path, {
+          method: "POST", keepalive,
+          headers: { "Content-Type": "application/json", ...actorHeaders() },
+          body: JSON.stringify({ upsert, delete: del }),
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json().catch(() => ({}));
+        if (Array.isArray(j.activities) && j.activities.length) onActivities(j.activities as SeedActivity[]);
+      } catch (e) {
+        console.error(`Falha ao gravar ${key}:`, e);
+        previous.forEach((v, id) => { if (v === undefined) snap.delete(id); else snap.set(id, v); });
+        setTimeout(bumpRetry, 5000);
+      }
+    };
+    pending.current[key] = () => { void send(true); };
+    const t = setTimeout(() => { void send(false); }, 800);
+    return () => clearTimeout(t);
+  }, [items, hydrated, retryTick]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+// ============================================================
 // MAIN PORTAL
 // ============================================================
 export default function Portal() {
@@ -5911,13 +6163,20 @@ export default function Portal() {
   const openBlocks = (status: BlockStatus | "all") => { setBlocksPreset(status); setPage("blocks"); };
   useEffect(() => { if (page !== "blocks" && blocksPreset !== "all") setBlocksPreset("all"); }, [page, blocksPreset]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  // Retrato de cada tabela como veio do banco. Os efeitos de persistência só
-  // gravam quando o estado DIFERE disso — antes, toda abertura do portal
-  // repostava as 7 tabelas inteiras 800 ms depois de hidratar. Com o
-  // replaceAll, quem abria a tela durante uma escrita externa (importação,
-  // outro usuário) lia um retrato intermediário e o gravava por cima.
-  const hydratedSnapshot = useRef<Record<string, string>>({});
-  const unchangedSinceHydration = (key: string, value: unknown) => hydratedSnapshot.current[key] === JSON.stringify(value);
+  // Quem está logado vai em todo fetch de gravação (cabeçalho x-att-actor):
+  // é assim que o servidor sabe QUEM fez cada mudança no log de atividades.
+  useEffect(() => {
+    setActivityActor(currentUser ? { id: currentUser.id, name: currentUser.name, role: currentUser.role, email: currentUser.email, clientId: currentUser.clientId } : null);
+  }, [currentUser]);
+  // Retrato item a item de cada tabela como está no banco (id → JSON). Os
+  // efeitos de persistência mandam só o DELTA (itens que mudaram + ids
+  // removidos), nunca a tabela inteira: dois usuários ao mesmo tempo não se
+  // sobrescrevem, exclusão realmente apaga no banco, e o servidor consegue
+  // descrever cada mudança no log de atividades.
+  const persisted = useRef<Record<string, Map<string, string>>>({});
+  const pendingFlush = useRef<Record<string, (() => void) | undefined>>({});
+  const [persistRetry, setPersistRetry] = useState(0);
+  const bumpRetry = useCallback(() => setPersistRetry((n) => n + 1), []);
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
   const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
@@ -5952,20 +6211,21 @@ export default function Portal() {
     (async () => {
       try {
         const [b, t, a, c, ctr, pub, u, bd, fin] = await Promise.all([
-          load("/api/state/blocks"), load("/api/state/tickets"), load("/api/state/activities"),
+          load("/api/state/blocks"), load("/api/state/tickets"), load("/api/state/activities?days=90"),
           load("/api/state/clients"), load("/api/state/contracts"), load("/api/state/publications"),
           load("/api/state/users"), load("/api/state/bim-demands"), load("/api/state/finishes"),
         ]);
 
-        hydratedSnapshot.current = {
-          blocks: JSON.stringify(b.length ? b : INITIAL_BLOCKS), tickets: JSON.stringify(t.length ? t : TICKETS),
-          activities: JSON.stringify(a.length ? a : ACTIVITIES), clients: JSON.stringify(c.length ? c : CLIENTS),
-          contracts: JSON.stringify(ctr.length ? ctr : CONTRACTS), publications: JSON.stringify(pub.length ? pub : PUBLICATIONS),
-          users: JSON.stringify(u.length ? u : USERS), bimDemands: JSON.stringify(bd), finishes: JSON.stringify(fin),
+        const snap = (items: unknown[]) => new Map((items as { id: string }[]).map((i) => [i.id, JSON.stringify(i)]));
+        persisted.current = {
+          blocks: snap(b.length ? b : INITIAL_BLOCKS), tickets: snap(t.length ? t : TICKETS),
+          clients: snap(c.length ? c : CLIENTS), contracts: snap(ctr.length ? ctr : CONTRACTS),
+          publications: snap(pub.length ? pub : PUBLICATIONS), users: snap(u.length ? u : USERS),
+          bimDemands: snap(bd), finishes: snap(fin),
         };
         if (b.length) setBlocks(b as SeedBlock[]); else await seedIfEmpty("/api/state/blocks", b, INITIAL_BLOCKS);
         if (t.length) { setTickets(t as ProductionTicket[]); TICKETS = t as ProductionTicket[]; } else await seedIfEmpty("/api/state/tickets", t, TICKETS);
-        if (a.length) setActivities(a as SeedActivity[]); else await seedIfEmpty("/api/state/activities", a, ACTIVITIES);
+        setActivities(a as SeedActivity[]); // só leitura: o log é escrito pelo servidor
         if (c.length) { setClients(c as SeedClient[]); CLIENTS = c as SeedClient[]; } else await seedIfEmpty("/api/state/clients", c, CLIENTS);
         if (ctr.length) { setContracts(ctr as SeedContract[]); CONTRACTS = ctr as SeedContract[]; } else await seedIfEmpty("/api/state/contracts", ctr, CONTRACTS);
         if (pub.length) setPublications(pub as SeedPub[]); else await seedIfEmpty("/api/state/publications", pub, PUBLICATIONS);
@@ -6008,16 +6268,33 @@ export default function Portal() {
     })();
   }, []);
 
-  // Persistência DynamoDB com debounce 800ms (anti-flood)
-  useEffect(() => { if (!hydrated || unchangedSinceHydration("blocks", blocks)) return; const t = setTimeout(() => { fetch("/api/state/blocks", { method: "POST", body: JSON.stringify(blocks) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [blocks, hydrated]);
-  useEffect(() => { if (!hydrated) return; TICKETS = tickets; if (unchangedSinceHydration("tickets", tickets)) return; const t = setTimeout(() => { fetch("/api/state/tickets", { method: "POST", body: JSON.stringify(tickets) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [tickets, hydrated]);
-  useEffect(() => { if (!hydrated || unchangedSinceHydration("activities", activities)) return; const t = setTimeout(() => { fetch("/api/state/activities", { method: "POST", body: JSON.stringify(activities) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [activities, hydrated]);
-  useEffect(() => { if (!hydrated) return; CLIENTS = clients; if (unchangedSinceHydration("clients", clients)) return; const t = setTimeout(() => { fetch("/api/state/clients", { method: "POST", body: JSON.stringify(clients) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [clients, hydrated]);
-  useEffect(() => { if (!hydrated) return; CONTRACTS = contracts; if (unchangedSinceHydration("contracts", contracts)) return; const t = setTimeout(() => { fetch("/api/state/contracts", { method: "POST", body: JSON.stringify(contracts) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [contracts, hydrated]);
-  useEffect(() => { if (!hydrated || unchangedSinceHydration("publications", publications)) return; const t = setTimeout(() => { fetch("/api/state/publications", { method: "POST", body: JSON.stringify(publications) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [publications, hydrated]);
-  useEffect(() => { if (!hydrated || unchangedSinceHydration("bimDemands", bimDemands)) return; const t = setTimeout(() => { fetch("/api/state/bim-demands", { method: "POST", body: JSON.stringify(bimDemands) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [bimDemands, hydrated]);
-  useEffect(() => { if (!hydrated || unchangedSinceHydration("finishes", finishes)) return; const t = setTimeout(() => { fetch("/api/state/finishes", { method: "POST", body: JSON.stringify(finishes) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [finishes, hydrated]);
-  useEffect(() => { if (!hydrated) return; USERS.length = 0; USERS.push(...users); if (unchangedSinceHydration("users", users)) return; const t = setTimeout(() => { fetch("/api/state/users", { method: "POST", body: JSON.stringify(users) }).catch(() => {}); }, 800); return () => clearTimeout(t); }, [users, hydrated]);
+  // Espelhos globais usados por helpers fora do React (getUserName, getClientName…)
+  useEffect(() => { if (hydrated) TICKETS = tickets; }, [tickets, hydrated]);
+  useEffect(() => { if (hydrated) CLIENTS = clients; }, [clients, hydrated]);
+  useEffect(() => { if (hydrated) CONTRACTS = contracts; }, [contracts, hydrated]);
+  useEffect(() => { if (hydrated) { USERS.length = 0; USERS.push(...users); } }, [users, hydrated]);
+
+  // Persistência DynamoDB por DELTA, debounce 800ms. O servidor devolve as
+  // atividades que descreveu para cada mudança; elas entram no log local na hora.
+  const appendActivities = useCallback((acts: SeedActivity[]) => setActivities((prev) => {
+    const ids = new Set(prev.map((a) => a.id));
+    return [...prev, ...acts.filter((a) => !ids.has(a.id))];
+  }), []);
+  const persistOpts = { hydrated, snapshots: persisted, pending: pendingFlush, retryTick: persistRetry, bumpRetry, onActivities: appendActivities };
+  useDeltaPersist({ ...persistOpts, key: "blocks", path: "/api/state/blocks", items: blocks });
+  useDeltaPersist({ ...persistOpts, key: "tickets", path: "/api/state/tickets", items: tickets });
+  useDeltaPersist({ ...persistOpts, key: "clients", path: "/api/state/clients", items: clients });
+  useDeltaPersist({ ...persistOpts, key: "contracts", path: "/api/state/contracts", items: contracts });
+  useDeltaPersist({ ...persistOpts, key: "publications", path: "/api/state/publications", items: publications });
+  useDeltaPersist({ ...persistOpts, key: "bimDemands", path: "/api/state/bim-demands", items: bimDemands });
+  useDeltaPersist({ ...persistOpts, key: "finishes", path: "/api/state/finishes", items: finishes });
+  useDeltaPersist({ ...persistOpts, key: "users", path: "/api/state/users", items: users });
+  // Fechou a aba dentro dos 800ms? Manda o que estiver pendente com keepalive.
+  useEffect(() => {
+    const flush = () => Object.values(pendingFlush.current).forEach((fn) => fn?.());
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
 
   // Ao logar, cai na primeira página permitida. Sem isso um cliente restrito a
   // Analytics entraria direto na tela bloqueada, já que o padrão é "dashboard".
@@ -6025,6 +6302,14 @@ export default function Portal() {
     if (!currentUser) return;
     setPage((atual) => (podeAcessar(currentUser, atual) ? atual : primeiraPaginaPermitida(currentUser)));
   }, [currentUser]);
+
+  // Toda tela aberta vira "page_view" no log — é a medida de uso do portal.
+  useEffect(() => {
+    if (!currentUser) return;
+    const label = PAGE_LABELS[page] ?? page;
+    const b = page === "block_detail" ? blocks.find((x) => x.id === selectedBlock) : undefined;
+    logActivity({ type: "page_view", entity: "session", page, clientId: currentUser.clientId, desc: `Abriu a tela ${label}${b ? ` · ${b.title} (${b.sku})` : ""}` });
+  }, [page, selectedBlock, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const todayLabel = useMemo(
     () => new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "long", year: "numeric" }).format(new Date()),
@@ -6057,7 +6342,7 @@ export default function Portal() {
       );
     }
     switch (page) {
-      case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} openBlocks={openBlocks} />;
+      case "dashboard": return isClient ? <ClientDashboard user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} /> : <InternalDashboard setPage={setPage} openBlocks={openBlocks} setSelectedBlock={setSelectedBlock} setSelectedContract={setSelectedContract} />;
       case "onboarding": return <OnboardingWizardPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "blocks": return <BlocksListPage key={blocksPreset} user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} initialStatus={blocksPreset} />;
       case "block_detail": return <BlockDetailPage blockId={selectedBlock} user={currentUser} setPage={setPage} />;
@@ -6069,7 +6354,7 @@ export default function Portal() {
       case "tickets": return <ProductionTicketsPage user={currentUser} />;
       case "publications": return <PublicationsPage user={currentUser} />;
       case "analytics": return <AnalyticsPage user={currentUser} />;
-      case "activity": return <ActivityPage />;
+      case "activity": return <ActivityPage setPage={setPage} setSelectedBlock={setSelectedBlock} setSelectedContract={setSelectedContract} />;
       case "users": return <UsersPage />;
       case "finishes": return <FinishesPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "bim": return <BimPage user={currentUser} />;
@@ -6081,7 +6366,7 @@ export default function Portal() {
       case "agent_yoda_kanban": return <YodaKanbanPage setPage={setPage} />;
       case "agent_harvey_closer": return <HarveyCloserPage setPage={setPage} />;
       case "agent_argus_watchtower": return <ArgusWatchtowerPage setPage={setPage} />;
-      default: return <InternalDashboard setPage={setPage} openBlocks={openBlocks} />;
+      default: return <InternalDashboard setPage={setPage} openBlocks={openBlocks} setSelectedBlock={setSelectedBlock} setSelectedContract={setSelectedContract} />;
     }
   };
 

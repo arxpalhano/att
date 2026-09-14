@@ -5,8 +5,9 @@
  * Auto-contida de propósito: recebe o usuário logado, a lista de usuários (para
  * a administração de acesso) e os registros da KB pelo Portal, e grava POR ITEM
  * em /api/state/kb (POST objeto / DELETE ?id=). Não passa pelo persist com
- * debounce das outras tabelas (replaceAll), porque dois editores gravando a
- * tabela inteira se sobrescreveriam.
+ * debounce das outras tabelas, porque dois editores gravando a tabela inteira
+ * se sobrescreveriam. Toda gravação leva o cabeçalho x-att-actor: o servidor
+ * registra quem criou/editou/excluiu no log de atividades.
  */
 import React, { useEffect, useMemo, useRef, useState, ReactNode } from "react";
 import {
@@ -19,6 +20,7 @@ import {
   KB_ROLE_LABELS, KB_ALLOWED_EXTENSIONS, KB_MAX_FILE_MB,
   canEditBase, canViewBase, describeAccess, emptyAccess, fmtKbSize, isKbArticle, isKbBase, kbExt, kbId,
 } from "@/lib/kb";
+import { actorHeaders } from "@/lib/activity-client";
 
 // ------------------------------------------------------------
 // Aparência das bases
@@ -50,11 +52,11 @@ const fmtDateTime = (iso?: string) => (iso ? new Date(iso).toLocaleString("pt-BR
 // API (por item)
 // ------------------------------------------------------------
 async function apiSave(rec: KbRecord): Promise<void> {
-  const r = await fetch("/api/state/kb", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(rec) });
+  const r = await fetch("/api/state/kb", { method: "POST", headers: { "Content-Type": "application/json", ...actorHeaders() }, body: JSON.stringify(rec) });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
 }
 async function apiDelete(id: string): Promise<void> {
-  const r = await fetch(`/api/state/kb?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  const r = await fetch(`/api/state/kb?id=${encodeURIComponent(id)}`, { method: "DELETE", headers: actorHeaders() });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
 }
 async function apiDeleteFile(key: string): Promise<void> {

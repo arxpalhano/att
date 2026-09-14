@@ -48,7 +48,14 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
 - **Frontend/Backend:** Next.js 14 App Router, um único app. UI principal em
   `src/components/Portal.tsx` (arquivo grande — clientes, blocos, tickets, agentes).
 - **Estado persistente:** DynamoDB (us-east-1), 12 tabelas `att-*`. APIs em
-  `src/app/api/state/*`. Hidrata no mount, persiste com debounce.
+  `src/app/api/state/*` (geradas por `stateRoute()` em `src/lib/activity-server.ts`).
+  Hidrata no mount, persiste com debounce **por delta** (`{upsert, delete}`), nunca a
+  tabela inteira.
+- **Log de atividades (auditoria de uso):** gravado SÓ pelo servidor ao aplicar o delta
+  (`describeChange` em `src/lib/activity.ts`) + `POST /api/activity` para login/logout/
+  tela aberta/upload/agentes/analytics (`logActivity` em `src/lib/activity-client.ts`).
+  Tela "Atividade" mostra uso por pessoa. Não criar `setActivities([...])` no browser —
+  o servidor já descreve a mudança. PORTAL.md §6 "Atividade".
 - **Analytics:** AWS Athena (`customizador_events`). Builder em
   `src/lib/analytics-builder.ts` (com filtro de bots). Dashboard em
   `src/components/AnalyticsDashboard.tsx`.
@@ -91,6 +98,9 @@ Portal em produção, funcional. Resumo do que foi construído (ordem cronológi
 - ✅ ATT Instant: funil `/experimentar` (foto→3D IA) + plano Instant
 - ✅ BIM · Terceirizados: demandas de blocos ArchiCAD/Revit para Danilo e Raquel (perfil
   `freelancer_bim`, tela própria só com as demandas deles) — espelho do Notion. PORTAL.md §6
+- ✅ Log de atividades confiável (2026-09-09): servidor registra toda gravação de estado
+  + login/logout/telas/upload/agentes/analytics; tela Atividade com uso por pessoa, filtros
+  e CSV; exclusões passaram a apagar no banco (bug do replaceAll). PORTAL.md §6
 - ✅ Base de Conhecimento (`kb`): bases Comercial/Marketing/Tech/TI liberadas por perfil ou
   pessoa, artigos em Markdown com anexos no S3 (`kb/`). Base de TI já preenchida com todo o
   contexto técnico (portal, AWS, site WordPress, Instant, repos). `src/lib/kb.ts`,

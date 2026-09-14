@@ -76,16 +76,23 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 | `att-blocks` | Produtos/blocos 3D (clientId, contractId, sku, csku, title, status, svc, pri) |
 | `att-publications` | Publicações (blockId, url, embed, env, v) |
 | `att-tickets` | Tickets de produção (clientId, blockId, title, status, slaDate, assignedTo) |
-| `att-activities` | Log de atividades (blockId, userId, type, desc, at) |
+| `att-activities` | Log de atividades — **gravado só pelo servidor** (at, userId/userName/userRole, type, entity, entityId, blockId, clientId, desc, sessionEmail). Ver §6 "Atividade" |
 | `att-users` | Usuários do portal (email, password, name, role, clientId) |
 | `att-agent-routines` | Rotinas dos agentes automáticos (hoje só `argus-watchtower`: horários, destinatários, sites monitorados) |
 | `att-agent-checks` | Histórico de verificações do Argus Watchtower (TTL 90 dias via `expiresAt`) |
 | `att-bim-demands` | Demandas de blocos BIM para terceirizados (lote por marca: produtos, arquivos ArchiCAD/Revit/SketchUp, prazo, entrega, status) |
 | `att-kb` | Base de Conhecimento: bases (acesso por perfil/usuário) e artigos (Markdown + anexos no S3 `kb/`) |
 
-**Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`.
-Se vazias, faz seed inicial (de `src/data/seed.ts` + `wj-seed.ts` + hardcoded).
-Mudanças persistem com debounce de 800ms. Estado compartilhado entre admin e cliente.
+**Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`
+(atividades: só os últimos 90 dias, `?days=90`). Se vazias, faz seed inicial (de
+`src/data/seed.ts` + `wj-seed.ts` + hardcoded) — exceto `att-activities`, que não tem seed.
+Mudanças persistem com debounce de 800ms **por delta** (desde 2026-09-09): o browser guarda
+um retrato item a item (id → JSON) do que está no banco e manda só `{ upsert: [itens que
+mudaram], delete: [ids removidos] }` (`useDeltaPersist` em `Portal.tsx`). Isso resolveu dois
+bugs do `replaceAll` antigo: **exclusões não apagavam no banco** (o batch era só PutRequest, o
+item voltava ao recarregar) e dois usuários ao mesmo tempo se sobrescreviam. Ao fechar a
+aba dentro dos 800ms, o pendente é enviado com `keepalive` (`pagehide`). Em falha, o retrato
+é desfeito e tenta de novo em 5s. Estado compartilhado entre admin e cliente.
 
 **Status de bloco (`BlockStatus`):** draft, awaiting_client_files, client_files_under_review,
 ready_to_start, in_modeling, **in_texturing**, awaiting_client_material_validation, approved_for_programming,
@@ -107,7 +114,7 @@ espelhar o "Banco de Produtos" do Notion, onde são estágios com dezenas de pro
 
 **1. Tela nunca lê constante de seed.** `CLIENTS`, `CONTRACTS`, `USERS`, `TICKETS`
 são variáveis de módulo espelhadas do estado por efeito (uma renderização atrás);
-`ACTIVITIES`, `PUBLICATIONS` e `INITIAL_BLOCKS` são só o seed inicial e **nunca**
+`PUBLICATIONS` e `INITIAL_BLOCKS` são só o seed inicial (`ACTIVITIES` é vazio) e **nunca**
 acompanham o app. Componente que precisa de dado lê do `AppContext`
 (`blocks`, `activities`, `clients`, `contracts`, `publications`, `users`). Foi isso
 que congelava o dashboard: "Atividade recente" mostrava o seed de março enquanto o
@@ -117,8 +124,9 @@ banco tinha movimentação de setembro.
 bloco em `awaiting_client_material_validation` ou `awaiting_client_final_validation`
 É a aprovação pendente (`isAwaitingClient`). Aprovar/pedir revisão muda o status
 (`APPROVAL_NEXT`: material → `approved_for_programming` / volta `in_modeling`;
-final → `approved` / volta `internal_review`) e grava atividade
-`approval_approved` / `approval_rejected`, que é o histórico das "resolvidas".
+final → `approved` / volta `internal_review`); o servidor, ao gravar o bloco, registra
+`approval_approved` / `approval_rejected` (ator com `role: client` saindo de um status
+`awaiting_client_*`; `clientRevisions` subiu = revisão), que é o histórico das "resolvidas".
 Dashboard, badge da sidebar, tela de Aprovações e aba do detalhe do bloco usam o
 mesmo critério — por isso batem. Limite de 3 revisões (`MAX_CLIENT_REVISIONS`).
 
@@ -336,6 +344,41 @@ lista vazia. Tipos e helpers (`canViewBase`, `canEditBase`) em `src/lib/kb.ts`; 
 `archtechtour-assets` (até então só liberava `archtechtour.com` e localhost — o upload de
 arquivos de bloco em produção também dependia disso).
 
+### Atividade (log de uso do portal) — refeito em 2026-09-09
+
+**Por que:** virou regra a equipe usar o portal, e a gestão cobra pelo log. Antes só 6 ações
+gravavam registro (bloco criar/editar/excluir/status, aprovação, upload), o browser gravava
+com 800ms de atraso e sem retry, e havia 12 registros fictícios do seed. Agora:
+
+- **O servidor escreve o log, nunca o browser.** Toda rota de estado recebe o delta, lê o
+  item anterior, grava o novo e descreve a diferença (`describeChange` em
+  `src/lib/activity.ts` — um arquivo isomórfico, sem AWS SDK, que também é a fonte única dos
+  rótulos de status de bloco/ticket/BIM usados pelo Portal). Se gravou, registrou: blocos,
+  tickets (status, responsável), clientes, contratos, publicações, usuários (senha nunca
+  aparece — só "alterou: senha"), demandas BIM (status, arquivos entregues), acabamentos
+  (catálogo e por produto) e KB (base, artigo, anexo). Importação em massa (>10 criações num
+  delta) vira um único registro `import`.
+- **Quem fez** vem do cabeçalho `x-att-actor` (set por `setActivityActor` ao logar, em
+  `src/lib/activity-client.ts`) mais `sessionEmail` da sessão Microsoft quando existe
+  (`getServerSession(authOptions)`, `src/lib/auth-options.ts`). Cada registro carrega
+  `userName`/`userRole`, então continua legível se o usuário for excluído. Usuário Microsoft
+  sem cadastro em Usuários recebe id estável `ms_<email>` (antes era `ms_<timestamp>`, e as
+  ações ficavam sem nome).
+- **Eventos fora das tabelas** (`logActivity`, imediato, `keepalive`, 1 retry): `login`
+  (Microsoft ou senha), `logout`, `page_view` (toda tela aberta; bloco inclui título e SKU),
+  `asset_uploaded`, `agent_run` (Sherlock/Monk/Yoda/Harvey/Argus), `agent_config` (rotina do
+  Argus), `analytics_refresh` (botão Atualizar do dashboard e Gerar/Atualizar do admin).
+- **Tela Atividade** (`ActivityPage`): lê sempre do servidor (`/api/activity?days=`);
+  KPIs (ações, telas abertas, pessoas ativas, **sem uso no período**); tabela "Uso por
+  pessoa" que parte da lista de usuários — quem não usou aparece com zero, em vermelho
+  (alternância equipe+terceirizados × todos); filtros por período (7/30/90/tudo), pessoa,
+  área, texto; navegação (page_view/login/logout) escondida por padrão; exportação CSV.
+  Dashboard "Movimentações", notificações e timeline do bloco ignoram navegação.
+- `POST /api/state/reseed` **não limpa mais** `att-activities`. Os 12 registros de seed
+  (`al1`..`al12`) foram apagados do banco em 2026-09-09.
+- Volume: `page_view` gera dezenas de linhas por pessoa/dia; a leitura é Scan com filtro
+  por `at`. Se a tabela passar de ~100k itens, criar índice por data ou TTL.
+
 ## 7. Analytics
 
 **Pipeline (própria, SEM Google/GA4):**
@@ -503,8 +546,16 @@ destinatário novo fora do domínio, verificar antes:
 
 ## 9. Endpoints da API
 
-**Estado (DynamoDB):** `GET/POST /api/state/{blocks,tickets,activities,clients,contracts,publications,users,bim-demands,finishes,kb}`
-(POST aceita item único ou array; array = replaceAll).
+**Estado (DynamoDB):** `GET/POST/DELETE /api/state/{blocks,tickets,clients,contracts,publications,users,bim-demands,finishes,kb}`
+— rotas geradas por `stateRoute()` em `src/lib/activity-server.ts` (a KB é manual por causa da senha).
+POST `{ upsert, delete }` = delta com log de atividade; POST objeto = upsert de um item (com log);
+POST array = replaceAll (só seed/manutenção, sem log); DELETE `?id=` (com log). Toda gravação leva o
+cabeçalho `x-att-actor` (JSON `{id,name,role,email,clientId}` de quem está logado).
+
+**Log de atividades:** `GET /api/state/activities?days=90` (leitura; POST é ignorado — nada do browser
+escreve direto no log). `POST /api/activity` grava eventos que não passam por tabela de estado
+(`login`, `logout`, `page_view`, `asset_uploaded`, `agent_run`, `agent_config`, `analytics_refresh`;
+tipos fora dessa lista são recusados) e `GET /api/activity?days=30&user=&entity=&client=` lista.
 
 **Manutenção (admin, server-side):**
 - `POST /api/state/reseed` — limpa e re-popula tabelas com seed consolidado + reconcilia contadores
@@ -622,6 +673,6 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
    estado do `AppContext`, então o efeito de persistência nunca disparava e nada
    chegava ao DynamoDB (confirmado: `att-users` tinha só os 25 do seed).
    Corrigido; a página passa a consumir `users/setUsers` do contexto.
-   ⚠️ Risco conhecido que continua de pé: o persist manda o array inteiro
-   (`replaceAll`), então duas abas/admins editando ao mesmo tempo = o último
-   sobrescreve o outro.
+   ~~Risco conhecido: o persist manda o array inteiro (`replaceAll`), então duas
+   abas/admins editando ao mesmo tempo = o último sobrescreve o outro.~~ Resolvido
+   em 2026-09-09 com a persistência por delta (ver §3).

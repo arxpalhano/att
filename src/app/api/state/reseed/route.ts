@@ -2,7 +2,8 @@
  * POST /api/state/reseed
  *
  * Endpoint admin-only que apaga TODOS os dados das tabelas mutáveis
- * (blocks, publications, contracts, tickets, activities) e re-seeda
+ * (blocks, publications, contracts, tickets) e re-seeda — o log de
+ * atividades (att-activities) é preservado
  * com os dados consolidados de seed.ts no SERVIDOR — sem depender
  * do browser/cache JS do admin.
  *
@@ -82,7 +83,7 @@ export async function POST() {
       publications: await clearTable(doc, "att-publications"),
       contracts: await clearTable(doc, "att-contracts"),
       tickets: await clearTable(doc, "att-tickets"),
-      activities: await clearTable(doc, "att-activities"),
+      // att-activities NÃO é limpa: é o log de auditoria de uso do portal.
     };
 
     // 3. Reseed com dados consolidados

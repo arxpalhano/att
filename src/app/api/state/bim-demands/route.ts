@@ -1,34 +1,15 @@
 /**
- * Demandas de blocos BIM (terceirizados). Mesmo contrato das outras rotas de
- * estado: GET lista tudo; POST com array = replaceAll, com objeto = upsert.
+ * Estado: bim-demands (tabela att-bim-demands). Rota gerada por stateRoute():
+ * GET lista; POST { upsert, delete } aplica delta COM log de atividade;
+ * POST array = replaceAll (seed); DELETE ?id= exclui (com log).
+ * Ver src/lib/activity-server.ts.
  */
-import { NextRequest, NextResponse } from "next/server";
-import { bootstrapAmplifyCredentials } from "@/lib/amplify-credentials";
-import { scanAll, putItem, replaceAll, TABLES } from "@/lib/dynamo";
-
-bootstrapAmplifyCredentials();
+import { stateRoute } from "@/lib/activity-server";
+import { TABLES } from "@/lib/dynamo";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  try {
-    const items = await scanAll(TABLES.BIM_DEMANDS);
-    return NextResponse.json({ items });
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-    if (Array.isArray(body)) {
-      await replaceAll(TABLES.BIM_DEMANDS, body);
-      return NextResponse.json({ ok: true, count: body.length });
-    }
-    await putItem(TABLES.BIM_DEMANDS, body);
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
-  }
-}
+const route = stateRoute(TABLES.BIM_DEMANDS, "bim-demands");
+export const GET = route.GET;
+export const POST = route.POST;
+export const DELETE = route.DELETE;

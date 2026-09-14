@@ -1,4 +1,5 @@
 "use client";
+import { logActivity } from "@/lib/activity-client";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -306,12 +307,13 @@ export default function AnalyticsDashboard({
       const fresh = await res.json();
       setData(fresh);
       if (newRange) setRange(newRange);
+      logActivity({ type: "analytics_refresh", entity: "analytics", entityId: clientAlias, desc: `Atualizou o analytics de ${clientName || clientAlias} (${r.inicio} a ${r.fim})` });
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setRefreshing(false);
     }
-  }, [clientAlias, range]);
+  }, [clientAlias, clientName, range]);
 
   const handleRangeChange = useCallback((r: DateRange) => {
     setRange(r);

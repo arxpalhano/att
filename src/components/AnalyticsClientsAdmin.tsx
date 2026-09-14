@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
+import { logActivity } from "@/lib/activity-client";
 import {
   RefreshCw, Plus, Database, CheckCircle, AlertCircle, X, Calendar,
 } from "lucide-react";
@@ -54,6 +55,7 @@ export default function AnalyticsClientsAdmin() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       loadClients(); // recarrega lista com last_updated novo
+      logActivity({ type: "analytics_refresh", entity: "analytics", entityId: alias, desc: `Gerou/atualizou o analytics de ${alias} (últimos 30 dias)` });
     } catch (e) {
       setError(`Refresh ${alias}: ${(e as Error).message}`);
     } finally {
