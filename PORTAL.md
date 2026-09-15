@@ -67,7 +67,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 
 ## 5. Modelo de dados (DynamoDB)
 
-12 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
+13 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
 
 | Tabela | Conteúdo |
 |--------|----------|
@@ -82,6 +82,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 | `att-agent-checks` | Histórico de verificações do Argus Watchtower (TTL 90 dias via `expiresAt`) |
 | `att-bim-demands` | Demandas de blocos BIM para terceirizados (lote por marca: produtos, arquivos ArchiCAD/Revit/SketchUp, prazo, entrega, status) |
 | `att-kb` | Base de Conhecimento: bases (acesso por perfil/usuário) e artigos (Markdown + anexos no S3 `kb/`) |
+| `att-assets` | Metadados dos arquivos enviados por bloco (S3 `clientes/<clientId>/blocos/<blockId>/…`). Até 2026-09-15 viviam só na memória do navegador |
 
 **Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`
 (atividades: só os últimos 90 dias, `?days=90`). Se vazias, faz seed inicial (de
@@ -378,6 +379,29 @@ com 800ms de atraso e sem retry, e havia 12 registros fictícios do seed. Agora:
   (`al1`..`al12`) foram apagados do banco em 2026-09-09.
 - Volume: `page_view` gera dezenas de linhas por pessoa/dia; a leitura é Scan com filtro
   por `at`. Se a tabela passar de ~100k itens, criar índice por data ou TTL.
+
+### Correções de 2026-09-15 (relato da Jéssica: "não salva", "material some", "upload falha")
+
+1. **Acento no nome derrubava toda gravação.** O cabeçalho `x-att-actor` (quem está agindo) ia
+   como JSON cru; "Jéssica" tem `é`, cabeçalho HTTP só aceita ISO-8859-1, e o request voltava
+   **400 antes de chegar ao handler** — bloco, ticket, acabamento, atividade, tudo perdido, com o
+   cliente tentando de novo a cada 5 s (2.930 requests num dia). Agora o valor vai em
+   `encodeURIComponent` e o servidor aceita os dois formatos (`readActor`). Quem não tem acento
+   nunca sentiu. O bloco "Poltrona Caju" e os tickets criados por ela em 14–15/09 **não existem
+   no banco** — precisam ser recriados.
+2. **Upload "Failed to fetch".** `/api/upload` criava o `S3Client` no load do módulo com
+   `APP_AWS_REGION || AWS_REGION`; na Lambda do Amplify (sa-east-1) a URL saía assinada para a
+   região errada e o bucket (us-east-1) devolvia **301** — no browser vira "Failed to fetch".
+   Passou a usar `getS3()` (região em runtime) + `bootstrapAmplifyCredentials()`.
+3. **Arquivos sumiam ao recarregar.** Não existia tabela: `assets` era só estado React (e o
+   `checkReadiness` lia a constante de seed). Criada `att-assets` (`scripts/assets-infra.sh`),
+   rota `/api/state/assets` via `stateRoute`, carga tolerante no mount e `useDeltaPersist`.
+   Estado inicial vazio (sem os arquivos fictícios do seed).
+4. **Responsável do bloco.** Virou um seletor na Visão Geral do bloco; muda `owner` e o
+   `assignedTo` dos tickets abertos do bloco. Na tela Tickets, atribuir/criar ticket também
+   grava o `owner` do bloco. Antes eram dois campos sem relação.
+5. **Ticket duplicado.** Criar bloco já abre o ticket "– Modelagem"; o modal Novo Ticket agora
+   avisa quando o bloco escolhido já tem ticket em aberto.
 
 ## 7. Analytics
 

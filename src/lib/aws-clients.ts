@@ -21,8 +21,8 @@ function getRegion(): string {
   return process.env.APP_AWS_REGION || "us-east-1";
 }
 
-export function getS3(): S3Client {
-  return new S3Client({ region: getRegion() });
+export function getS3(extra: Partial<ConstructorParameters<typeof S3Client>[0]> = {}): S3Client {
+  return new S3Client({ region: getRegion(), ...extra });
 }
 
 export function getAthena(): AthenaClient {

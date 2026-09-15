@@ -38,7 +38,11 @@ export async function readActor(req: NextRequest): Promise<{ actor: ActivityActo
   const raw = req.headers.get(ACTOR_HEADER);
   if (raw) {
     try {
-      const p = JSON.parse(raw);
+      // Vem codificado (encodeURIComponent) — acento em cabeçalho HTTP derruba o
+      // request com 400 antes de chegar aqui. Aceita também o JSON cru (versão antiga).
+      let txt = raw;
+      try { txt = decodeURIComponent(raw); } catch { /* já era JSON cru */ }
+      const p = JSON.parse(txt);
       if (p && typeof p.id === "string") actor = { id: p.id, name: String(p.name ?? p.id), role: String(p.role ?? "unknown"), email: p.email, clientId: p.clientId };
     } catch { /* cabeçalho inválido: fica anônimo */ }
   }

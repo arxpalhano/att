@@ -11,16 +11,21 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { bootstrapAmplifyCredentials } from "@/lib/amplify-credentials";
+import { getS3 } from "@/lib/aws-clients";
 
-// SDK default provider chain: env vars em dev, IAM Role em Lambda/Amplify.
-const s3 = new S3Client({
-  region: process.env.APP_AWS_REGION || process.env.AWS_REGION || "us-east-1",
-  // Disable automatic checksum (CRC32) added by SDK v3 >= 3.750 — browser PUT does not send it
-  requestChecksumCalculation: "WHEN_REQUIRED",
-  responseChecksumValidation: "WHEN_REQUIRED",
-});
+bootstrapAmplifyCredentials();
+
+export const dynamic = "force-dynamic";
+
+// ⚠️ Antes o client era criado no load do módulo com `APP_AWS_REGION || AWS_REGION`;
+// na Lambda do Amplify (sa-east-1) a URL saía assinada para a região errada e o
+// bucket (us-east-1) respondia 301 — no browser isso vira "Failed to fetch".
+// getS3() resolve a região em runtime (us-east-1) e desliga o checksum CRC32
+// que o SDK novo exigiria no PUT do browser.
+const s3 = () => getS3({ requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED" });
 
 const BUCKET = process.env.S3_BUCKET_NAME || "archtechtour-assets";
 
@@ -70,11 +75,11 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const uploadUrl = await getSignedUrl(s3, putCommand, { expiresIn: 300 }); // 5 minutos
+    const uploadUrl = await getSignedUrl(s3(), putCommand, { expiresIn: 300 }); // 5 minutos
 
     // Gerar URL pré-assinada para GET (leitura do arquivo depois do upload)
     const getCommand = new GetObjectCommand({ Bucket: BUCKET, Key: key });
-    const readUrl = await getSignedUrl(s3, getCommand, { expiresIn: 3600 * 24 }); // 24h
+    const readUrl = await getSignedUrl(s3(), getCommand, { expiresIn: 3600 * 24 }); // 24h
 
     return NextResponse.json({
       uploadUrl,

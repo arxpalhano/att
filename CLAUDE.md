@@ -47,7 +47,7 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
 
 - **Frontend/Backend:** Next.js 14 App Router, um único app. UI principal em
   `src/components/Portal.tsx` (arquivo grande — clientes, blocos, tickets, agentes).
-- **Estado persistente:** DynamoDB (us-east-1), 12 tabelas `att-*`. APIs em
+- **Estado persistente:** DynamoDB (us-east-1), 13 tabelas `att-*`. APIs em
   `src/app/api/state/*` (geradas por `stateRoute()` em `src/lib/activity-server.ts`).
   Hidrata no mount, persiste com debounce **por delta** (`{upsert, delete}`), nunca a
   tabela inteira.
@@ -111,7 +111,6 @@ dashboards; dashboards zerados corrigidos (era o parquet ETL); bloco editável+e
 filtro de marca nas publicações.
 
 **Pendências abertas** (ver `PORTAL.md §13`):
-- 🟠 Rodar `scripts/kb-infra.sh` (IAM da `att-kb` + CORS do bucket) — sem isso a KB não carrega em produção
 - 🔴 Rotacionar chave AWS legada `AKIA47CRXRD2MWFO4FKS` (adiado a pedido do dono)
 - 🟡 Patch no JS do customizador (Verge3D): anexar `session_id` nas interações
   (hoje AR/download/whatsapp não têm session_id — só o `session_start` tem)

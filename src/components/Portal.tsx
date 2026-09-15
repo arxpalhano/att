@@ -455,9 +455,9 @@ const MAX_CLIENT_REVISIONS = 3;
 // criado ou excluído, então ele descola da realidade no primeiro bloco novo.
 const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter((b) => b.contractId === contractId).length;
 
-function checkReadiness(blockId: string, serviceType: ServiceType) {
+function checkReadiness(blockId: string, serviceType: ServiceType, assets: SeedAsset[]) {
   const required = READINESS_RULES[serviceType] || [];
-  const blockAssets = ASSETS.filter((a) => a.blockId === blockId);
+  const blockAssets = assets.filter((a) => a.blockId === blockId);
   const cats = new Set(blockAssets.map((a) => a.cat));
   const present = required.filter((c) => cats.has(c));
   const missing = required.filter((c) => !cats.has(c));
@@ -2290,7 +2290,7 @@ function BlockEditModal({ initial, onClose, onSave }: {
 }
 
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
-  const { blocks, setBlocks, activities, setActivities, assets, setAssets, publications, setPublications, tickets, setTickets } = useContext(AppContext);
+  const { blocks, setBlocks, activities, setActivities, assets, setAssets, publications, setPublications, tickets, setTickets, users } = useContext(AppContext);
   const block = blocks.find((b) => b.id === blockId);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -2317,7 +2317,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const blockActivities = activities.filter((a) => a.blockId === block.id && !isNavigation(a)).sort((a, b) => b.at.localeCompare(a.at));
   const approvalHistory = blockActivities.filter((a) => a.type === "approval_approved" || a.type === "approval_rejected");
   const approvalRule = APPROVAL_NEXT[block.status];
-  const readiness = checkReadiness(block.id, block.svc);
+  const readiness = checkReadiness(block.id, block.svc, assets);
   const publication = publications.find((p) => p.blockId === block.id);
   const validNext = VALID_TRANSITIONS[block.status] || [];
   const isClient = user.role === "client";
@@ -2417,7 +2417,24 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                 <div><p className="text-xs text-slate-400">Contrato</p><p className="font-medium text-slate-700">{contract?.title || "—"}</p></div>
                 <div><p className="text-xs text-slate-400">Nº do Bloco</p><p className="font-medium text-slate-700">#{block.n}</p></div>
                 <div><p className="text-xs text-slate-400">Criado em</p><p className="font-medium text-slate-700">{fmtDate(block.created)}</p></div>
-                {!isClient && <div><p className="text-xs text-slate-400">Responsável</p><p className="font-medium text-slate-700">{block.owner ? getUserName(block.owner) : "Não atribuído"}</p></div>}
+                {!isClient && (
+                  <div>
+                    <p className="text-xs text-slate-400">Responsável</p>
+                    {/* Muda aqui e nos tickets abertos do bloco — e o inverso vale na tela Tickets. */}
+                    <select
+                      value={block.owner ?? ""}
+                      onChange={(e) => {
+                        const owner = e.target.value || undefined;
+                        setBlocks(blocks.map((b) => (b.id === block.id ? { ...b, owner } : b)));
+                        setTickets(tickets.map((t) => (t.blockId === block.id && t.status !== "delivered" ? { ...t, assignedTo: owner } : t)));
+                      }}
+                      className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400"
+                    >
+                      <option value="">Não atribuído</option>
+                      {users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                  </div>
+                )}
                 {!isClient && <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>}
                 {block.published && <div><p className="text-xs text-slate-400">Publicado em</p><p className="font-medium text-slate-700">{fmtDate(block.published)}</p></div>}
                 <div>
@@ -3773,7 +3790,7 @@ const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
 };
 
 function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: ProductionTicket) => void }) {
-  const { blocks } = useContext(AppContext);
+  const { blocks, tickets } = useContext(AppContext);
   const [title, setTitle] = useState("");
   const [clientId, setClientId] = useState("");
   const [blockId, setBlockId] = useState("");
@@ -3850,6 +3867,16 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
                 {filteredBlocks.map((b) => <option key={b.id} value={b.id}>#{b.n} · {b.title}</option>)}
               </select>
               {q && <p className="mt-1 text-[11px] text-slate-400">{filteredBlocks.length} de {clientBlocks.length} blocos{filteredBlocks.length === 0 ? " — nada com esse texto" : ""}</p>}
+              {(() => {
+                // Criar bloco já abre um ticket "– Modelagem" automaticamente; avisa
+                // para a pessoa não abrir um segundo sem querer.
+                const abertos = blockId ? tickets.filter((t) => t.blockId === blockId && t.status !== "delivered") : [];
+                return abertos.length ? (
+                  <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
+                    Este bloco já tem {abertos.length} ticket{abertos.length === 1 ? "" : "s"} em aberto: {abertos.map((t) => t.title).join(" · ")}. Confira antes de criar outro.
+                  </p>
+                ) : null;
+              })()}
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -3898,7 +3925,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
 }
 
 function ProductionTicketsPage({ user }: { user: SeedUser }) {
-  const { blocks, tickets, setTickets, clients, users } = useContext(AppContext);
+  const { blocks, setBlocks, tickets, setTickets, clients, users } = useContext(AppContext);
   const [filter, setFilter] = useState<TicketStatus | "all">("all");
   const [filterClient, setFilterClient] = useState<string>("");
   const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
@@ -3918,9 +3945,15 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   });
   const visible = scoped.filter((t) => filter === "all" || t.status === filter);
 
+  // Responsável do ticket = responsável do bloco (a tela do bloco mostra o mesmo campo).
+  const syncBlockOwner = (blockId: string | undefined, userId: string | undefined) => {
+    if (!blockId) return;
+    setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, owner: userId || undefined } : b)));
+  };
   const createTicket = (t: ProductionTicket) => {
     const updated = [...tickets, t];
     setTickets(updated);
+    if (t.assignedTo) syncBlockOwner(t.blockId, t.assignedTo);
   };
 
   const updateStatus = (id: string, status: TicketStatus) => {
@@ -3929,8 +3962,9 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   };
 
   const assignTicket = (id: string, userId: string) => {
-    const updated = tickets.map((t) => t.id === id ? { ...t, assignedTo: userId } : t);
+    const updated = tickets.map((t) => t.id === id ? { ...t, assignedTo: userId || undefined } : t);
     setTickets(updated);
+    syncBlockOwner(tickets.find((t) => t.id === id)?.blockId, userId);
   };
 
   const internalUsers = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
@@ -6182,7 +6216,8 @@ export default function Portal() {
   const bumpRetry = useCallback(() => setPersistRetry((n) => n + 1), []);
   const [blocks, setBlocks] = useState<SeedBlock[]>(INITIAL_BLOCKS);
   const [activities, setActivities] = useState<SeedActivity[]>(ACTIVITIES);
-  const [assets, setAssets] = useState<SeedAsset[]>([...ASSETS]);
+  // Arquivos dos blocos: começa vazio e carrega de att-assets (nunca o seed fictício).
+  const [assets, setAssets] = useState<SeedAsset[]>([]);
   const [tickets, setTickets] = useState<ProductionTicket[]>(TICKETS);
   const [clients, setClients] = useState<SeedClient[]>(CLIENTS);
   const [contracts, setContracts] = useState<SeedContract[]>(CONTRACTS);
@@ -6246,6 +6281,23 @@ export default function Portal() {
     })();
   }, []);
 
+  // Arquivos dos blocos (att-assets): carga separada e tolerante — se falhar, a
+  // aba "Arquivos" fica vazia e nada é gravado (sem retrato, o persist não roda).
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/state/assets");
+        if (!r.ok) throw new Error(`/api/state/assets → HTTP ${r.status}`);
+        const j = await r.json();
+        if (!Array.isArray(j.items)) throw new Error(j.error || "/api/state/assets → resposta sem lista");
+        persisted.current.assets = new Map((j.items as SeedAsset[]).map((i) => [i.id, JSON.stringify(i)]));
+        setAssets(j.items as SeedAsset[]);
+      } catch (e) {
+        console.error("Failed to load assets:", e);
+      }
+    })();
+  }, []);
+
   // Base de Conhecimento: carga separada e tolerante a falha — se a tabela
   // att-kb não existir ou faltar permissão IAM, só a KB fica indisponível
   // (com aviso na tela), sem derrubar a hidratação das outras tabelas.
@@ -6292,6 +6344,7 @@ export default function Portal() {
   useDeltaPersist({ ...persistOpts, key: "bimDemands", path: "/api/state/bim-demands", items: bimDemands });
   useDeltaPersist({ ...persistOpts, key: "finishes", path: "/api/state/finishes", items: finishes });
   useDeltaPersist({ ...persistOpts, key: "users", path: "/api/state/users", items: users });
+  useDeltaPersist({ ...persistOpts, key: "assets", path: "/api/state/assets", items: assets });
   // Fechou a aba dentro dos 800ms? Manda o que estiver pendente com keepalive.
   useEffect(() => {
     const flush = () => Object.values(pendingFlush.current).forEach((fn) => fn?.());

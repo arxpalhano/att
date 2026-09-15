@@ -24,8 +24,13 @@ export function getActivityActor(): ActivityActor | null {
   return actor;
 }
 
+/**
+ * O valor vai codificado (encodeURIComponent): cabeçalho HTTP só aceita
+ * ISO-8859-1/ASCII, e um nome com acento ("Jéssica") fazia o servidor responder
+ * 400 em TODA gravação da pessoa — bloco, ticket, acabamento, atividade.
+ */
 export function actorHeaders(): Record<string, string> {
-  return actor ? { [ACTOR_HEADER]: JSON.stringify(actor) } : {};
+  return actor ? { [ACTOR_HEADER]: encodeURIComponent(JSON.stringify(actor)) } : {};
 }
 
 export interface ClientActivityInput {
@@ -44,7 +49,7 @@ export async function logActivity(input: ClientActivityInput, actorOverride?: Ac
   const who = actorOverride ?? actor;
   if (!who) return null;
   const body = JSON.stringify(input);
-  const headers = { "Content-Type": "application/json", [ACTOR_HEADER]: JSON.stringify(who) };
+  const headers = { "Content-Type": "application/json", [ACTOR_HEADER]: encodeURIComponent(JSON.stringify(who)) };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch("/api/activity", { method: "POST", headers, body, keepalive: true });
