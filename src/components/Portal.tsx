@@ -17,7 +17,7 @@ import {
   AlertTriangle, Eye, ChevronDown, ArrowLeft, Copy, Check, Layers,
   Settings, UserCheck, Clipboard, Box, FileUp, ExternalLink, Zap,
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
-  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw, BookOpen
+  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw, BookOpen, Download
 } from "lucide-react";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
@@ -89,6 +89,8 @@ export interface SeedBlock {
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
   name: string; size: number; v: number; by: string;
+  /** Chave do objeto no S3 (clientes/<clientId>/blocos/<blockId>/<cat>/<ts>_<nome>). Sem ela não há download. */
+  key?: string;
   analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; notes?: string[]; };
   uploadedAt?: string;
 }
@@ -1739,7 +1741,7 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
           const err = await uploadResp.json().catch(() => ({}));
           throw new Error(err.error || "Erro ao obter URL de upload");
         }
-        const { uploadUrl, readUrl } = await uploadResp.json();
+        const { uploadUrl, readUrl, key: s3Key } = await uploadResp.json();
         setProgress(35);
 
         // 2. Upload directly to S3
@@ -1785,6 +1787,7 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
           by: currentUser?.id ?? "u1",
           uploadedAt: new Date().toISOString(),
           analysis: analysis ?? undefined,
+          key: s3Key,
         };
         onUploaded(newAsset);
         allResults.push({ file, result: analysis });
@@ -2197,6 +2200,14 @@ function AssetRow({ asset }: { asset: SeedAsset }) {
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs text-slate-400">{fmtSize(asset.size)}</span>
+          {asset.key && (
+            <>
+              {/\.(png|jpe?g|webp|gif|pdf|svg)$/i.test(asset.name) && (
+                <a href={`/api/assets/file?key=${encodeURIComponent(asset.key)}&name=${encodeURIComponent(asset.name)}&inline=1`} target="_blank" rel="noreferrer" title="Abrir" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Eye className="w-4 h-4" /></a>
+              )}
+              <a href={`/api/assets/file?key=${encodeURIComponent(asset.key)}&name=${encodeURIComponent(asset.name)}`} title="Baixar" className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"><Download className="w-4 h-4" /></a>
+            </>
+          )}
           {a ? (
             <button
               onClick={() => setExpanded(!expanded)}
