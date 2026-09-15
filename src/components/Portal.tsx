@@ -6283,7 +6283,11 @@ export default function Portal() {
         ]);
 
         const snap = (items: unknown[]) => new Map((items as { id: string }[]).map((i) => [i.id, JSON.stringify(i)]));
+        // Mescla (não substitui): a carga dos arquivos (att-assets) roda em paralelo
+        // e costuma terminar antes — substituir o objeto apagava o retrato dela e o
+        // persist de arquivos nunca rodava (upload "sumia" ao trocar de página).
         persisted.current = {
+          ...persisted.current,
           blocks: snap(b.length ? b : INITIAL_BLOCKS), tickets: snap(t.length ? t : TICKETS),
           clients: snap(c.length ? c : CLIENTS), contracts: snap(ctr.length ? ctr : CONTRACTS),
           publications: snap(pub.length ? pub : PUBLICATIONS), users: snap(u.length ? u : USERS),
