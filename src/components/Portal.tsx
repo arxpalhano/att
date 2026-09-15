@@ -151,6 +151,11 @@ const READINESS_RULES: Record<ServiceType, AssetCategory[]> = {
   plus: ["cad", "finishing", "photos", "technical_drawing"],
   ultra: ["cad", "finishing", "photos", "technical_drawing", "videos", "3d_block"],
 };
+/** Fases que geram ticket na fila quando o bloco entra nelas sem ticket aberto. */
+const PRODUCTION_PHASE_LABELS: Partial<Record<BlockStatus, string>> = {
+  ready_to_start: "Modelagem", in_modeling: "Modelagem", in_texturing: "Texturização",
+  approved_for_programming: "Programação", in_programming: "Programação", bim_conversion: "Conversão BIM",
+};
 const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
   draft: ["awaiting_client_files", "blocked", "on_hold", "archived"],
   awaiting_client_files: ["client_files_under_review", "blocked", "on_hold", "archived"],
@@ -455,10 +460,13 @@ const MAX_CLIENT_REVISIONS = 3;
 // criado ou excluído, então ele descola da realidade no primeiro bloco novo.
 const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter((b) => b.contractId === contractId).length;
 
-function checkReadiness(blockId: string, serviceType: ServiceType, assets: SeedAsset[]) {
+function checkReadiness(blockId: string, serviceType: ServiceType, assets: SeedAsset[], finishesFilled = false) {
   const required = READINESS_RULES[serviceType] || [];
   const blockAssets = assets.filter((a) => a.blockId === blockId);
   const cats = new Set(blockAssets.map((a) => a.cat));
+  // "Acabamento / Material" também fica ok quando o produto tem os acabamentos
+  // cadastrados na aba Acabamentos — é o que a equipe usa para texturizar.
+  if (finishesFilled) cats.add("finishing");
   const present = required.filter((c) => cats.has(c));
   const missing = required.filter((c) => !cats.has(c));
   const pct = required.length ? Math.round((present.length / required.length) * 100) : 100;
@@ -2291,6 +2299,7 @@ function BlockEditModal({ initial, onClose, onSave }: {
 
 function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: SeedUser; setPage: (p: string) => void }) {
   const { blocks, setBlocks, activities, setActivities, assets, setAssets, publications, setPublications, tickets, setTickets, users } = useContext(AppContext);
+  const { forBlock: finishesForBlock } = useFinishes();
   const block = blocks.find((b) => b.id === blockId);
   const [copied, setCopied] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -2317,7 +2326,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const blockActivities = activities.filter((a) => a.blockId === block.id && !isNavigation(a)).sort((a, b) => b.at.localeCompare(a.at));
   const approvalHistory = blockActivities.filter((a) => a.type === "approval_approved" || a.type === "approval_rejected");
   const approvalRule = APPROVAL_NEXT[block.status];
-  const readiness = checkReadiness(block.id, block.svc, assets);
+  const readiness = checkReadiness(block.id, block.svc, assets, isFilled(finishesForBlock(block.id)));
   const publication = publications.find((p) => p.blockId === block.id);
   const validNext = VALID_TRANSITIONS[block.status] || [];
   const isClient = user.role === "client";
@@ -2344,9 +2353,23 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const revisionLimitReached = revisions >= MAX_REVISIONS;
   const revisionWarning = revisions === MAX_REVISIONS - 1;
 
+  // Bloco que entra numa fase de produção sem ticket aberto ganha um ticket
+  // automático (antes só o "Criar bloco" fazia isso — bloco antigo mudando para
+  // "Em Modelagem" ficava sem ticket na fila).
+  const ensureTicket = (status: BlockStatus, owner: string | undefined) => {
+    const phase = PRODUCTION_PHASE_LABELS[status];
+    if (!phase) return;
+    if (tickets.some((t) => t.blockId === block.id && t.status !== "delivered")) return;
+    const sla = new Date(); sla.setDate(sla.getDate() + 14);
+    setTickets((prev) => [...prev, {
+      id: `tk_${Date.now()}`, clientId: block.clientId, blockId: block.id, title: `${block.title} – ${phase}`,
+      plan: block.svc, slaDate: sla.toISOString().slice(0, 10), priority: block.pri, assignedTo: owner, status: "new",
+    }]);
+  };
   const handleTransition = (newStatus: BlockStatus) => {
     const updated = blocks.map((b) => b.id === block.id ? { ...b, status: newStatus, ...(newStatus === "published" ? { published: new Date().toISOString().slice(0, 10) } : {}) } : b);
     setBlocks(updated); // o servidor descreve "Status: A → B" ao gravar
+    ensureTicket(newStatus, block.owner);
     setConfirmTransition(null);
   };
 
@@ -2427,6 +2450,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                         const owner = e.target.value || undefined;
                         setBlocks(blocks.map((b) => (b.id === block.id ? { ...b, owner } : b)));
                         setTickets(tickets.map((t) => (t.blockId === block.id && t.status !== "delivered" ? { ...t, assignedTo: owner } : t)));
+                        if (owner) ensureTicket(block.status, owner);
                       }}
                       className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400"
                     >
