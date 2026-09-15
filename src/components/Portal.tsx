@@ -939,7 +939,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 
   return (
     <aside className={`fixed left-0 top-0 z-40 flex h-full flex-col border-r border-slate-800/60 backdrop-blur-xl transition-all duration-300 ${collapsed ? "w-[88px]" : "w-[280px]"}`} style={{ backgroundColor: "rgba(7,17,31,0.97)", color: "white" }}>
-      <div className="p-4 pb-3">
+      <div className="flex-shrink-0 p-4 pb-3">
         <div className="rounded-[28px] border border-white/10 bg-white/5 p-3 shadow-[0_24px_48px_-36px_rgba(15,23,42,0.9)]">
           <div className="flex items-start gap-3">
             <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-400 via-cyan-400 to-sky-500 shadow-[0_12px_30px_-12px_rgba(34,211,238,0.55)]">
@@ -961,7 +961,9 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 
       {!collapsed && <p className="px-6 pb-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-500">Navegação</p>}
 
-      <nav className="flex-1 space-y-1 px-3 py-2">
+      {/* min-h-0 + overflow-y-auto: sem isso o flex-1 não encolhe e os itens de
+          baixo ficam cortados quando o menu não cabe na altura da tela. */}
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 py-2 [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.18)_transparent]">
         {navItems.map((item) => {
           const active = page === item.id;
           return (
@@ -983,7 +985,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         })}
       </nav>
 
-      <div className="p-4 pt-3">
+      <div className="flex-shrink-0 p-4 pt-3">
         <div className={`rounded-[24px] border border-white/10 bg-white/5 p-3 ${collapsed ? "flex justify-center" : ""}`}>
           <div className={`flex items-center gap-3 ${collapsed ? "justify-center" : ""}`}>
             <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 text-xs font-bold text-white">
