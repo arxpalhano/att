@@ -127,7 +127,12 @@ type Item = Record<string, any>; // eslint-disable-line @typescript-eslint/no-ex
 export type ActivityDraft = Pick<ActivityRecord, "type" | "entity" | "desc" | "blockId"> &
   Partial<Pick<ActivityRecord, "entityId" | "entityLabel" | "clientId">>;
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// "Vazio" é tudo igual: undefined, null, "", e objeto só com false/vazios (ex.: o
+// formulário de bloco manda {skp:false,rvt:false,gsm:false} para um bim ausente).
+const blank = (v: unknown): boolean =>
+  v === undefined || v === null || v === "" || v === false ||
+  (typeof v === "object" && !Array.isArray(v) && Object.values(v as Record<string, unknown>).every(blank));
+const same = (a: unknown, b: unknown) => (blank(a) && blank(b)) || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const changedFields = (before: Item, after: Item, labels: Record<string, string>): string[] =>
   Object.keys(labels).filter((k) => !same(before[k], after[k])).map((k) => labels[k]);
 const listOf = (fields: string[]) => (fields.length ? ` · alterou: ${fields.join(", ")}` : "");

@@ -2334,7 +2334,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   const [showEdit, setShowEdit] = useState(false);
 
   const handleEditSave = (d: BlockEditData) => {
-    setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku, modeler: d.modeler, bim: d.bim } : b));
+    // Nenhum arquivo BIM marcado = campo ausente (igual ao bloco original). Se
+    // gravasse {skp:false,rvt:false,gsm:false}, o log acusaria "alterou: arquivos BIM"
+    // toda vez que alguém salvasse o bloco sem mexer nisso.
+    const bim = d.bim && (d.bim.skp || d.bim.rvt || d.bim.gsm) ? d.bim : undefined;
+    setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku, modeler: d.modeler, bim } : b));
     setShowEdit(false);
   };
 
