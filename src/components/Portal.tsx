@@ -4907,6 +4907,46 @@ function PublicationFormModal({ title, onClose, onSave, initial, blocks }: {
   );
 }
 
+/** Modelo oficial do embed: as permissões são o que liga câmera/giroscópio (AR) e tela cheia dentro do iframe. */
+const EMBED_TEMPLATE = '<iframe width="100%" height="640px" frameborder="0" src="SUBSTITUA O LINK DO PRODUTO AQUI" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>';
+
+/** Instruções de uso dos embeds (texto que a Jéssica mantinha no Notion, "Cadastro de Produtos"). */
+function EmbedInstructions({ defaultOpen }: { defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [copied, setCopied] = useState(false);
+  const copy = () => { navigator.clipboard.writeText(EMBED_TEMPLATE).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); };
+  return (
+    <Card className="p-5">
+      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 text-left">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">Como colocar o customizador no seu site</p>
+          <p className="mt-0.5 text-xs text-slate-500">Passo a passo do embed por iFrame — vale para todos os produtos abaixo.</p>
+        </div>
+        <ChevronDown className={`h-4 w-4 flex-shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
+          <p>O customizador deve ser implementado na <b>página do respectivo produto</b> do seu site, a partir de um embed de iFrame.</p>
+          <ol className="list-decimal space-y-1.5 pl-5">
+            <li>Copie o link do produto no card abaixo (ícone de copiar ao lado do endereço).</li>
+            <li>Cole o link no lugar de <span className="font-mono text-[12px] text-rose-600">SUBSTITUA O LINK DO PRODUTO AQUI</span> no código-modelo:</li>
+          </ol>
+          <div className="flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+            <code className="min-w-0 flex-1 break-all font-mono text-[12px] leading-5 text-slate-700">{EMBED_TEMPLATE}</code>
+            <button onClick={copy} className="flex-shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 hover:border-slate-300">{copied ? "Copiado ✓" : "Copiar modelo"}</button>
+          </div>
+          <ol className="list-decimal space-y-1.5 pl-5" start={3}>
+            <li>Ou copie direto o <b>código do embed</b> já pronto de cada produto (segundo campo do card) — ele já vem com o link certo.</li>
+            <li>Insira o código na página do produto num <b>bloco HTML</b> do seu site (normalmente representado pelo ícone <span className="font-mono">&lt;/&gt;</span>).</li>
+          </ol>
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-emerald-800">Pronto! Seu produto já está rodando no seu site, com customizador em tempo real, catálogo de acabamentos, blocos para especificação e realidade aumentada.</p>
+          <p className="text-xs text-slate-500">Importante: mantenha o atributo <span className="font-mono">allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"</span> — sem ele a realidade aumentada e a tela cheia não funcionam dentro do iFrame. A altura (<span className="font-mono">height</span>) pode ser ajustada ao layout da página.</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function PublicationsPage({ user }: { user: SeedUser }) {
   const { blocks, publications, setPublications, clients, currentUser } = useContext(AppContext);
   const [copied, setCopied] = useState<string | null>(null);
@@ -4962,6 +5002,8 @@ function PublicationsPage({ user }: { user: SeedUser }) {
           </div>
         }
       />
+
+      <EmbedInstructions defaultOpen={isClient} />
 
       {pubs.length === 0 ? (
         <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc={canEdit ? "Clique em 'Nova Publicação' para adicionar manualmente." : "Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour."} /></Card>
