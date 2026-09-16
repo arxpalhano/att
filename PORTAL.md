@@ -520,6 +520,11 @@ aditiva — nenhum cliente perde evento. Ao mexer na view, validar que o
 
 ## 8. Agentes AI (admin only)
 
+> ⏸ **Argus Watchtower pausado em 2026-09-15** a pedido do dono: rotina `enabled=false` e regra
+> EventBridge `site-watchdog-hourly` desligada. Nada apagado; como religar em
+> `lambda/site-watchdog/README.md`.
+
+
 Aba "Agentes AI" no sidebar admin. Todos herdam `src/lib/agent-context.ts` (contexto
 de negócio + arquitetura) e têm função isolada. Cada um: API própria + página de chat
 com histórico em localStorage. Modelo Haiku 4.5 com retry/fallback (`claude-retry.ts`).

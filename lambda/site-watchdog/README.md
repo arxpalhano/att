@@ -101,3 +101,25 @@ aws sesv2 create-email-identity --email-identity NOVO@dominio.com \
 ```
 
 Ou peça **production access** no console do SES para liberar qualquer destinatário.
+
+---
+
+## ⏸ Pausado em 2026-09-15 (a pedido do dono)
+
+Nada foi apagado. O agente está parado em dois pontos:
+
+1. rotina `argus-watchtower` em `att-agent-routines` com `enabled = false`
+   (o portal mostra como pausado; a Lambda sai sem checar quando `enabled` é falso);
+2. regra EventBridge `site-watchdog-hourly` **DISABLED** (a Lambda nem é invocada).
+
+Para religar:
+
+```bash
+aws events enable-rule --name site-watchdog-hourly --region us-east-1 --profile att-admin
+aws dynamodb update-item --table-name att-agent-routines --key '{"id":{"S":"argus-watchtower"}}' \
+  --update-expression 'SET enabled = :t' --expression-attribute-values '{":t":{"BOOL":true}}' \
+  --region us-east-1 --profile att-admin
+```
+
+Ou só o segundo passo pelo portal (Agentes AI → Argus Watchtower → ativar rotina) — mas a
+regra do EventBridge precisa ser religada pela CLI, o portal não mexe nela.
