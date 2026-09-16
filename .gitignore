@@ -32,3 +32,6 @@ lambda/auditoria-compute/__pycache__
 
 # Audit output (gerado pela lambda auditoria-compute, fica no S3)
 public/auditoria-data/
+
+# Repo próprio (arxpalhano/att-instant) clonado dentro deste — nunca commitar aqui
+att-instant/

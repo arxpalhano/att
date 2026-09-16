@@ -22,6 +22,11 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 > `/experimentar` de geração 3D por IA (foto → modelo, self-service) + plano
 > "Instant" em `/planos`. Arquivos: `src/app/experimentar/*`, `src/app/api/instant/*`,
 > `src/components/Instant*.tsx`, `src/lib/instant-categorias.ts`.
+> O processamento (Tripo/Rodin + Blender + QA) roda no repo `arxpalhano/att-instant`,
+> num worker Windows no escritório que consome a fila em `s3://explorar.archtechtour.com/_instant/`.
+> **Contrato dos slots de foto** (2026-09-15): os até 4 arquivos do wizard vão na ordem
+> frente, lado esquerdo, costas, lado direito — a geração multi-view da Tripo e o QA
+> visual dependem dessa ordem. Atualizar o worker é manual (scp na LAN; `windows/SETUP.md`).
 
 ---
 

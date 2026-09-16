@@ -20,6 +20,13 @@ interface FotoLocal {
   url: string;
 }
 
+/**
+ * Ordem dos slots de foto. É um contrato com o pipeline: a geração multi-view
+ * (Tripo) recebe as fotos nesta ordem — frente, lado esquerdo, costas, lado
+ * direito. Por isso cada miniatura mostra qual vista ela representa.
+ */
+const VISTAS = ["Frente", "Lado esquerdo", "Costas", "Lado direito"];
+
 export default function InstantWizard() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -199,8 +206,9 @@ export default function InstantWizard() {
             Envie as fotos do produto
           </h2>
           <p className="mb-6 text-sm text-[#6B6760]">
-            Uma foto já funciona. Quatro ângulos (frente, lados e costas) deixam o resultado bem melhor,
-            porque o que não aparece na foto é o que a geração precisa deduzir.
+            Uma foto de frente já funciona. Quatro ângulos deixam o resultado bem melhor, porque o
+            que não aparece na foto é o que a geração precisa deduzir. Envie nesta ordem:
+            frente, lado esquerdo, costas e lado direito.
           </p>
 
           <input
@@ -216,7 +224,10 @@ export default function InstantWizard() {
             {fotos.map((f, i) => (
               <div key={f.url} className="group relative aspect-square overflow-hidden rounded-[16px] border border-[#E5E0DA] bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={f.url} alt={`Foto ${i + 1}`} className="h-full w-full object-cover" />
+                <img src={f.url} alt={`Foto ${i + 1} · ${VISTAS[i]}`} className="h-full w-full object-cover" />
+                <span className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-[#0D0D0D]/70 to-transparent px-2.5 pb-2 pt-5 text-[10px] font-bold uppercase tracking-wider text-white">
+                  {i + 1} · {VISTAS[i]}
+                </span>
                 <button
                   type="button"
                   onClick={() => removeFoto(i)}
@@ -235,6 +246,7 @@ export default function InstantWizard() {
               >
                 <Upload className="h-5 w-5" />
                 <span className="text-xs font-semibold">Adicionar</span>
+                <span className="text-[10px] text-[#A09890]">{VISTAS[fotos.length]}</span>
               </button>
             )}
           </div>
