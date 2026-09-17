@@ -715,6 +715,30 @@ function SectionHeader({ eyebrow, title, description, action }: { eyebrow?: stri
 }
 
 // ============================================================
+// SESSÃO NO NAVEGADOR (sobrevive ao F5)
+// ============================================================
+// Antes, recarregar a página zerava o estado em memória: quem entrou por
+// e-mail/senha voltava para a tela de login, e quem entrou pelo Microsoft
+// reentrava no dashboard (perdendo a tela onde estava) e gerava um "login"
+// novo no log a cada F5. Guardamos quem está logado (sem senha) e a tela atual.
+const SESSION_KEY = "att_session";
+const PAGE_KEY = "att_page";
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+type StoredSession = { user: Omit<SeedUser, "password">; at: number };
+const readSession = (): StoredSession | null => {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY); if (!raw) return null;
+    const s = JSON.parse(raw) as StoredSession;
+    if (!s?.user?.id || Date.now() - (s.at || 0) > SESSION_TTL_MS) { localStorage.removeItem(SESSION_KEY); return null; }
+    return s;
+  } catch { return null; }
+};
+const saveSession = (u: SeedUser) => { try { const { password: _pw, ...user } = u; localStorage.setItem(SESSION_KEY, JSON.stringify({ user, at: Date.now() } satisfies StoredSession)); } catch { /* sem storage */ } };
+const clearSession = () => { try { localStorage.removeItem(SESSION_KEY); localStorage.removeItem(PAGE_KEY); } catch { /* sem storage */ } };
+const readPage = (): string | null => { try { return localStorage.getItem(PAGE_KEY); } catch { return null; } };
+const savePage = (page: string) => { try { localStorage.setItem(PAGE_KEY, page); } catch { /* sem storage */ } };
+
+// ============================================================
 // LOGIN PAGE
 // ============================================================
 function LoginPage() {
@@ -735,6 +759,8 @@ function LoginPage() {
     const logLogin = (who: SeedUser, how: string) => {
       if (loginLogged.current === msEmail) return;
       loginLogged.current = msEmail;
+      // F5 com sessão guardada não é um login novo — só restauração.
+      if (readSession()?.user.email?.toLowerCase() === msEmail) return;
       logActivity({ type: "login", entity: "session", desc: how }, { id: who.id, name: who.name, role: who.role, email: who.email, clientId: who.clientId });
     };
     // Match against seed users by email
@@ -4983,6 +5009,39 @@ function PublicationsPage({ user }: { user: SeedUser }) {
     setPublications(publications.filter((p) => p.id !== id));
   };
 
+  // Baixa os links das publicações em TXT — todas as marcas ou só a filtrada.
+  // Agrupado por marca, um link por linha, para colar em e-mail/WhatsApp.
+  const exportTxt = () => {
+    const brandName = filterClient ? getClientName(filterClient) : isClient ? getClientName(user.clientId!) : "";
+    const groups = new Map<string, string[]>();
+    pubs.forEach((p) => {
+      const b = blocks.find((x) => x.id === p.blockId);
+      const marca = b ? getClientName(b.clientId) : "Sem marca";
+      const label = b ? `#${b.n} · ${b.title}${b.sku ? ` (${b.sku})` : ""}` : p.blockId;
+      if (!groups.has(marca)) groups.set(marca, []);
+      groups.get(marca)!.push(`${label}\n${p.url}`);
+    });
+    const hoje = new Date().toLocaleDateString("pt-BR");
+    const linhas: string[] = [
+      `ArchTechTour · Links dos customizadores${brandName ? ` · ${brandName}` : " · todas as marcas"}`,
+      `Gerado em ${hoje} · ${pubs.length} publicação(ões)`,
+      "",
+    ];
+    Array.from(groups.keys()).sort((a, b) => a.localeCompare(b)).forEach((marca) => {
+      const itens = groups.get(marca)!;
+      linhas.push(`==== ${marca} (${itens.length}) ====`, "");
+      itens.sort((a, b) => a.localeCompare(b, "pt-BR", { numeric: true })).forEach((it) => linhas.push(it, ""));
+    });
+    const blob = new Blob([linhas.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const slug = (brandName || "todas-as-marcas").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "-").toLowerCase();
+    a.href = url; a.download = `links-archtechtour-${slug}-${new Date().toISOString().slice(0, 10)}.txt`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    logActivity({ type: "export", entity: "publications", clientId: filterClient || user.clientId, desc: `Baixou os links em TXT (${brandName || "todas as marcas"}, ${pubs.length} publicações)` });
+  };
+
   return (
     <div className="space-y-6">
       <SectionHeader
@@ -4998,6 +5057,11 @@ function PublicationsPage({ user }: { user: SeedUser }) {
               </select>
             )}
             <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{pubs.length} publicados</Badge>
+            {pubs.length > 0 && (
+              <button onClick={exportTxt} title="Baixa um .txt com os links dos customizadores (todas as marcas ou só a marca filtrada)" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition">
+                <FileText className="w-3.5 h-3.5" /> Baixar links (.txt)
+              </button>
+            )}
             {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova Publicação</button>}
           </div>
         }
@@ -6192,6 +6256,7 @@ function PortalHeaderActions({
           // keepalive: o registro chega mesmo com o redirect do signOut logo em seguida.
           logActivity({ type: "logout", entity: "session", desc: "Saiu do portal" });
           setActivityActor(null);
+          clearSession();
           setCurrentUser(null);
           setPage("dashboard");
           // Encerra TAMBÉM a sessão do NextAuth. Sem isso o logout não acontecia:
@@ -6273,6 +6338,17 @@ function useDeltaPersist<T extends { id: string }>(opts: {
 export default function Portal() {
   const [currentUser, setCurrentUser] = useState<SeedUser | null>(null);
   const [page, setPage] = useState("dashboard");
+  // Restaura quem estava logado e a tela aberta (ver SESSÃO NO NAVEGADOR).
+  // Roda em efeito, não no useState inicial: o componente ainda passa pelo SSR.
+  useEffect(() => {
+    const stored = readSession();
+    if (!stored) return;
+    setCurrentUser({ ...stored.user, password: "" } as SeedUser);
+    const savedPage = readPage();
+    if (savedPage) setPage(savedPage);
+  }, []);
+  useEffect(() => { if (currentUser) saveSession(currentUser); }, [currentUser]);
+  useEffect(() => { if (currentUser) savePage(page); }, [page, currentUser]);
   const [collapsed, setCollapsed] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState("");
   const [selectedContract, setSelectedContract] = useState("");
@@ -6413,6 +6489,16 @@ export default function Portal() {
   useEffect(() => { if (hydrated) CLIENTS = clients; }, [clients, hydrated]);
   useEffect(() => { if (hydrated) CONTRACTS = contracts; }, [contracts, hydrated]);
   useEffect(() => { if (hydrated) { USERS.length = 0; USERS.push(...users); } }, [users, hydrated]);
+  // Sessão restaurada do navegador é revalidada contra o cadastro assim que ele
+  // chega do banco: pega perfil/telas atualizados e derruba quem foi desativado.
+  // Usuário Microsoft sem cadastro (id ms_…) não está na tabela — fica como está.
+  useEffect(() => {
+    if (!hydrated || !currentUser || currentUser.id.startsWith("ms_")) return;
+    const fresh = users.find((u) => u.id === currentUser.id);
+    if (!fresh) return;
+    if (fresh.active === false) { clearSession(); setCurrentUser(null); return; }
+    if (JSON.stringify({ ...fresh, password: "" }) !== JSON.stringify({ ...currentUser, password: "" })) setCurrentUser(fresh);
+  }, [hydrated, users]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persistência DynamoDB por DELTA, debounce 800ms. O servidor devolve as
   // atividades que descreveu para cada mudança; elas entram no log local na hora.
