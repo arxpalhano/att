@@ -86,6 +86,7 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 | `att-agent-routines` | Rotinas dos agentes automáticos (hoje só `argus-watchtower`: horários, destinatários, sites monitorados) |
 | `att-agent-checks` | Histórico de verificações do Argus Watchtower (TTL 90 dias via `expiresAt`) |
 | `att-bim-demands` | Demandas de blocos BIM para terceirizados (lote por marca: produtos, arquivos ArchiCAD/Revit/SketchUp, prazo, entrega, status) |
+| `att-profiles` | Perfis de acesso: matriz módulo × ação + permissões especiais (padrões no código; só o que o admin muda é gravado) |
 | `att-kb` | Base de Conhecimento: bases (acesso por perfil/usuário) e artigos (Markdown + anexos no S3 `kb/`) |
 | `att-assets` | Metadados dos arquivos enviados por bloco (S3 `clientes/<clientId>/blocos/<blockId>/…`). Até 2026-09-15 viviam só na memória do navegador |
 
@@ -295,6 +296,34 @@ acabamentos, publicações dos últimos 14 dias; terceirizado — demandas novas
 Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`); abrir o menu
 marca tudo como visto; clicar navega direto.
 
+
+### Perfis de acesso e filtros em Usuários (desde 2026-09-18)
+
+Tela **Perfis de acesso** (`profiles`, menu interno) + tabela `att-profiles`. Tipos, módulos e
+perfis padrão em `src/lib/access.ts`; tela em `src/components/AccessProfiles.tsx`.
+
+- **Perfil** = matriz módulo × (ver / criar / editar / excluir) + permissões especiais
+  (*mover bloco entre etapas*, *forçar status*, *alterar prazos*). O usuário aponta para um perfil
+  (`profileId`); sem isso vale o padrão do tipo de conta (`prof_<role>`).
+- **Tipo de conta (`role`) continua existindo** e decide o **escopo dos dados** (cliente só vê a
+  própria marca, terceirizado só as próprias demandas) e o grupo na Base de Conhecimento. Todo
+  perfil nasce de um tipo de conta; ao escolher o perfil no cadastro, o `role` vira a base dele.
+- **6 perfis padrão vivem no código** e espelham as checagens antigas (`role === "admin"` etc.).
+  Salvar um perfil com o mesmo id sobrepõe o padrão ("Restaurar" desfaz). **Admin é travado** com
+  acesso total. Se `att-profiles` não carregar, o portal cai nos padrões e avisa na tela.
+- **Checagem:** `can(user, módulo, ação)` e `special(user, perm)` em `Portal.tsx` — leem a variável
+  de módulo `PROFILES`, que o componente raiz atribui a cada render. `paginasPermitidas()` sai do
+  "Ver" do perfil; para cliente, "Telas liberadas" no usuário ainda vence o perfil (exceção).
+  Aplicado em: menu/`renderPage`, blocos (criar/editar/excluir/override/transições), tickets,
+  BIM, publicações, clientes (excluir = desativar), contratos, usuários, perfis, acabamentos
+  (editar), analytics (editar = gerenciar clientes do dim), agentes (ver), prazos.
+- **Fora da matriz:** Base de Conhecimento (liberada base a base) e Atividade (só o dono).
+- **Mudança de comportamento:** Usuários e Perfis passam a ser só do Admin por padrão (antes
+  qualquer interno abria Usuários e via as senhas). Libera-se editando o perfil.
+- ⚠️ Trava de interface, como o resto do portal: `/api/state/*` não confere permissão no servidor.
+- **Usuários ganhou filtros:** busca (nome, e-mail, marca), tipo (equipe/clientes/terceirizados),
+  perfil, marca e ordenação; ações respeitam criar/editar/excluir; ninguém remove a si mesmo.
+- Infra: `scripts/profiles-infra.sh` (tabela + `DynamoDBPortalAccess`), rodado em 2026-09-18.
 
 ### Prazo do bloco, ticket que segue a etapa e etapa SketchUp (desde 2026-09-18)
 

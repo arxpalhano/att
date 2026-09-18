@@ -47,7 +47,7 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
 
 - **Frontend/Backend:** Next.js 14 App Router, um único app. UI principal em
   `src/components/Portal.tsx` (arquivo grande — clientes, blocos, tickets, agentes).
-- **Estado persistente:** DynamoDB (us-east-1), 13 tabelas `att-*`. APIs em
+- **Estado persistente:** DynamoDB (us-east-1), 14 tabelas `att-*`. APIs em
   `src/app/api/state/*` (geradas por `stateRoute()` em `src/lib/activity-server.ts`).
   Hidrata no mount, persiste com debounce **por delta** (`{upsert, delete}`), nunca a
   tabela inteira.
@@ -105,6 +105,10 @@ Portal em produção, funcional. Resumo do que foi construído (ordem cronológi
   pessoa, artigos em Markdown com anexos no S3 (`kb/`). Base de TI já preenchida com todo o
   contexto técnico (portal, AWS, site WordPress, Instant, repos). `src/lib/kb.ts`,
   `src/components/KnowledgeBase.tsx`, `src/data/kb-seed.ts`. PORTAL.md §6
+
+- ✅ Perfis de acesso (`profiles`, 2026-09-18): matriz módulo × ver/criar/editar/excluir +
+  permissões especiais; `can()`/`special()` em Portal.tsx, tipos em `src/lib/access.ts`. Nunca
+  voltar a checar `role === "admin"` para permissão — `role` é só escopo de dados. PORTAL.md §6
 
 **Feedbacks recentes da Jessica (PM) — todos atendidos:** Arctefacto removido dos
 dashboards; dashboards zerados corrigidos (era o parquet ETL); bloco editável+excluível;

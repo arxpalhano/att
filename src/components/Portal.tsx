@@ -6,6 +6,8 @@ import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_STATUS_LABELS
 import { FinishCatalog, BlockFinishes, FinishRecord, FinishGroup, catalogId, blockFinishesId, slugId, SUGGESTED_GROUPS, emptyCatalog, emptyBlockFinishes, isFilled } from "@/lib/finishes";
 import LanguageSwitcher from "./LanguageSwitcher";
 import KnowledgeBase from "./KnowledgeBase";
+import AccessProfilesPage from "./AccessProfiles";
+import { AccessProfile, AccessAction, SpecialPerm, DEFAULT_PROFILES, MODULES as ACCESS_MODULES, BASE_LABELS, mergeProfiles, profileOf, canDo, hasSpecial, defaultProfileId, summarizeProfile } from "@/lib/access";
 import { KbRecord, KbBase, canViewBase, isKbBase } from "@/lib/kb";
 import { KB_SEED } from "@/data/kb-seed";
 import { ActivityRecord, BLOCK_STATUS_LABELS, TICKET_STATUS_LABELS as SHARED_TICKET_STATUS_LABELS, ENTITY_LABELS, TYPE_LABELS, PAGE_LABELS, isNavigation } from "@/lib/activity";
@@ -64,6 +66,8 @@ interface SeedUser {
    * PAGINAS_PADRAO_CLIENTE.
    */
   allowedPages?: string[];
+  /** Perfil de acesso (src/lib/access.ts). Ausente = perfil padrão do tipo de conta (`role`). */
+  profileId?: string;
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
 export interface SeedContract {
@@ -481,16 +485,26 @@ const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter(
 // ------------------------------------------------------------
 // Prazo do bloco e ticket acompanhando a etapa
 // ------------------------------------------------------------
+/**
+ * Perfis de acesso vivos (padrões do código + o que veio de att-profiles). O
+ * componente raiz atribui a cada render, ANTES de desenhar os filhos — por isso
+ * `can()`/`special()` funcionam em qualquer função, sem hook.
+ */
+let PROFILES: AccessProfile[] = DEFAULT_PROFILES;
+/** O usuário pode fazer `action` no módulo? (ver / criar / editar / excluir) */
+const can = (u: SeedUser | null | undefined, moduleId: string, action: AccessAction) => !!u && canDo(u, PROFILES, moduleId, action);
+const special = (u: SeedUser | null | undefined, perm: SpecialPerm) => !!u && hasSpecial(u, PROFILES, perm);
+
 /** Prazo padrão de produção, em dias, contado da entrega dos materiais. */
 const SLA_DAYS = 14;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const addDaysISO = (iso: string, days: number) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
 /**
- * Quem pode mexer em datas (entrega do bloco, prazo do ticket) e editar ticket:
- * toda a equipe interna — admin, Operações, Modelagem e Programação (liberado em
- * 2026-09-18). Cliente e terceirizado BIM não. Toda mudança cai no log de atividades.
+ * Quem pode mexer em datas (entrega do bloco, prazo do ticket): permissão especial
+ * "Alterar prazos" do perfil de acesso. Por padrão toda a equipe interna tem
+ * (liberado em 2026-09-18); cliente e terceirizado BIM não.
  */
-const canEditDeadlines = (u: SeedUser) => ["admin", "internal_ops", "internal_modeling", "internal_programming"].includes(u.role);
+const canEditDeadlines = (u: SeedUser) => special(u, "deadlines");
 /** Só estas contas abrem a tela Atividade (auditoria de uso da equipe). */
 const ACTIVITY_VIEWERS = ["mpalhano@archtechtour.com"];
 const canSeeActivity = (u: SeedUser) => ACTIVITY_VIEWERS.includes((u.email || "").toLowerCase());
@@ -592,6 +606,9 @@ interface AppState {
   kb: KbRecord[];
   setKb: React.Dispatch<React.SetStateAction<KbRecord[]>>;
   kbError: string | null;
+  /** Perfis de acesso: padrões do código + att-profiles (src/lib/access.ts). */
+  profiles: AccessProfile[];
+  setProfiles: React.Dispatch<React.SetStateAction<AccessProfile[]>>;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
@@ -694,18 +711,23 @@ const PAGINAS_CLIENTE: Array<{ id: string; label: string }> = [
 const PAGINA_PAI: Record<string, string> = {
   block_detail: "blocks",
   contract_detail: "contracts",
+  agent_sherlock_codes: "agents", agent_monk_lighthouse: "agents", agent_yoda_kanban: "agents",
+  agent_harvey_closer: "agents", agent_argus_watchtower: "agents",
 };
 
-/** Páginas liberadas para o usuário. `"all"` = sem restrição. */
-function paginasPermitidas(user: SeedUser): string[] | "all" {
-  // Terceirizado de BIM só enxerga as próprias demandas — nada do pipeline,
-  // clientes, analytics ou usuários.
-  if (user.role === "freelancer_bim") return ["bim_minhas"];
-  if (user.role !== "client") return "all";
-  const cfg = user.allowedPages;
-  if (cfg?.includes("all")) return "all";
-  if (cfg && cfg.length > 0) return cfg;
-  return PAGINAS_PADRAO_CLIENTE;
+/**
+ * Módulos que o usuário abre = os marcados como "Ver" no PERFIL DE ACESSO dele
+ * (src/lib/access.ts). Para cliente, "Telas liberadas" no cadastro do usuário
+ * vence o perfil (exceção caso a caso, como já era antes dos perfis).
+ */
+function paginasPermitidas(user: SeedUser): string[] {
+  if (user.role === "client") {
+    const cfg = user.allowedPages;
+    if (cfg?.includes("all")) return ACCESS_MODULES.filter((m) => m.audiences.includes("client")).map((m) => m.id);
+    if (cfg && cfg.length > 0) return cfg;
+  }
+  const prof = profileOf(user, PROFILES);
+  return ACCESS_MODULES.filter((m) => prof.modules?.[m.id]?.view).map((m) => m.id);
 }
 
 /**
@@ -720,16 +742,15 @@ function podeAcessar(user: SeedUser, page: string): boolean {
   if (page === "kb") return true;
   // Atividade é auditoria de uso da equipe: só o dono do portal enxerga.
   if (page === "activity") return canSeeActivity(user);
-  const permitidas = paginasPermitidas(user);
-  if (permitidas === "all") return true;
-  return permitidas.includes(PAGINA_PAI[page] ?? page);
+  return paginasPermitidas(user).includes(PAGINA_PAI[page] ?? page);
 }
 
 /** Primeira página que o usuário pode abrir — é onde ele cai ao logar. */
 function primeiraPaginaPermitida(user: SeedUser): string {
   const permitidas = paginasPermitidas(user);
-  if (permitidas === "all") return "dashboard";
-  return PAGINAS_CLIENTE.find((p) => permitidas.includes(p.id))?.id ?? permitidas[0] ?? "analytics";
+  if (permitidas.includes("dashboard")) return "dashboard";
+  // Sem nenhum módulo no perfil: a Base de Conhecimento é a única tela que não depende dele.
+  return permitidas[0] ?? "kb";
 }
 
 function EmptyState({ icon: Icon, title, desc }: { icon: any; title: string; desc?: string }) {
@@ -1050,8 +1071,9 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "contracts", icon: FileText, label: "Contratos" },
         { id: "activity", icon: Activity, label: "Atividade" },
         { id: "users", icon: Settings, label: "Usuários" },
+        { id: "profiles", icon: Lock, label: "Perfis de acesso" },
         ...itemKb,
-        ...(user.role === "admin" ? [{ id: "agents", icon: Sparkles, label: "Agentes AI" }] : []),
+        { id: "agents", icon: Sparkles, label: "Agentes AI" }, // quem vê sai do perfil de acesso (podeAcessar)
       ];
 
   // Esconder o item aqui é só o efeito visual — quem realmente barra o acesso é
@@ -1740,9 +1762,11 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
               <BarChart3 className="w-3.5 h-3.5" /> Exportar CSV
             </button>
           )}
-          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors">
-            <Plus className="w-3.5 h-3.5" /> Novo Bloco
-          </button>
+          {can(user, "blocks", "create") && (
+            <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors">
+              <Plus className="w-3.5 h-3.5" /> Novo Bloco
+            </button>
+          )}
         </div>
       </div>
       <Card className="p-4">
@@ -2580,7 +2604,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-xl font-bold text-slate-800">{block.title}</h1>
             <StatusBadge status={block.status} />
-            {user.role === "admin" && (
+            {special(user, "statusOverride") && (
               <select
                 value={block.status}
                 onChange={(e) => handleTransition(e.target.value as BlockStatus)}
@@ -2592,12 +2616,12 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                 ))}
               </select>
             )}
-            {user.role === "admin" && (
+            {can(user, "blocks", "edit") && (
               <button onClick={() => setShowEdit(true)} title="Editar dados do bloco" className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800">
                 <Settings className="w-3 h-3" /> Editar
               </button>
             )}
-            {user.role === "admin" && (
+            {can(user, "blocks", "delete") && (
               <button onClick={handleDelete} title="Excluir bloco" className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50">
                 <X className="w-3 h-3" /> Excluir
               </button>
@@ -2709,7 +2733,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                 </div>
               </Card>
             )}
-            {!isClient && validNext.length > 0 && (
+            {!isClient && special(user, "transition") && validNext.length > 0 && (
               <Card className="p-5">
                 <h3 className="text-sm font-semibold text-slate-700 mb-3">Transições Disponíveis</h3>
                 <div className="flex flex-wrap gap-2">
@@ -2938,7 +2962,10 @@ function ContractsPage({ user, setPage, setSelectedContract }: { user: SeedUser;
   const { contracts, setContracts, clients, currentUser, blocks } = useContext(AppContext);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SeedContract | null>(null);
-  const canEdit = currentUser?.role === "admin";
+  // Permissões vêm do perfil de acesso (src/lib/access.ts).
+  const canCreate = can(currentUser, "contracts", "create");
+  const canEdit = can(currentUser, "contracts", "edit");
+  const canDelete = can(currentUser, "contracts", "delete");
   const ctrs = user.role === "client" ? contracts.filter((c) => c.clientId === user.clientId) : contracts;
 
   const handleSave = (d: { id?: string; clientId: string; title: string; totalBlocks: number; usedBlocks: number; startDate: string; active: boolean }) => {
@@ -2954,7 +2981,7 @@ function ContractsPage({ user, setPage, setSelectedContract }: { user: SeedUser;
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div><h1 className="text-xl font-bold text-slate-800">Contratos</h1><p className="text-sm text-slate-500">{ctrs.length} contratos</p></div>
-        {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Contrato</button>}
+        {canCreate && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Contrato</button>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {ctrs.map((ct) => {
@@ -3054,7 +3081,10 @@ function ClientsPage() {
   const { clients, setClients, contracts, blocks, currentUser } = useContext(AppContext);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SeedClient | null>(null);
-  const canEdit = currentUser?.role === "admin";
+  // Permissões vêm do perfil de acesso (src/lib/access.ts).
+  const canCreate = can(currentUser, "clients", "create");
+  const canEdit = can(currentUser, "clients", "edit");
+  const canDelete = can(currentUser, "clients", "delete");
 
   const handleSave = (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean }) => {
     if (d.id) {
@@ -3070,7 +3100,7 @@ function ClientsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div><h1 className="text-xl font-bold text-slate-800">Clientes</h1><p className="text-sm text-slate-500">{clients.length} clientes · {clients.filter((c) => c.active).length} ativos</p></div>
-        {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Cliente</button>}
+        {canCreate && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Cliente</button>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {clients.map((cl) => {
@@ -3085,10 +3115,10 @@ function ClientsPage() {
                   <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-sm font-bold text-slate-500">{cl.code.slice(0, 2).toUpperCase()}</div>
                   <div><p className="text-sm font-semibold text-slate-800">{cl.name}</p><p className="text-xs text-slate-400 font-mono">{cl.code}</p></div>
                 </div>
-                {canEdit && (
+                {(canEdit || canDelete) && (
                   <div className="flex gap-1">
-                    <button onClick={() => setEditing(cl)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>
-                    <button onClick={() => toggleActive(cl.id)} title={cl.active ? "Desativar" : "Reativar"} className="p-1.5 rounded-lg hover:bg-slate-100">{cl.active ? <X className="w-3.5 h-3.5 text-red-500" /> : <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />}</button>
+                    {canEdit && <button onClick={() => setEditing(cl)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>}
+                    {canDelete && <button onClick={() => toggleActive(cl.id)} title={cl.active ? "Desativar" : "Reativar"} className="p-1.5 rounded-lg hover:bg-slate-100">{cl.active ? <X className="w-3.5 h-3.5 text-red-500" /> : <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />}</button>}
                   </div>
                 )}
               </div>
@@ -3441,17 +3471,25 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
   );
 }
 
+type UserFormData = { name: string; email: string; role: UserRole; profileId?: string; clientId: string; password: string; allowedPages?: string[] };
+
 function UserFormModal({
   title, onClose, onSave, initial,
 }: {
   title: string;
   onClose: () => void;
-  onSave: (data: { name: string; email: string; role: UserRole; clientId: string; password: string; allowedPages?: string[] }) => void;
+  onSave: (data: UserFormData) => void;
   initial?: SeedUser;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [email, setEmail] = useState(initial?.email ?? "");
-  const [role, setRole] = useState<UserRole>(initial?.role ?? "internal_ops");
+  // O perfil de acesso escolhido define também o tipo de conta (role = base do perfil).
+  const { profiles } = useContext(AppContext);
+  const [profileId, setProfileId] = useState<string>(() => (initial ? profileOf(initial, profiles).id : defaultProfileId("internal_ops")));
+  const chosen = profiles.find((p) => p.id === profileId) ?? profiles[0];
+  const role: UserRole = chosen.base;
+  // Cliente: usa as telas do perfil, a não ser que este usuário tenha exceção marcada à mão.
+  const [usarPerfil, setUsarPerfil] = useState(!(initial?.allowedPages?.length));
   const [clientId, setClientId] = useState(initial?.clientId ?? "");
   const [password, setPassword] = useState(initial?.password ?? "");
   const [showPw, setShowPw] = useState(false);
@@ -3506,11 +3544,13 @@ function UserFormModal({
             </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Perfil</label>
-            <select value={role} onChange={(e) => setRole(e.target.value as UserRole)}
+            <label className="block text-xs font-medium text-slate-500 mb-1">Perfil de acesso</label>
+            <select value={profileId} onChange={(e) => setProfileId(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
-              {(Object.entries(ROLE_LABELS) as [UserRole, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              <optgroup label="Perfis padrão">{profiles.filter((p) => p.system).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</optgroup>
+              {profiles.some((p) => !p.system) && <optgroup label="Personalizados">{profiles.filter((p) => !p.system).map((p) => <option key={p.id} value={p.id}>{p.name} · tipo {BASE_LABELS[p.base]}</option>)}</optgroup>}
             </select>
+            <p className="mt-1 text-[11px] leading-4 text-slate-400">{summarizeProfile(chosen)}. Permissões em <b>Perfis de acesso</b>.</p>
           </div>
           {role === "client" && (
             <>
@@ -3524,6 +3564,12 @@ function UserFormModal({
               </div>
               <div className="rounded-xl border border-slate-200 p-3">
                 <label className="block text-xs font-medium text-slate-500 mb-2">Telas liberadas</label>
+                <label className="flex items-center gap-2 text-sm text-slate-700 mb-2">
+                  <input type="checkbox" checked={usarPerfil} onChange={(e) => setUsarPerfil(e.target.checked)} />
+                  <span className="font-medium">Usar as telas do perfil</span>
+                  <span className="text-xs text-slate-400">(desmarque para uma exceção só deste usuário)</span>
+                </label>
+                {!usarPerfil && <>
                 <label className="flex items-center gap-2 text-sm text-slate-700 mb-2">
                   <input type="checkbox" checked={acessoTotal} onChange={(e) => setAcessoTotal(e.target.checked)} />
                   <span className="font-medium">Acesso total</span>
@@ -3541,9 +3587,10 @@ function UserFormModal({
                 )}
                 {!acessoTotal && paginas.length === 0 && (
                   <p className="mt-2 text-xs text-amber-600">
-                    Nada marcado — o usuário vai cair no padrão ({PAGINAS_PADRAO_CLIENTE.join(", ")}).
+                    Nada marcado — o usuário vai cair nas telas do perfil.
                   </p>
                 )}
+                </>}
               </div>
             </>
           )}
@@ -3552,7 +3599,9 @@ function UserFormModal({
           <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg">Cancelar</button>
           <button onClick={() => onSave({
             name: name.trim(), email: email.trim(), role, clientId, password,
-            allowedPages: role === "client" ? (acessoTotal ? ["all"] : paginas) : undefined,
+            // Perfil padrão do tipo de conta não precisa ficar gravado no usuário.
+            profileId: profileId === defaultProfileId(role) ? undefined : profileId,
+            allowedPages: role === "client" && !usarPerfil ? (acessoTotal ? ["all"] : paginas) : undefined,
           })}
             disabled={!canSave}
             className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-40">
@@ -3568,27 +3617,55 @@ function UsersPage() {
   // Usa o estado do AppContext — NÃO criar estado local aqui. Só o `users` do
   // contexto dispara o efeito que espelha o array de módulo USERS e persiste no
   // DynamoDB; um useState local fica só na tela e o usuário some no reload.
-  const { currentUser, users, setUsers } = useContext(AppContext);
+  const { currentUser, users, setUsers, profiles, clients } = useContext(AppContext);
   const [showAdd, setShowAdd] = useState(false);
   const [editingUser, setEditingUser] = useState<SeedUser | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const canCreate = can(currentUser, "users", "create");
+  const canEdit = can(currentUser, "users", "edit");
+  const canDelete = can(currentUser, "users", "delete");
 
-  const handleAdd = (data: { name: string; email: string; role: UserRole; clientId: string; password: string; allowedPages?: string[] }) => {
+  // Filtros — 45+ cadastros já não cabem numa rolagem só.
+  const [q, setQ] = useState("");
+  const [fProfile, setFProfile] = useState("all");
+  const [fClient, setFClient] = useState("all");
+  const [fGroup, setFGroup] = useState<"all" | "team" | "clients" | "freelancers">("all");
+  const [sortBy, setSortBy] = useState<"name" | "profile" | "client">("name");
+  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const filteredUsers = useMemo(() => {
+    const term = norm(q.trim());
+    const list = users.filter((u) => {
+      if (term && !norm(`${u.name} ${u.email} ${u.clientId ? getClientName(u.clientId) : ""}`).includes(term)) return false;
+      if (fProfile !== "all" && profileOf(u, profiles).id !== fProfile) return false;
+      if (fClient !== "all" && u.clientId !== fClient) return false;
+      if (fGroup === "team" && (u.role === "client" || u.role === "freelancer_bim")) return false;
+      if (fGroup === "clients" && u.role !== "client") return false;
+      if (fGroup === "freelancers" && u.role !== "freelancer_bim") return false;
+      return true;
+    });
+    const key = (u: SeedUser) => (sortBy === "profile" ? profileOf(u, profiles).name : sortBy === "client" ? (u.clientId ? getClientName(u.clientId) : "~") : "") + " " + u.name;
+    return [...list].sort((a, b) => key(a).localeCompare(key(b), "pt-BR"));
+  }, [users, profiles, q, fProfile, fClient, fGroup, sortBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  const hasFilters = !!q || fProfile !== "all" || fClient !== "all" || fGroup !== "all";
+  const clientsWithUsers = clients.filter((c) => users.some((u) => u.clientId === c.id)).sort((a, b) => a.name.localeCompare(b.name));
+  const selCls = "text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40";
+
+  const handleAdd = (data: UserFormData) => {
     const u: SeedUser = {
       id: `u_${Date.now()}`, name: data.name, email: data.email, password: data.password,
-      role: data.role, active: true, ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
+      role: data.role, active: true, ...(data.profileId ? { profileId: data.profileId } : {}), ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
       ...(data.allowedPages?.length ? { allowedPages: data.allowedPages } : {}),
     };
     setUsers([...users, u]);
     setShowAdd(false);
   };
 
-  const handleEdit = (data: { name: string; email: string; role: UserRole; clientId: string; password: string; allowedPages?: string[] }) => {
+  const handleEdit = (data: UserFormData) => {
     if (!editingUser) return;
     setUsers(users.map((u) =>
       u.id === editingUser.id
         ? {
-            ...u, name: data.name, email: data.email, role: data.role, password: data.password,
+            ...u, name: data.name, email: data.email, role: data.role, password: data.password, profileId: data.profileId,
             clientId: data.role === "client" && data.clientId ? data.clientId : undefined,
             // Vazio = volta ao padrão (PAGINAS_PADRAO_CLIENTE); undefined em não-cliente.
             allowedPages: data.allowedPages?.length ? data.allowedPages : undefined,
@@ -3606,25 +3683,59 @@ function UsersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div><h1 className="text-xl font-bold text-slate-800">Usuários</h1><p className="text-sm text-slate-500">{users.length} registrados</p></div>
-        <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors"><Plus className="w-3.5 h-3.5" /> Novo Usuário</button>
+        <div><h1 className="text-xl font-bold text-slate-800">Usuários</h1><p className="text-sm text-slate-500">{hasFilters ? `${filteredUsers.length} de ${users.length} registrados` : `${users.length} registrados`}</p></div>
+        {canCreate && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors"><Plus className="w-3.5 h-3.5" /> Novo Usuário</button>}
       </div>
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por nome, e-mail ou marca…" className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <select value={fGroup} onChange={(e) => setFGroup(e.target.value as typeof fGroup)} className={selCls}>
+            <option value="all">Todos os tipos</option>
+            <option value="team">Equipe interna</option>
+            <option value="clients">Clientes</option>
+            <option value="freelancers">Terceirizados</option>
+          </select>
+          <select value={fProfile} onChange={(e) => setFProfile(e.target.value)} className={selCls}>
+            <option value="all">Todos os perfis</option>
+            {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select value={fClient} onChange={(e) => setFClient(e.target.value)} className={selCls}>
+            <option value="all">Todas as marcas</option>
+            {clientsWithUsers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as typeof sortBy)} className={selCls} title="Ordenação">
+            <option value="name">Ordem: nome</option>
+            <option value="profile">Ordem: perfil</option>
+            <option value="client">Ordem: marca</option>
+          </select>
+          {hasFilters && <button onClick={() => { setQ(""); setFProfile("all"); setFClient("all"); setFGroup("all"); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-1">Limpar filtros</button>}
+        </div>
+      </Card>
       <Card>
-        <DataTable data={users} columns={[
+        <DataTable data={filteredUsers} columns={[
           { label: "Nome", render: (r: SeedUser) => <p className="text-sm font-medium text-slate-800">{r.name}</p> },
           { label: "Email", render: (r: SeedUser) => <span className="text-sm text-slate-500">{r.email}</span> },
-          { label: "Perfil", render: (r: SeedUser) => <Badge className={r.role === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : r.role === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : "bg-slate-100 text-slate-600 border-slate-200"}>{ROLE_LABELS[r.role]}</Badge> },
+          { label: "Perfil", render: (r: SeedUser) => {
+            const pf = profileOf(r, profiles);
+            return (
+              <div>
+                <Badge className={pf.base === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : pf.base === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : pf.system ? "bg-slate-100 text-slate-600 border-slate-200" : "bg-cyan-50 text-cyan-700 border-cyan-200"}>{pf.name}</Badge>
+                {!pf.system && <p className="mt-1 text-[11px] text-slate-400">tipo {ROLE_LABELS[r.role]}</p>}
+              </div>
+            );
+          } },
           { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "\u2014" },
           { label: "Acesso", render: (r: SeedUser) => {
-            const p = paginasPermitidas(r);
-            if (p === "all") {
-              return <span className="text-xs text-slate-400">{r.role === "freelancer_bim" ? "Só as próprias demandas BIM" : r.role === "client" ? "Total" : "Interno"}</span>;
-            }
-            const rotulos = p.map((id) => PAGINAS_CLIENTE.find((x) => x.id === id)?.label || id);
+            const ids = paginasPermitidas(r);
+            const excecao = r.role === "client" && !!r.allowedPages?.length;
+            const rotulos = ids.map((id) => ACCESS_MODULES.find((x) => x.id === id)?.label || id);
             return (
-              <span className="text-xs text-slate-600">
-                {rotulos.join(", ")}
-                {!r.allowedPages?.length && <span className="ml-1 text-slate-400">(padrão)</span>}
+              <span className="text-xs text-slate-600" title={rotulos.join(", ")}>
+                {rotulos.length <= 3 ? (rotulos.join(", ") || "Nenhum módulo") : `${rotulos.length} módulos`}
+                {excecao && <span className="ml-1 text-amber-600">(exceção do usuário)</span>}
               </span>
             );
           } },
@@ -3635,9 +3746,10 @@ function UsersPage() {
             </div>
           ) : (
             <div className="flex gap-2">
-              <button onClick={() => setEditingUser(r)} className="text-xs text-slate-500 hover:text-slate-800 hover:underline">Editar</button>
-              <span className="text-slate-200">|</span>
-              <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>
+              {canEdit && <button onClick={() => setEditingUser(r)} className="text-xs text-slate-500 hover:text-slate-800 hover:underline">Editar</button>}
+              {canEdit && canDelete && <span className="text-slate-200">|</span>}
+              {canDelete && r.id !== currentUser?.id && <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>}
+              {!canEdit && !canDelete && <span className="text-xs text-slate-300">—</span>}
             </div>
           )},
         ]} />
@@ -4025,7 +4137,8 @@ const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
 
 /** Criar ticket ou, com `initial`, editar um existente (título, bloco, prazo, prioridade, plano, responsável). */
 function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onSave: (t: ProductionTicket) => void; initial?: ProductionTicket }) {
-  const { blocks, tickets } = useContext(AppContext);
+  const { blocks, tickets, currentUser } = useContext(AppContext);
+  const lockDate = !!initial && !canEditDeadlines(currentUser!); // editar ticket ≠ mexer no prazo
   const [title, setTitle] = useState(initial?.title ?? "");
   const [clientId, setClientId] = useState(initial?.clientId ?? "");
   const [blockId, setBlockId] = useState(initial?.blockId ?? "");
@@ -4124,7 +4237,7 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">SLA *</label>
-              <input type="date" value={slaDate} onChange={(e) => setSlaDate(e.target.value)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition" />
+              <input type="date" value={slaDate} onChange={(e) => setSlaDate(e.target.value)} disabled={lockDate} title={lockDate ? "Seu perfil não tem a permissão 'Alterar prazos'" : undefined} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition disabled:opacity-50" />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -4166,7 +4279,10 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [editingTicket, setEditingTicket] = useState<ProductionTicket | null>(null);
-  const canEdit = canEditDeadlines(user); // equipe interna edita ticket e prazo
+  // Perfil de acesso: criar / editar / excluir ticket. (O prazo dentro da edição pede também "Alterar prazos".)
+  const canCreate = can(user, "tickets", "create");
+  const canEdit = can(user, "tickets", "edit");
+  const canDelete = can(user, "tickets", "delete");
 
   const isClient = user.role === "client";
 
@@ -4243,7 +4359,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
         action={
           <div className="flex items-center gap-2">
             <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{counts.all} tickets</Badge>
-            {!isClient && (
+            {!isClient && canCreate && (
               <button onClick={() => setShowNewTicket(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition">
                 <Plus className="w-3.5 h-3.5" /> Novo Ticket
               </button>
@@ -4337,10 +4453,10 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                       </select>
                     </>
                   )}
-                  {canEdit && (
+                  {(canEdit || canDelete) && (
                     <>
-                      <button onClick={() => setEditingTicket(ticket)} title="Editar título, bloco, prazo, prioridade e plano" className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition"><Settings className="h-3 w-3" /> Editar</button>
-                      <button onClick={() => deleteTicket(ticket)} title="Excluir ticket" className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-400 hover:border-rose-200 hover:text-rose-600 transition"><X className="h-3 w-3" /></button>
+                      {canEdit && <button onClick={() => setEditingTicket(ticket)} title="Editar título, bloco, prazo, prioridade e plano" className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition"><Settings className="h-3 w-3" /> Editar</button>}
+                      {canDelete && <button onClick={() => deleteTicket(ticket)} title="Excluir ticket" className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-400 hover:border-rose-200 hover:text-rose-600 transition"><X className="h-3 w-3" /></button>}
                     </>
                   )}
                   {assignedUser && (
@@ -4620,7 +4736,9 @@ function BimPage({ user }: { user: SeedUser }) {
   const [editing, setEditing] = useState<BimDemand | null>(null);
 
   const freelancers = users.filter((u) => u.role === "freelancer_bim" && u.active);
-  const canEdit = user.role === "admin" || user.role === "internal_ops";
+  const canCreate = can(user, "bim", "create");
+  const canEdit = can(user, "bim", "edit");
+  const canDelete = can(user, "bim", "delete");
 
   const list = bimDemands
     .filter((d) => (!filterFreelancer || d.freelancerId === filterFreelancer) && (!filterClient || d.clientId === filterClient))
@@ -4663,7 +4781,7 @@ function BimPage({ user }: { user: SeedUser }) {
         action={
           <div className="flex items-center gap-2 flex-wrap">
             <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{bimDemands.length} demandas</Badge>
-            {canEdit && <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova demanda</button>}
+            {canCreate && <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova demanda</button>}
           </div>
         }
       />
@@ -4702,7 +4820,7 @@ function BimPage({ user }: { user: SeedUser }) {
           {list.map((d) => (
             <BimDemandCard key={d.id} d={d} mode="internal" clientName={clientOf(d.clientId)} freelancerName={nameOf(d.freelancerId)}
               onToggle={(itemId, fmt) => toggle(d, itemId, fmt)} onStatus={(st) => setStatus(d, st)}
-              onEdit={canEdit ? () => setEditing(d) : undefined} onDelete={canEdit ? () => remove(d) : undefined} />
+              onEdit={canEdit ? () => setEditing(d) : undefined} onDelete={canDelete ? () => remove(d) : undefined} />
           ))}
         </div>
       )}
@@ -4840,7 +4958,7 @@ function BlockFinishesTab({ block, user, setPage }: { block: SeedBlock; user: Se
           </div>
           <div className="flex items-center gap-2">
             {isFilled(saved) ? <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200">Cadastrado</Badge> : <Badge className="bg-amber-50 text-amber-700 border-amber-200">Pendente</Badge>}
-            <button onClick={save} disabled={!dirty} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+            {can(user, "finishes", "edit") ? <button onClick={save} disabled={!dirty} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button> : <span className="text-[11px] text-slate-400">Somente consulta</span>}
           </div>
         </div>
         {catalog.groups.length === 0 && (
@@ -4884,7 +5002,7 @@ function BlockFinishesTab({ block, user, setPage }: { block: SeedBlock; user: Se
         <textarea value={draft.applicationNotes || ""} onChange={(e) => setDraft({ ...draft, applicationNotes: e.target.value })} rows={4} placeholder='Ex: "Base sempre preto fosco. Parte externa em pintura gofrato, tampo em melamina, interior nos tecidos."' className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" />
         {saved?.updatedAt && new Date(saved.updatedAt).getTime() > 0 && <p className="text-xs text-slate-400 mt-2">Última alteração: {new Date(saved.updatedAt).toLocaleString("pt-BR")}{saved.updatedBy ? ` por ${saved.updatedBy}` : ""}{saved.notionUrl ? <> · <a href={saved.notionUrl} target="_blank" rel="noreferrer" className="text-cyan-700 hover:underline">origem no Notion</a></> : null}</p>}
       </Card>
-      {dirty && <div className="sticky bottom-4 flex justify-end"><button onClick={save} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold shadow-lg hover:bg-slate-800">Salvar acabamentos</button></div>}
+      {dirty && can(user, "finishes", "edit") && <div className="sticky bottom-4 flex justify-end"><button onClick={save} className="px-5 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-semibold shadow-lg hover:bg-slate-800">Salvar acabamentos</button></div>}
     </div>
   );
 }
@@ -4945,7 +5063,7 @@ function FinishesPage({ user, setPage, setSelectedBlock }: { user: SeedUser; set
           </div>
           <div className="flex gap-2">
             {dirty && <button onClick={() => setDraft(catalog)} className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-500 hover:bg-slate-100">Descartar</button>}
-            <button onClick={save} disabled={!dirty} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar catálogo</button>
+            {can(user, "finishes", "edit") ? <button onClick={save} disabled={!dirty} className="px-4 py-2 rounded-xl bg-slate-900 text-white text-xs font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar catálogo</button> : <span className="text-[11px] text-slate-400">Somente consulta</span>}
           </div>
         </div>
         <div className="mt-4 space-y-3">
@@ -5180,7 +5298,10 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SeedPub | null>(null);
-  const canEdit = currentUser?.role === "admin";
+  // Permissões vêm do perfil de acesso (src/lib/access.ts).
+  const canCreate = can(currentUser, "publications", "create");
+  const canEdit = can(currentUser, "publications", "edit");
+  const canDelete = can(currentUser, "publications", "delete");
   const [filterClient, setFilterClient] = useState<string>("");
 
   const isClient = user.role === "client";
@@ -5264,7 +5385,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                 <FileText className="w-3.5 h-3.5" /> Baixar links (.txt)
               </button>
             )}
-            {canEdit && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova Publicação</button>}
+            {canCreate && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova Publicação</button>}
           </div>
         }
       />
@@ -5272,7 +5393,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
       <EmbedInstructions defaultOpen={isClient} />
 
       {pubs.length === 0 ? (
-        <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc={canEdit ? "Clique em 'Nova Publicação' para adicionar manualmente." : "Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour."} /></Card>
+        <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc={canCreate ? "Clique em 'Nova Publicação' para adicionar manualmente." : "Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour."} /></Card>
       ) : (
         <div className="grid gap-4 lg:grid-cols-2">
           {pubs.map((pub) => {
@@ -5286,10 +5407,10 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                     <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
                     <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>
                   </div>
-                  {canEdit && (
+                  {(canEdit || canDelete) && (
                     <div className="flex gap-1">
-                      <button onClick={() => setEditing(pub)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>
-                      <button onClick={() => handleDelete(pub.id)} title="Remover" className="p-1.5 rounded-lg hover:bg-red-50"><X className="w-3.5 h-3.5 text-red-500" /></button>
+                      {canEdit && <button onClick={() => setEditing(pub)} title="Editar" className="p-1.5 rounded-lg hover:bg-slate-100"><Settings className="w-3.5 h-3.5 text-slate-400" /></button>}
+                      {canDelete && <button onClick={() => handleDelete(pub.id)} title="Remover" className="p-1.5 rounded-lg hover:bg-red-50"><X className="w-3.5 h-3.5 text-red-500" /></button>}
                     </div>
                   )}
                 </div>
@@ -6407,13 +6528,13 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
                 ))}
               </select>
             </div>
-            <button
+            {can(user, "analytics", "edit") && <button
               onClick={() => setTab("manage")}
               className="rounded-xl border border-slate-200/80 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-sm transition"
               title="Listar/adicionar clientes na dim_client_alias do Athena"
             >
               Gerenciar clientes
-            </button>
+            </button>}
           </div>
         )}
       </div>
@@ -6586,6 +6707,9 @@ export default function Portal() {
   const [finishes, setFinishes] = useState<FinishRecord[]>([]);
   const [kb, setKb] = useState<KbRecord[]>([]);
   const [kbError, setKbError] = useState<string | null>(null);
+  const [profiles, setProfiles] = useState<AccessProfile[]>(DEFAULT_PROFILES);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  PROFILES = profiles; // can()/special()/podeAcessar leem daqui — atribuído antes de desenhar os filhos
   const [hydrated, setHydrated] = useState(false);
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
@@ -6661,6 +6785,27 @@ export default function Portal() {
     })();
   }, []);
 
+  // Perfis de acesso (att-profiles): carga separada e tolerante. Se falhar, valem
+  // os perfis padrão do código (o comportamento de antes dos perfis) e, sem
+  // retrato, o persist não roda — nada é gravado por cima.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/state/profiles");
+        if (!r.ok) throw new Error(`/api/state/profiles → HTTP ${r.status}`);
+        const j = await r.json();
+        if (!Array.isArray(j.items)) throw new Error(j.error || "/api/state/profiles → resposta sem lista");
+        const merged = mergeProfiles(j.items as AccessProfile[]);
+        // O retrato inclui os padrões do código: só o que o admin MUDAR vai para o banco.
+        persisted.current.profiles = new Map(merged.map((i) => [i.id, JSON.stringify(i)]));
+        setProfiles(merged);
+      } catch (e) {
+        console.error("Failed to load profiles:", e);
+        setProfilesError((e as Error).message);
+      }
+    })();
+  }, []);
+
   // Base de Conhecimento: carga separada e tolerante a falha — se a tabela
   // att-kb não existir ou faltar permissão IAM, só a KB fica indisponível
   // (com aviso na tela), sem derrubar a hidratação das outras tabelas.
@@ -6718,6 +6863,7 @@ export default function Portal() {
   useDeltaPersist({ ...persistOpts, key: "finishes", path: "/api/state/finishes", items: finishes });
   useDeltaPersist({ ...persistOpts, key: "users", path: "/api/state/users", items: users });
   useDeltaPersist({ ...persistOpts, key: "assets", path: "/api/state/assets", items: assets });
+  useDeltaPersist({ ...persistOpts, key: "profiles", path: "/api/state/profiles", items: profiles });
   // Fechou a aba dentro dos 800ms? Manda o que estiver pendente com keepalive.
   useEffect(() => {
     const flush = () => Object.values(pendingFlush.current).forEach((fn) => fn?.());
@@ -6730,7 +6876,7 @@ export default function Portal() {
   useEffect(() => {
     if (!currentUser) return;
     setPage((atual) => (podeAcessar(currentUser, atual) ? atual : primeiraPaginaPermitida(currentUser)));
-  }, [currentUser]);
+  }, [currentUser, profiles]);
 
   // Toda tela aberta vira "page_view" no log — é a medida de uso do portal.
   useEffect(() => {
@@ -6747,7 +6893,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -6785,6 +6931,8 @@ export default function Portal() {
       case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage setPage={setPage} setSelectedBlock={setSelectedBlock} setSelectedContract={setSelectedContract} />;
       case "users": return <UsersPage />;
+      case "profiles": return <AccessProfilesPage profiles={profiles} setProfiles={setProfiles} users={users} actorName={currentUser.name} loadError={profilesError}
+        perms={{ create: can(currentUser, "profiles", "create"), edit: can(currentUser, "profiles", "edit"), delete: can(currentUser, "profiles", "delete") }} />;
       case "finishes": return <FinishesPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "bim": return <BimPage user={currentUser} />;
       case "bim_minhas": return <BimMinhasDemandasPage user={currentUser} />;
@@ -6800,7 +6948,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />

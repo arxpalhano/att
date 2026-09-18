@@ -19,7 +19,7 @@
 
 export type ActivityEntity =
   | "blocks" | "tickets" | "clients" | "contracts" | "publications" | "users"
-  | "bim-demands" | "finishes" | "kb" | "assets" | "agents" | "analytics" | "session";
+  | "bim-demands" | "finishes" | "kb" | "assets" | "agents" | "analytics" | "session" | "profiles";
 
 export interface ActivityActor {
   id: string;
@@ -67,6 +67,7 @@ export const ENTITY_LABELS: Record<ActivityEntity, string> = {
   contracts: "Contratos",
   publications: "Publicações",
   users: "Usuários",
+  profiles: "Perfis de acesso",
   "bim-demands": "BIM · Terceirizados",
   finishes: "Acabamentos",
   kb: "Base de Conhecimento",
@@ -80,7 +81,7 @@ export const PAGE_LABELS: Record<string, string> = {
   dashboard: "Dashboard", onboarding: "Onboarding", blocks: "Blocos", block_detail: "Detalhe do bloco",
   contracts: "Contratos", contract_detail: "Detalhe do contrato", clients: "Clientes", approvals: "Aprovações",
   queue: "Fila de Trabalho", tickets: "Tickets", publications: "Publicações", analytics: "Analytics",
-  activity: "Atividade", users: "Usuários", finishes: "Acabamentos", bim: "BIM · Terceirizados",
+  activity: "Atividade", users: "Usuários", profiles: "Perfis de acesso", finishes: "Acabamentos", bim: "BIM · Terceirizados",
   bim_minhas: "Minhas demandas", kb: "Base de Conhecimento", agents: "Agentes AI",
   agent_sherlock_codes: "Agente Sherlock Codes", agent_monk_lighthouse: "Agente Monk Lighthouse",
   agent_yoda_kanban: "Agente Yoda Kanban", agent_harvey_closer: "Agente Harvey Closer",
@@ -226,8 +227,17 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       if (!before) return [base({ ...ctx, type: "user_created", desc: `Usuário criado: ${label} · ${cur.email ?? ""}` })];
       if (!after) return [base({ ...ctx, type: "user_deleted", desc: `Usuário excluído: ${label}` })];
       // A senha nunca aparece na descrição — só o fato de ter mudado.
-      const fields = changedFields(before, after, { name: "nome", email: "e-mail", role: "perfil", clientId: "cliente", active: "ativo", allowedPages: "telas liberadas", password: "senha" });
+      const fields = changedFields(before, after, { name: "nome", email: "e-mail", role: "tipo de conta", profileId: "perfil de acesso", clientId: "cliente", active: "ativo", allowedPages: "telas liberadas", password: "senha" });
       return fields.length ? [base({ ...ctx, type: "user_edited", desc: `Usuário editado: ${label}${listOf(fields)}` })] : [];
+    }
+
+    case "profiles": {
+      const label = String(cur.name ?? cur.id);
+      const ctx = { entityLabel: label };
+      if (!before) return [base({ ...ctx, type: "profile_created", desc: `Perfil de acesso criado: ${label}` })];
+      if (!after) return [base({ ...ctx, type: "profile_deleted", desc: `Perfil de acesso excluído: ${label}` })];
+      const fields = changedFields(before, after, { name: "nome", description: "descrição", base: "tipo de conta", modules: "módulos e permissões", special: "permissões especiais" });
+      return fields.length ? [base({ ...ctx, type: "profile_edited", desc: `Perfil de acesso editado: ${label}${listOf(fields)}` })] : [];
     }
 
     case "bim-demands": {
@@ -297,6 +307,7 @@ export const TYPE_LABELS: Record<string, string> = {
   contract_created: "Contrato criado", contract_edited: "Contrato editado", contract_deleted: "Contrato excluído",
   publication_created: "Publicação criada", publication_updated: "Publicação editada", publication_deleted: "Publicação removida",
   user_created: "Usuário criado", user_edited: "Usuário editado", user_deleted: "Usuário excluído",
+  profile_created: "Perfil criado", profile_edited: "Perfil editado", profile_deleted: "Perfil excluído",
   bim_created: "BIM · demanda criada", bim_status: "BIM · status", bim_files: "BIM · arquivos", bim_edited: "BIM · editada", bim_deleted: "BIM · excluída",
   finishes_catalog_created: "Catálogo criado", finishes_catalog_updated: "Catálogo atualizado", finishes_block_created: "Acabamentos cadastrados", finishes_block_updated: "Acabamentos atualizados", finishes_deleted: "Acabamentos excluídos",
   kb_base_created: "KB · base criada", kb_base_edited: "KB · base editada", kb_base_deleted: "KB · base excluída",

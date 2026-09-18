@@ -74,4 +74,5 @@ export const TABLES = {
   FINISHES: "att-finishes",
   KB: "att-kb",
   ASSETS: "att-assets",
+  PROFILES: "att-profiles",
 } as const;
