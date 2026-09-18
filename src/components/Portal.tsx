@@ -485,8 +485,12 @@ const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter(
 const SLA_DAYS = 14;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const addDaysISO = (iso: string, days: number) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
-/** Quem pode mexer em datas (entrega do bloco, prazo do ticket) e editar ticket. */
-const canEditDeadlines = (u: SeedUser) => u.role === "admin" || u.role === "internal_ops";
+/**
+ * Quem pode mexer em datas (entrega do bloco, prazo do ticket) e editar ticket:
+ * toda a equipe interna — admin, Operações, Modelagem e Programação (liberado em
+ * 2026-09-18). Cliente e terceirizado BIM não. Toda mudança cai no log de atividades.
+ */
+const canEditDeadlines = (u: SeedUser) => ["admin", "internal_ops", "internal_modeling", "internal_programming"].includes(u.role);
 /** Só estas contas abrem a tela Atividade (auditoria de uso da equipe). */
 const ACTIVITY_VIEWERS = ["mpalhano@archtechtour.com"];
 const canSeeActivity = (u: SeedUser) => ACTIVITY_VIEWERS.includes((u.email || "").toLowerCase());
@@ -4162,7 +4166,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
   const [showNewTicket, setShowNewTicket] = useState(false);
   const [editingTicket, setEditingTicket] = useState<ProductionTicket | null>(null);
-  const canEdit = canEditDeadlines(user); // admin e Operações editam ticket e prazo
+  const canEdit = canEditDeadlines(user); // equipe interna edita ticket e prazo
 
   const isClient = user.role === "client";
 

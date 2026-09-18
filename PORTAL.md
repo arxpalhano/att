@@ -316,8 +316,8 @@ ticket acompanhando a etapa".
   *Etapa do bloco* ao vivo, então ticket antigo com título congelado já aparece certo sem regravar.
 - **Prazo é uma data só**: editar o prazo de um ticket ligado a bloco grava `dueDate` manual no bloco.
 - **Editar/excluir ticket** (título, bloco, prazo, prioridade, plano, responsável): botão *Editar*
-  no cartão. **Quem pode mexer em datas e editar ticket: `canEditDeadlines` = admin e Operações.**
-  Os demais continuam podendo trocar situação e responsável. Tudo cai no log de atividades.
+  no cartão. **Quem pode mexer em datas e editar ticket: `canEditDeadlines` = toda a equipe interna**
+  (admin, Operações, Modelagem e Programação); cliente e terceirizado BIM não. Tudo cai no log de atividades.
 - **Etapa `sketchup_conversion` ("Conversão SketchUp")** entre *Aprovado* e *Conversão BIM*:
   `approved → sketchup_conversion → bim_conversion → published`. SKP e BIM só começam com o
   customizador aprovado — ajuste de modelagem antes disso não gera retrabalho nos dois.
