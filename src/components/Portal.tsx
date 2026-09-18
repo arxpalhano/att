@@ -32,7 +32,7 @@ type BlockStatus =
   | "draft" | "awaiting_client_files" | "client_files_under_review"
   | "ready_to_start" | "in_modeling" | "in_texturing" | "awaiting_client_material_validation"
   | "approved_for_programming" | "in_programming" | "internal_review"
-  | "awaiting_client_final_validation" | "approved" | "bim_conversion" | "published"
+  | "awaiting_client_final_validation" | "approved" | "sketchup_conversion" | "bim_conversion" | "published"
   | "blocked" | "on_hold" | "archived";
 type AssetCategory = "cad" | "finishing" | "photos" | "videos" | "technical_drawing" | "3d_block" | "extra_reference";
 type TicketStatus = "new" | "in_production" | "internal_review" | "delivered";
@@ -80,6 +80,14 @@ export interface SeedBlock {
   bim?: { skp: boolean; rvt: boolean; gsm: boolean };
   /** Modelador responsável (texto livre — no Notion era "pessoa"). */
   modeler?: string;
+  /**
+   * Data de entrega geral do bloco. Automática = `materialsAt` + SLA_DAYS; quando
+   * alguém digita a data, `dueManual` fica true e o automático para de mexer nela.
+   */
+  dueDate?: string;
+  dueManual?: boolean;
+  /** Dia em que o cliente entregou os materiais (reinicia se ele precisar reenviar). */
+  materialsAt?: string;
   /** Rastreabilidade da importação do Notion (Banco de Produtos). */
   notionUrl?: string;
   notionCode?: string;
@@ -117,6 +125,7 @@ const STATUS_COLORS: Record<BlockStatus, string> = {
   internal_review: "border-fuchsia-200/80 bg-fuchsia-50 text-fuchsia-700",
   awaiting_client_final_validation: "border-amber-200/80 bg-amber-50 text-amber-700",
   approved: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
+  sketchup_conversion: "border-orange-200/80 bg-orange-50 text-orange-700",
   bim_conversion: "border-teal-200/80 bg-teal-50 text-teal-700",
   published: "border-emerald-300/80 bg-emerald-500/10 text-emerald-700",
   blocked: "border-rose-200/80 bg-rose-50 text-rose-700",
@@ -156,7 +165,8 @@ const READINESS_RULES: Record<ServiceType, AssetCategory[]> = {
 /** Fases que geram ticket na fila quando o bloco entra nelas sem ticket aberto. */
 const PRODUCTION_PHASE_LABELS: Partial<Record<BlockStatus, string>> = {
   ready_to_start: "Modelagem", in_modeling: "Modelagem", in_texturing: "Texturização",
-  approved_for_programming: "Programação", in_programming: "Programação", bim_conversion: "Conversão BIM",
+  approved_for_programming: "Programação", in_programming: "Programação",
+  sketchup_conversion: "Conversão SketchUp", bim_conversion: "Conversão BIM",
 };
 const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
   draft: ["awaiting_client_files", "blocked", "on_hold", "archived"],
@@ -170,9 +180,13 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
   in_programming: ["internal_review", "blocked", "on_hold"],
   internal_review: ["awaiting_client_final_validation", "in_programming", "blocked", "on_hold"],
   awaiting_client_final_validation: ["approved", "internal_review", "blocked", "on_hold"],
-  approved: ["bim_conversion", "published"],
-  bim_conversion: ["published", "approved"],
-  published: ["bim_conversion", "archived"],
+  // Depois de aprovado: SketchUp → BIM → publicado (Igor, 2026-09-18). O SKP só
+  // começa com o customizador aprovado, senão ajuste de modelagem vira retrabalho
+  // em SKP e em BIM. approved → bim_conversion segue aceito para blocos antigos.
+  approved: ["sketchup_conversion", "bim_conversion", "published"],
+  sketchup_conversion: ["bim_conversion", "published", "approved"],
+  bim_conversion: ["published", "sketchup_conversion", "approved"],
+  published: ["sketchup_conversion", "bim_conversion", "archived"],
   blocked: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_texturing", "in_programming", "archived"],
   on_hold: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_texturing", "in_programming", "archived"],
   archived: [],
@@ -401,7 +415,9 @@ PUBLICATIONS.push(..._validPubs);
 // ============================================================
 // HELPERS
 // ============================================================
-const fmtDate = (d: string | undefined) => d ? new Date(d).toLocaleDateString("pt-BR") : "—";
+// Data sem hora ("2026-09-18") é lida como meia-noite UTC e, no Brasil, aparecia
+// como o dia anterior. Ancorar ao meio-dia mantém o dia que foi digitado.
+const fmtDate = (d: string | undefined) => d ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d).toLocaleDateString("pt-BR") : "—";
 const fmtSize = (b: number) => b < 1024 * 1024 ? `${(b / 1024).toFixed(0)} KB` : `${(b / (1024 * 1024)).toFixed(1)} MB`;
 const getUserName = (id: string) => USERS.find((u) => u.id === id)?.name || "—";
 /** Nome de quem fez uma atividade: o registro carrega o nome (vale mesmo para usuário excluído). */
@@ -461,6 +477,71 @@ const MAX_CLIENT_REVISIONS = 3;
 // gravado em usedBlocks — ninguém atualiza esse contador quando um bloco é
 // criado ou excluído, então ele descola da realidade no primeiro bloco novo.
 const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter((b) => b.contractId === contractId).length;
+
+// ------------------------------------------------------------
+// Prazo do bloco e ticket acompanhando a etapa
+// ------------------------------------------------------------
+/** Prazo padrão de produção, em dias, contado da entrega dos materiais. */
+const SLA_DAYS = 14;
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const addDaysISO = (iso: string, days: number) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + days); return d.toISOString().slice(0, 10); };
+/** Quem pode mexer em datas (entrega do bloco, prazo do ticket) e editar ticket. */
+const canEditDeadlines = (u: SeedUser) => u.role === "admin" || u.role === "internal_ops";
+/** Só estas contas abrem a tela Atividade (auditoria de uso da equipe). */
+const ACTIVITY_VIEWERS = ["mpalhano@archtechtour.com"];
+const canSeeActivity = (u: SeedUser) => ACTIVITY_VIEWERS.includes((u.email || "").toLowerCase());
+
+/**
+ * Aplica uma mudança de status ao bloco — ÚNICO lugar que decide os efeitos
+ * colaterais: data de publicação e o relógio do prazo. O prazo conta da entrega
+ * dos materiais: entrou em "Arquivos em Revisão" = materiais chegaram (e se o
+ * cliente precisar reenviar, o relógio reinicia na nova entrega). Bloco que pula
+ * direto para produção sem passar por lá ganha a data no dia em que entra.
+ */
+function withStatus(b: SeedBlock, status: BlockStatus, extra: Partial<SeedBlock> = {}): SeedBlock {
+  const next: SeedBlock = { ...b, ...extra, status };
+  if (status === "published" && !next.published) next.published = todayISO();
+  const materialsArrived = status === "client_files_under_review" && b.status !== "client_files_under_review";
+  // Só vale para quem está ENTRANDO em produção agora. Bloco antigo que já estava
+  // em modelagem/texturização não ganha "materiais hoje" — o prazo dele é o que já
+  // está no ticket (ou o que a PM digitar).
+  const preProduction = ["draft", "awaiting_client_files", "client_files_under_review", "ready_to_start"].includes(b.status);
+  const startedWithoutDate = !b.materialsAt && preProduction && (status === "ready_to_start" || status === "in_modeling" || status === "in_texturing");
+  if (materialsArrived || startedWithoutDate) {
+    next.materialsAt = todayISO();
+    if (!next.dueManual) next.dueDate = addDaysISO(next.materialsAt, SLA_DAYS);
+  }
+  return next;
+}
+
+/** Etapa do bloco do jeito que aparece no ticket ("Modelagem", "Validação Material"…). */
+const stageLabel = (status: BlockStatus) => PRODUCTION_PHASE_LABELS[status] ?? STATUS_LABELS[status] ?? status;
+const ALL_STAGE_LABELS = () => Array.from(new Set([...Object.values(PRODUCTION_PHASE_LABELS), ...Object.values(STATUS_LABELS), "Novo Ticket"])) as string[];
+/** Título automático = "<algo> – <etapa>". Título escrito à mão não é tocado. */
+function retitle(title: string, b: SeedBlock): string {
+  const i = title.lastIndexOf(" – ");
+  if (i < 0 || !ALL_STAGE_LABELS().includes(title.slice(i + 3).trim())) return title;
+  return `${b.title} – ${stageLabel(b.status)}`;
+}
+/**
+ * Ticket aberto acompanha o bloco: etapa no título, situação e prazo. Antes o
+ * título nascia "– Modelagem" e ficava assim para sempre, mesmo com o bloco já em
+ * Validação de Material (Jéssica, 2026-09-18).
+ */
+function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): ProductionTicket[] {
+  return tickets.map((t) => {
+    if (t.blockId !== b.id || t.status === "delivered") return t;
+    let status: TicketStatus = t.status;
+    if (b.status === "published") status = "delivered";
+    else if (b.status === "internal_review") status = "internal_review";
+    else if (PRODUCTION_PHASE_LABELS[b.status] && b.status !== "ready_to_start" && b.status !== "approved_for_programming" && t.status === "new") status = "in_production";
+    else if (t.status === "internal_review") status = "in_production"; // bloco saiu da revisão interna
+    const next = { ...t, title: retitle(t.title, b), status, slaDate: b.dueDate || t.slaDate };
+    return next.title === t.title && next.status === t.status && next.slaDate === t.slaDate ? t : next;
+  });
+}
+/** Para a tela: ticket antigo com título congelado já aparece com a etapa de hoje. */
+const ticketDisplayTitle = (t: ProductionTicket, b?: SeedBlock) => (b && t.status !== "delivered" ? retitle(t.title, b) : t.title);
 
 function checkReadiness(blockId: string, serviceType: ServiceType, assets: SeedAsset[], finishesFilled = false) {
   const required = READINESS_RULES[serviceType] || [];
@@ -633,6 +714,8 @@ function podeAcessar(user: SeedUser, page: string): boolean {
   // uma), dentro da própria tela. Quem não tem base liberada vê a tela vazia e
   // nem enxerga o item no menu (Sidebar filtra por temBaseLiberada).
   if (page === "kb") return true;
+  // Atividade é auditoria de uso da equipe: só o dono do portal enxerga.
+  if (page === "activity") return canSeeActivity(user);
   const permitidas = paginasPermitidas(user);
   if (permitidas === "all") return true;
   return permitidas.includes(PAGINA_PAI[page] ?? page);
@@ -1075,12 +1158,13 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
     { s: "internal_review", icon: Eye, color: "text-fuchsia-500" },
     { s: "awaiting_client_final_validation", icon: UserCheck, color: "text-amber-500" },
     { s: "approved", icon: ThumbsUp, color: "text-emerald-600" },
+    { s: "sketchup_conversion", icon: Box, color: "text-orange-500" },
     { s: "bim_conversion", icon: Box, color: "text-teal-600" },
     { s: "published", icon: Globe, color: "text-emerald-600" },
   ];
   const onPipeline = pipeline.reduce((n, p) => n + (byStatus[p.s] || 0), 0);
   const paused = (byStatus["blocked"] || 0) + (byStatus["on_hold"] || 0) + (byStatus["archived"] || 0);
-  const inProduction = ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "bim_conversion"].reduce((n, st) => n + (byStatus[st] || 0), 0);
+  const inProduction = ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "sketchup_conversion", "bim_conversion"].reduce((n, st) => n + (byStatus[st] || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -1291,7 +1375,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
   const used = ctrs.reduce((s, c) => s + usedBlocksOf(c.id, blocks), 0);
   const myBlocks = blocks.filter((b) => b.clientId === cid);
   const awaiting = myBlocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)).length;
-  const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "bim_conversion"].includes(b.status)).length;
+  const inProduction = myBlocks.filter((b) => ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "sketchup_conversion", "bim_conversion"].includes(b.status)).length;
   const publishedCount = myBlocks.filter((b) => b.status === "published").length;
   const contractUsage = contracted ? Math.round((used / contracted) * 100) : 0;
   const latestContract = [...ctrs].sort((a, b) => b.startDate.localeCompare(a.startDate))[0];
@@ -1304,7 +1388,7 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
     { label: "Contrato assinado", done: true, desc: "Seu contrato está ativo e registrado." },
     { label: "Reunião de onboarding agendada", done: !isNewClient, desc: "A equipe ATT entrará em contato em até 5 dias úteis para agendar." },
     { label: "Envio dos arquivos", done: myBlocks.some((b) => !["awaiting_client_files"].includes(b.status)), desc: "Envie blocos 3D, fotos, logo e desenhos técnicos para info@archtechtour.com." },
-    { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "bim_conversion", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
+    { label: "Aprovação do produto-modelo", done: myBlocks.some((b) => ["approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "sketchup_conversion", "bim_conversion", "published"].includes(b.status)), desc: "Validaremos 10% dos produtos como amostra antes de produzir o restante." },
     { label: "Publicação no catálogo digital", done: publishedCount > 0, desc: "Seus blocos estarão disponíveis em 3D e RA na plataforma ArchTechTour." },
   ];
   const onboardingProgress = onboardingSteps.filter((s) => s.done).length;
@@ -1559,11 +1643,24 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
 // ============================================================
 // BLOCKS LIST
 // ============================================================
+// Filtros da lista de blocos sobrevivem a abrir/editar um bloco e voltar. Antes
+// viviam só no useState da tela: salvar um produto devolvia a Jéssica para
+// "todas as marcas / todos os status" e ela tinha de filtrar tudo de novo.
+type BlockSort = "recent" | "sku" | "sku_desc" | "title" | "due";
+const BLOCKS_LIST_MEMORY: { search: string; status: string; client: string; sort: BlockSort } = { search: "", status: "all", client: "all", sort: "recent" };
+/** "2026_21_GH…" < "2026_98_GH…" < "2026_137_GH…" — comparação que entende número dentro do texto. */
+const naturalCompare = (a: string, b: string) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });
+
 function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all" }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void; initialStatus?: string }) {
   const { blocks, setBlocks, activities, setActivities, tickets, setTickets } = useContext(AppContext);
-  const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState(initialStatus);
-  const [filterClient, setFilterClient] = useState("all");
+  const [search, setSearch] = useState(BLOCKS_LIST_MEMORY.search);
+  // Card do dashboard (initialStatus) vence a memória; sem ele, vale o último filtro usado.
+  const [filterStatus, setFilterStatus] = useState(initialStatus !== "all" ? initialStatus : BLOCKS_LIST_MEMORY.status);
+  const [filterClient, setFilterClient] = useState(BLOCKS_LIST_MEMORY.client);
+  const [sort, setSort] = useState<BlockSort>(BLOCKS_LIST_MEMORY.sort);
+  useEffect(() => { Object.assign(BLOCKS_LIST_MEMORY, { search, status: filterStatus, client: filterClient, sort }); }, [search, filterStatus, filterClient, sort]);
+  const hasFilters = !!search || filterStatus !== "all" || filterClient !== "all";
+  const clearFilters = () => { setSearch(""); setFilterStatus("all"); setFilterClient("all"); };
   const [showCreateModal, setShowCreateModal] = useState(false);
   const isClient = user.role === "client";
 
@@ -1572,15 +1669,22 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
     if (search) list = list.filter((b) => b.title.toLowerCase().includes(search.toLowerCase()) || b.sku.toLowerCase().includes(search.toLowerCase()) || b.csku.toLowerCase().includes(search.toLowerCase()));
     if (filterStatus !== "all") list = list.filter((b) => b.status === filterStatus);
     if (filterClient !== "all") list = list.filter((b) => b.clientId === filterClient);
+    if (sort !== "recent") {
+      list = [...list].sort((a, b) =>
+        sort === "sku" ? naturalCompare(a.sku, b.sku)
+        : sort === "sku_desc" ? naturalCompare(b.sku, a.sku)
+        : sort === "title" ? naturalCompare(a.title, b.title)
+        : (a.dueDate || "9999").localeCompare(b.dueDate || "9999"));
+    }
     return list;
-  }, [blocks, search, filterStatus, filterClient, isClient, user.clientId]);
+  }, [blocks, search, filterStatus, filterClient, sort, isClient, user.clientId]);
 
   const exportCSV = () => {
-    const headers = ["SKU Interno", "SKU Cliente", "Título", "Cliente", "Tipo Serviço", "Status", "Prioridade", "Responsável", "Criado em"];
+    const headers = ["SKU Interno", "SKU Cliente", "Título", "Cliente", "Tipo Serviço", "Status", "Prioridade", "Responsável", "Criado em", "Materiais recebidos", "Entrega prevista"];
     const rows = filtered.map((b) => [
       b.sku, b.csku, b.title, getClientName(b.clientId),
       SERVICE_LABELS[b.svc], STATUS_LABELS[b.status], PRIORITY_LABELS[b.pri],
-      b.owner ? getUserName(b.owner) : "", fmtDate(b.created),
+      b.owner ? getUserName(b.owner) : "", fmtDate(b.created), b.materialsAt ? fmtDate(b.materialsAt) : "", b.dueDate ? fmtDate(b.dueDate) : "",
     ]);
     const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
@@ -1603,15 +1707,14 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
     setBlocks([...blocks, newBlock]); // o servidor registra "Bloco criado" ao gravar
 
     // Auto-cria ticket inicial na fila — Jessica (admin) atribui responsável depois
-    const slaDate = new Date();
-    slaDate.setDate(slaDate.getDate() + 14); // SLA padrão: 14 dias
+    // Prazo provisório; quando os materiais chegarem o bloco recalcula (withStatus) e o ticket acompanha.
     const newTicket: ProductionTicket = {
       id: `tk_${Date.now()}`,
       clientId: data.clientId,
       blockId: newBlock.id,
       title: `${data.title} – Modelagem`,
       plan: data.serviceType,
-      slaDate: slaDate.toISOString().slice(0, 10),
+      slaDate: addDaysISO(todayISO(), SLA_DAYS),
       priority: data.priority,
       status: "new",
     };
@@ -1654,7 +1757,16 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
               {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
+          <select value={sort} onChange={(e) => setSort(e.target.value as BlockSort)} title="Ordenação da lista" className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+            <option value="recent">Ordem: padrão</option>
+            <option value="sku">Ordem: numérica (SKU ↑)</option>
+            <option value="sku_desc">Ordem: numérica (SKU ↓)</option>
+            <option value="title">Ordem: nome A–Z</option>
+            <option value="due">Ordem: entrega mais próxima</option>
+          </select>
+          {hasFilters && <button onClick={clearFilters} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-2">Limpar filtros</button>}
         </div>
+        {hasFilters && <p className="mt-2 text-[11px] text-slate-400">{filtered.length} bloco{filtered.length === 1 ? "" : "s"} no filtro · o filtro fica guardado enquanto você abre e edita os blocos.</p>}
       </Card>
       <Card>
         <DataTable data={filtered} onRowClick={(row) => { setSelectedBlock(row.id); setPage("block_detail"); }} columns={[
@@ -1665,6 +1777,11 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
           { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
           { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
           ...(!isClient ? [{ label: "Responsável", render: (r: SeedBlock) => <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> }] : []),
+          { label: "Entrega", render: (r: SeedBlock) => {
+            if (!r.dueDate) return <span className="text-xs text-slate-300">—</span>;
+            const late = r.dueDate < todayISO() && !["published", "archived", "approved"].includes(r.status);
+            return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>;
+          } },
         ]} />
       </Card>
 
@@ -2350,9 +2467,10 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     const blockAssets = assets.filter((a) => a.blockId === block.id);
     const cats = new Set(blockAssets.map((a) => a.cat));
     if (required.every((c) => cats.has(c))) {
-      setBlocks(blocks.map((b) =>
-        b.id === block.id ? { ...b, status: "client_files_under_review" as BlockStatus } : b
-      ));
+      // Materiais completos = começa a contar o prazo de entrega (withStatus).
+      const next = withStatus(block, "client_files_under_review");
+      setBlocks(blocks.map((b) => (b.id === block.id ? next : b)));
+      setTickets((prev) => syncTicketsWithBlock(prev, next));
     }
   }, [assets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2375,8 +2493,28 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     // gravasse {skp:false,rvt:false,gsm:false}, o log acusaria "alterou: arquivos BIM"
     // toda vez que alguém salvasse o bloco sem mexer nisso.
     const bim = d.bim && (d.bim.skp || d.bim.rvt || d.bim.gsm) ? d.bim : undefined;
-    setBlocks(blocks.map((b) => b.id === block.id ? { ...b, title: d.title, sku: d.sku, csku: d.csku, modeler: d.modeler, bim } : b));
+    const next: SeedBlock = { ...block, title: d.title, sku: d.sku, csku: d.csku, modeler: d.modeler, bim };
+    setBlocks(blocks.map((b) => (b.id === block.id ? next : b)));
+    if (d.title !== block.title) setTickets((prev) => syncTicketsWithBlock(prev, next)); // título do ticket segue o nome do produto
     setShowEdit(false);
+  };
+
+  // Data de entrega geral do bloco. Digitar = manual (o automático para de mexer);
+  // "voltar ao automático" recalcula a partir da entrega dos materiais.
+  const setDueDate = (iso: string) => {
+    const next: SeedBlock = { ...block, dueDate: iso || undefined, dueManual: iso ? true : undefined };
+    setBlocks(blocks.map((b) => (b.id === block.id ? next : b)));
+    setTickets((prev) => syncTicketsWithBlock(prev, next));
+  };
+  const resetDueDate = () => {
+    const next: SeedBlock = { ...block, dueManual: undefined, dueDate: block.materialsAt ? addDaysISO(block.materialsAt, SLA_DAYS) : undefined };
+    setBlocks(blocks.map((b) => (b.id === block.id ? next : b)));
+    setTickets((prev) => syncTicketsWithBlock(prev, next));
+  };
+  const setMaterialsAt = (iso: string) => {
+    const next: SeedBlock = { ...block, materialsAt: iso || undefined, ...(block.dueManual ? {} : { dueDate: iso ? addDaysISO(iso, SLA_DAYS) : undefined }) };
+    setBlocks(blocks.map((b) => (b.id === block.id ? next : b)));
+    setTickets((prev) => syncTicketsWithBlock(prev, next));
   };
 
   const handleDelete = () => {
@@ -2397,20 +2535,22 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   // Bloco que entra numa fase de produção sem ticket aberto ganha um ticket
   // automático (antes só o "Criar bloco" fazia isso — bloco antigo mudando para
   // "Em Modelagem" ficava sem ticket na fila).
-  const ensureTicket = (status: BlockStatus, owner: string | undefined) => {
+  const ensureTicket = (status: BlockStatus, owner: string | undefined, due?: string) => {
     const phase = PRODUCTION_PHASE_LABELS[status];
     if (!phase) return;
-    if (tickets.some((t) => t.blockId === block.id && t.status !== "delivered")) return;
-    const sla = new Date(); sla.setDate(sla.getDate() + 14);
-    setTickets((prev) => [...prev, {
-      id: `tk_${Date.now()}`, clientId: block.clientId, blockId: block.id, title: `${block.title} – ${phase}`,
-      plan: block.svc, slaDate: sla.toISOString().slice(0, 10), priority: block.pri, assignedTo: owner, status: "new",
-    }]);
+    setTickets((prev) => {
+      if (prev.some((t) => t.blockId === block.id && t.status !== "delivered")) return prev;
+      return [...prev, {
+        id: `tk_${Date.now()}`, clientId: block.clientId, blockId: block.id, title: `${block.title} – ${phase}`,
+        plan: block.svc, slaDate: due || block.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: block.pri, assignedTo: owner, status: "new" as TicketStatus,
+      }];
+    });
   };
   const handleTransition = (newStatus: BlockStatus) => {
-    const updated = blocks.map((b) => b.id === block.id ? { ...b, status: newStatus, ...(newStatus === "published" ? { published: new Date().toISOString().slice(0, 10) } : {}) } : b);
-    setBlocks(updated); // o servidor descreve "Status: A → B" ao gravar
-    ensureTicket(newStatus, block.owner);
+    const next = withStatus(block, newStatus);
+    setBlocks(blocks.map((b) => (b.id === block.id ? next : b))); // o servidor descreve "Status: A → B" ao gravar
+    setTickets((prev) => syncTicketsWithBlock(prev, next)); // ticket aberto acompanha a etapa, a situação e o prazo
+    ensureTicket(newStatus, block.owner, next.dueDate);
     setConfirmTransition(null);
   };
 
@@ -2419,9 +2559,9 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     if (!approvalRule) return;
     if (action === "reject" && revisionLimitReached) return; // bloqueado — revisão paga
     const next = action === "approve" ? approvalRule.approve : approvalRule.reject;
-    setBlocks(blocks.map((b) => b.id === block.id
-      ? { ...b, status: next, ...(action === "reject" ? { clientRevisions: revisions + 1 } : {}) }
-      : b)); // o servidor registra aprovação/revisão do cliente ao gravar
+    const updated = withStatus(block, next, action === "reject" ? { clientRevisions: revisions + 1 } : {});
+    setBlocks(blocks.map((b) => (b.id === block.id ? updated : b))); // o servidor registra aprovação/revisão do cliente ao gravar
+    setTickets((prev) => syncTicketsWithBlock(prev, updated));
   };
 
   const copyEmbed = () => {
@@ -2501,6 +2641,31 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                   </div>
                 )}
                 {!isClient && <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>}
+                <div>
+                  <p className="text-xs text-slate-400">Entrega prevista</p>
+                  {canEditDeadlines(user) ? (
+                    <input type="date" value={block.dueDate ?? ""} onChange={(e) => setDueDate(e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400" />
+                  ) : (
+                    <p className="font-medium text-slate-700">{block.dueDate ? fmtDate(block.dueDate) : "—"}</p>
+                  )}
+                  {!isClient && (
+                    <p className="mt-1 text-[11px] leading-4 text-slate-400">
+                      {block.dueManual ? "Definida manualmente." : block.materialsAt ? `Automática: materiais + ${SLA_DAYS} dias.` : `Calculada sozinha quando os materiais chegarem (+${SLA_DAYS} dias).`}
+                      {block.dueManual && canEditDeadlines(user) && <button onClick={resetDueDate} className="ml-1 font-semibold text-cyan-700 hover:underline">Voltar ao automático</button>}
+                    </p>
+                  )}
+                </div>
+                {!isClient && (
+                  <div>
+                    <p className="text-xs text-slate-400">Materiais recebidos em</p>
+                    {canEditDeadlines(user) ? (
+                      <input type="date" value={block.materialsAt ?? ""} onChange={(e) => setMaterialsAt(e.target.value)} className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400" />
+                    ) : (
+                      <p className="font-medium text-slate-700">{block.materialsAt ? fmtDate(block.materialsAt) : "—"}</p>
+                    )}
+                    <p className="mt-1 text-[11px] leading-4 text-slate-400">Preenche sozinha quando o bloco entra em "Arquivos em Revisão".</p>
+                  </div>
+                )}
                 {block.published && <div><p className="text-xs text-slate-400">Publicado em</p><p className="font-medium text-slate-700">{fmtDate(block.published)}</p></div>}
                 <div>
                   <p className="text-xs text-slate-400">Revisões utilizadas</p>
@@ -2945,7 +3110,7 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
   // critério do dashboard e do badge da sidebar — os três sempre batem.
   const isClient = user.role === "client";
   const [tab, setTab] = useState("pending");
-  const { blocks, setBlocks, activities, clients } = useContext(AppContext);
+  const { blocks, setBlocks, setTickets, activities, clients } = useContext(AppContext);
   const scope = isClient ? blocks.filter((b) => b.clientId === user.clientId) : blocks;
   const pending = scope.filter(isAwaitingClient).sort((a, b) => (b.created || "").localeCompare(a.created || ""));
   const scopeIds = new Set(scope.map((b) => b.id));
@@ -2959,9 +3124,9 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
     const revisions = block.clientRevisions ?? 0;
     if (action === "reject" && revisions >= MAX_CLIENT_REVISIONS) return;
     const next = action === "approve" ? rule.approve : rule.reject;
-    setBlocks(blocks.map((b) => b.id === block.id
-      ? { ...b, status: next, ...(action === "reject" ? { clientRevisions: revisions + 1 } : {}) }
-      : b)); // o servidor registra aprovação/revisão do cliente ao gravar
+    const updated = withStatus(block, next, action === "reject" ? { clientRevisions: revisions + 1 } : {});
+    setBlocks(blocks.map((b) => (b.id === block.id ? updated : b))); // o servidor registra aprovação/revisão do cliente ao gravar
+    setTickets((prev) => syncTicketsWithBlock(prev, updated));
   };
 
   return (
@@ -3854,15 +4019,16 @@ const TICKET_STATUS_COLORS: Record<TicketStatus, string> = {
   delivered: "border-emerald-200/80 bg-emerald-50 text-emerald-700",
 };
 
-function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: ProductionTicket) => void }) {
+/** Criar ticket ou, com `initial`, editar um existente (título, bloco, prazo, prioridade, plano, responsável). */
+function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onSave: (t: ProductionTicket) => void; initial?: ProductionTicket }) {
   const { blocks, tickets } = useContext(AppContext);
-  const [title, setTitle] = useState("");
-  const [clientId, setClientId] = useState("");
-  const [blockId, setBlockId] = useState("");
-  const [assignedTo, setAssignedTo] = useState("");
-  const [slaDate, setSlaDate] = useState("");
-  const [priority, setPriority] = useState<Priority>("normal");
-  const [plan, setPlan] = useState<ServiceType>("standard");
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [clientId, setClientId] = useState(initial?.clientId ?? "");
+  const [blockId, setBlockId] = useState(initial?.blockId ?? "");
+  const [assignedTo, setAssignedTo] = useState(initial?.assignedTo ?? "");
+  const [slaDate, setSlaDate] = useState(initial?.slaDate ?? "");
+  const [priority, setPriority] = useState<Priority>(initial?.priority ?? "normal");
+  const [plan, setPlan] = useState<ServiceType>(initial?.plan ?? "standard");
 
   const internalUsers = USERS.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
   const clientBlocks = blocks.filter((b) => b.clientId === clientId);
@@ -3881,7 +4047,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
 
   const handleSave = () => {
     const t: ProductionTicket = {
-      id: `tk_${Date.now()}`,
+      id: initial?.id ?? `tk_${Date.now()}`,
       clientId,
       blockId: blockId || "",
       title: title.trim(),
@@ -3889,7 +4055,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
       slaDate,
       priority,
       assignedTo: assignedTo || undefined,
-      status: "new",
+      status: initial?.status ?? "new",
     };
     onSave(t);
     onClose();
@@ -3899,7 +4065,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
       <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-          <p className="font-semibold text-slate-900">Novo Ticket de Produção</p>
+          <p className="font-semibold text-slate-900">{initial ? "Editar Ticket" : "Novo Ticket de Produção"}</p>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition"><X className="w-4 h-4" /></button>
         </div>
         <div className="p-6 space-y-4">
@@ -3935,7 +4101,7 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
               {(() => {
                 // Criar bloco já abre um ticket "– Modelagem" automaticamente; avisa
                 // para a pessoa não abrir um segundo sem querer.
-                const abertos = blockId ? tickets.filter((t) => t.blockId === blockId && t.status !== "delivered") : [];
+                const abertos = blockId ? tickets.filter((t) => t.blockId === blockId && t.status !== "delivered" && t.id !== initial?.id) : [];
                 return abertos.length ? (
                   <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
                     Este bloco já tem {abertos.length} ticket{abertos.length === 1 ? "" : "s"} em aberto: {abertos.map((t) => t.title).join(" · ")}. Confira antes de criar outro.
@@ -3977,12 +4143,12 @@ function NewTicketModal({ onClose, onSave }: { onClose: () => void; onSave: (t: 
             </div>
           </div>
           {selectedBlock && (
-            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">Bloco: {selectedBlock.sku} · {selectedBlock.csku} · Status atual: {selectedBlock.status}</p>
+            <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">Bloco: {selectedBlock.sku} · {selectedBlock.csku} · Etapa atual: {STATUS_LABELS[selectedBlock.status]}{selectedBlock.dueDate ? ` · Entrega prevista: ${fmtDate(selectedBlock.dueDate)}` : ""}. O prazo salvo aqui vira a data de entrega do bloco.</p>
           )}
         </div>
         <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-100">
           <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm text-slate-500 hover:text-slate-700 transition">Cancelar</button>
-          <button onClick={handleSave} disabled={!canSave} className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 text-sm font-semibold text-slate-900 disabled:opacity-30 hover:brightness-110 transition">Criar Ticket</button>
+          <button onClick={handleSave} disabled={!canSave} className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 text-sm font-semibold text-slate-900 disabled:opacity-30 hover:brightness-110 transition">{initial ? "Salvar" : "Criar Ticket"}</button>
         </div>
       </div>
     </div>
@@ -3995,6 +4161,8 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const [filterClient, setFilterClient] = useState<string>("");
   const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
   const [showNewTicket, setShowNewTicket] = useState(false);
+  const [editingTicket, setEditingTicket] = useState<ProductionTicket | null>(null);
+  const canEdit = canEditDeadlines(user); // admin e Operações editam ticket e prazo
 
   const isClient = user.role === "client";
 
@@ -4015,10 +4183,27 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     if (!blockId) return;
     setBlocks((prev) => prev.map((b) => (b.id === blockId ? { ...b, owner: userId || undefined } : b)));
   };
+  // Prazo do ticket ligado a um bloco É a data de entrega do bloco (uma data só,
+  // dois lugares para mexer). Mudou aqui → vira data manual no bloco.
+  const pushDeadlineToBlock = (t: ProductionTicket, previous?: ProductionTicket) => {
+    if (!t.blockId || (previous && previous.slaDate === t.slaDate && previous.blockId === t.blockId)) return;
+    setBlocks((prev) => prev.map((b) => (b.id === t.blockId && b.dueDate !== t.slaDate ? { ...b, dueDate: t.slaDate, dueManual: true } : b)));
+  };
   const createTicket = (t: ProductionTicket) => {
     const updated = [...tickets, t];
     setTickets(updated);
     if (t.assignedTo) syncBlockOwner(t.blockId, t.assignedTo);
+    pushDeadlineToBlock(t);
+  };
+  const saveTicket = (t: ProductionTicket) => {
+    const previous = tickets.find((x) => x.id === t.id);
+    setTickets(tickets.map((x) => (x.id === t.id ? t : x)));
+    if (previous?.assignedTo !== t.assignedTo) syncBlockOwner(t.blockId, t.assignedTo);
+    pushDeadlineToBlock(t, previous);
+  };
+  const deleteTicket = (t: ProductionTicket) => {
+    if (!confirm(`Excluir o ticket "${t.title}"?\n\nO bloco não é afetado.`)) return;
+    setTickets(tickets.filter((x) => x.id !== t.id));
   };
 
   const updateStatus = (id: string, status: TicketStatus) => {
@@ -4046,6 +4231,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   return (
     <div className="space-y-6">
       {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onSave={createTicket} />}
+      {editingTicket && <NewTicketModal initial={editingTicket} onClose={() => setEditingTicket(null)} onSave={saveTicket} />}
       <SectionHeader
         eyebrow="Fase 5 · Produção"
         title="Tickets de produção"
@@ -4118,8 +4304,14 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                       <ServiceBadge type={ticket.plan} />
                       <PriorityDot priority={ticket.priority} />
                     </div>
-                    <p className="text-base font-semibold text-slate-900">{ticket.title}</p>
+                    <p className="text-base font-semibold text-slate-900">{ticketDisplayTitle(ticket, block)}</p>
                     <p className="text-sm text-slate-500 mt-1">{client?.name} · Bloco #{block?.n || "—"} · {block?.sku || ticket.blockId}</p>
+                    {block && (
+                      <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        Etapa do bloco: <StatusBadge status={block.status} />
+                        {block.materialsAt && <span>· materiais em {fmtDate(block.materialsAt)}</span>}
+                      </p>
+                    )}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className={`text-sm font-semibold ${slaUrgent ? "text-rose-600" : "text-slate-700"}`}>
@@ -4139,6 +4331,12 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                       <select value={ticket.status} onChange={(e) => updateStatus(ticket.id, e.target.value as TicketStatus)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
                         {(["new", "in_production", "internal_review", "delivered"] as TicketStatus[]).map((s) => <option key={s} value={s}>{TICKET_STATUS_LABELS[s]}</option>)}
                       </select>
+                    </>
+                  )}
+                  {canEdit && (
+                    <>
+                      <button onClick={() => setEditingTicket(ticket)} title="Editar título, bloco, prazo, prioridade e plano" className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition"><Settings className="h-3 w-3" /> Editar</button>
+                      <button onClick={() => deleteTicket(ticket)} title="Excluir ticket" className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-400 hover:border-rose-200 hover:text-rose-600 transition"><X className="h-3 w-3" /></button>
                     </>
                   )}
                   {assignedUser && (

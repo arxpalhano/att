@@ -96,7 +96,7 @@ export const BLOCK_STATUS_LABELS: Record<string, string> = {
   in_modeling: "Em Modelagem", in_texturing: "Em Texturização", awaiting_client_material_validation: "Validação Material",
   approved_for_programming: "Aprovado p/ Programação", in_programming: "Em Programação",
   internal_review: "Revisão Interna", awaiting_client_final_validation: "Validação Final",
-  approved: "Aprovado", bim_conversion: "Conversão BIM", published: "Publicado", blocked: "Bloqueado",
+  approved: "Aprovado", sketchup_conversion: "Conversão SketchUp", bim_conversion: "Conversão BIM", published: "Publicado", blocked: "Bloqueado",
   on_hold: "Em Espera", archived: "Arquivado",
 };
 export const TICKET_STATUS_LABELS: Record<string, string> = {
@@ -171,6 +171,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       const fields = changedFields(before, after, {
         title: "título", sku: "SKU", csku: "SKU do cliente", desc: "descrição", svc: "plano", pri: "prioridade",
         owner: "responsável", backup: "backup", modeler: "modelador", bim: "arquivos BIM", contractId: "contrato", clientId: "cliente",
+        dueDate: "data de entrega", dueManual: "prazo manual/automático", materialsAt: "materiais recebidos",
       });
       if (fields.length) out.push(base({ ...ctx, type: "block_edited", desc: `Bloco editado: ${label}${listOf(fields)}` }));
       return out;

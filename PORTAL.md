@@ -102,7 +102,7 @@ aba dentro dos 800ms, o pendente é enviado com `keepalive` (`pagehide`). Em fal
 
 **Status de bloco (`BlockStatus`):** draft, awaiting_client_files, client_files_under_review,
 ready_to_start, in_modeling, **in_texturing**, awaiting_client_material_validation, approved_for_programming,
-in_programming, internal_review, awaiting_client_final_validation, approved, **bim_conversion**, published,
+in_programming, internal_review, awaiting_client_final_validation, approved, **sketchup_conversion**, **bim_conversion**, published,
 blocked, on_hold, archived.
 
 `in_texturing` (Em Texturização) e `bim_conversion` (Conversão BIM) entraram em 2026-09-02 para
@@ -294,6 +294,40 @@ de outras pessoas nas últimas 24 h; cliente — blocos que esperam ação dele,
 acabamentos, publicações dos últimos 14 dias; terceirizado — demandas novas e atrasadas.
 Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`); abrir o menu
 marca tudo como visto; clicar navega direto.
+
+
+### Prazo do bloco, ticket que segue a etapa e etapa SketchUp (desde 2026-09-18)
+
+Pedidos da Jéssica e do Igor na daily de 18/09. Tudo em `Portal.tsx`, seção "Prazo do bloco e
+ticket acompanhando a etapa".
+
+- **`withStatus(bloco, status)` é o único lugar que muda status de bloco** (transição, override do
+  admin, aprovação/revisão do cliente na tela do bloco e em Aprovações, auto-avanço por upload). Ele
+  cuida da data de publicação e do **relógio do prazo**: ao entrar em *Arquivos em Revisão* grava
+  `materialsAt = hoje` e, se o prazo não for manual, `dueDate = materialsAt + SLA_DAYS` (14). Se o
+  cliente precisar reenviar, o relógio reinicia na nova entrega. Bloco que pula direto da
+  pré-produção para modelagem ganha a data no dia. Bloco antigo já em produção **não** é tocado.
+- **Data de entrega geral do bloco** (`dueDate`, `dueManual`, `materialsAt`): cartão *Informações*
+  do bloco. Digitar a data = manual (o automático para de mexer); "Voltar ao automático" recalcula.
+  Coluna *Entrega* na lista (vermelho se vencida) e no CSV.
+- **Ticket aberto acompanha o bloco** (`syncTicketsWithBlock`): etapa no título automático
+  ("Produto – Validação Material"; título escrito à mão não é tocado), situação (revisão interna ↔
+  em produção, publicado → entregue) e prazo (`slaDate = dueDate`). O cartão do ticket mostra a
+  *Etapa do bloco* ao vivo, então ticket antigo com título congelado já aparece certo sem regravar.
+- **Prazo é uma data só**: editar o prazo de um ticket ligado a bloco grava `dueDate` manual no bloco.
+- **Editar/excluir ticket** (título, bloco, prazo, prioridade, plano, responsável): botão *Editar*
+  no cartão. **Quem pode mexer em datas e editar ticket: `canEditDeadlines` = admin e Operações.**
+  Os demais continuam podendo trocar situação e responsável. Tudo cai no log de atividades.
+- **Etapa `sketchup_conversion` ("Conversão SketchUp")** entre *Aprovado* e *Conversão BIM*:
+  `approved → sketchup_conversion → bim_conversion → published`. SKP e BIM só começam com o
+  customizador aprovado — ajuste de modelagem antes disso não gera retrabalho nos dois.
+  (`approved → bim_conversion` continua aceito para blocos antigos.)
+- **Lista de blocos**: busca, status, marca e ordenação ficam guardados (`BLOCKS_LIST_MEMORY`)
+  enquanto se abre/edita blocos; "Limpar filtros" zera. Ordenação nova: numérica pelo SKU
+  (`2026_21` < `2026_98` < `2026_137`), nome A–Z, entrega mais próxima.
+- **Tela Atividade só para o dono do portal**: `ACTIVITY_VIEWERS` (e-mails) em `podeAcessar` — some
+  do menu e falha fechada para os demais, inclusive outros admins.
+- `fmtDate` ancora datas sem hora ao meio-dia (antes "2026-09-18" aparecia como 17/09 no Brasil).
 
 
 ### Base de Conhecimento (desde 2026-09-08)
