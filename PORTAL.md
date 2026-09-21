@@ -297,6 +297,30 @@ Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`
 marca tudo como visto; clicar navega direto.
 
 
+### Tickets organizáveis e importação de links por TXT (desde 2026-09-21)
+
+Pedidos do Liles, do Victor e da Jéssica.
+
+- **Ticket ganhou** `desc` (descrição livre, aparece no cartão e entra na busca), `createdAt` e
+  `archivedAt`/`archivedBy`. **Arquivar** tira o ticket das listas, da fila e dos alertas sem apagar
+  (aba *Arquivados*; "Arquivar entregues" faz em lote, respeitando o filtro de marca). Em todo o
+  código, "ticket aberto" = `isOpenTicket()` (não entregue **e** não arquivado).
+- **Organização da tela** (guardada em `TICKETS_LIST_MEMORY` ao sair e voltar): busca, filtro de
+  **prazo** (atrasados / 7 dias / 30 dias / depois) e **ordem** — mais atrasado primeiro (padrão),
+  prazo mais distante, mais recente → mais antigo, mais antigo → mais recente, prioridade, marca.
+  "Mais recente" usa `ticketCreatedAt()`: `createdAt` → instante no id `tk_<timestamp>` → data de
+  criação do bloco (os 121 tickets migrados do Planner não têm data própria).
+- **Importar links (.txt)** em Publicações (`src/components/LinkImportModal.tsx` +
+  `src/lib/link-import.ts`): cola/sobe um TXT com um link do explorar por linha; o portal resolve
+  **marca** (alias aprendido das publicações existentes → `code` igual → `code` parecido; o alias da
+  URL difere do `code` em várias marcas: `estudio-bola`, `minnimal`, `rs`, `jader-ver-N`…) e **bloco**
+  (mesmo produto já publicado → nome igual → SKU igual → nome parecido, que pede conferência). A
+  prévia mostra nova / troca de link (vX → vY) / já igual / falta escolher, deixa corrigir marca e
+  bloco por linha e acusa dois links no mesmo bloco. Opção de marcar os blocos como Publicado
+  (desligada por padrão). Testado em leave-one-out nas 472 publicações reais: 420 certos, 22
+  deixados para escolher; os 29 "errados" são blocos duplicados no banco (mesmo produto duas vezes).
+  Pede `publications` criar + editar no perfil — o padrão de Programação passou a ter.
+
 ### Perfis de acesso e filtros em Usuários (desde 2026-09-18)
 
 Tela **Perfis de acesso** (`profiles`, menu interno) + tabela `att-profiles`. Tipos, módulos e

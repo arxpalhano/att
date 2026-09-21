@@ -186,7 +186,9 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       const out: ActivityDraft[] = [];
       if (before.status !== after.status) out.push(base({ ...ctx, type: "ticket_status", desc: `Ticket "${label}": ${TICKET_STATUS_LABELS[before.status] ?? before.status} → ${TICKET_STATUS_LABELS[after.status] ?? after.status}` }));
       if (before.assignedTo !== after.assignedTo) out.push(base({ ...ctx, type: "ticket_assigned", desc: after.assignedTo ? `Ticket "${label}" atribuído a ${names.user(after.assignedTo)}` : `Ticket "${label}" ficou sem responsável` }));
-      const fields = changedFields(before, after, { title: "título", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente" });
+      if (!before.archivedAt && after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket arquivado: ${label}` }));
+      if (before.archivedAt && !after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket desarquivado: ${label}` }));
+      const fields = changedFields(before, after, { title: "título", desc: "descrição", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente" });
       if (fields.length) out.push(base({ ...ctx, type: "ticket_edited", desc: `Ticket editado: ${label}${listOf(fields)}` }));
       return out;
     }
@@ -307,6 +309,7 @@ export const TYPE_LABELS: Record<string, string> = {
   contract_created: "Contrato criado", contract_edited: "Contrato editado", contract_deleted: "Contrato excluído",
   publication_created: "Publicação criada", publication_updated: "Publicação editada", publication_deleted: "Publicação removida",
   user_created: "Usuário criado", user_edited: "Usuário editado", user_deleted: "Usuário excluído",
+  ticket_archived: "Ticket arquivado",
   profile_created: "Perfil criado", profile_edited: "Perfil editado", profile_deleted: "Perfil excluído",
   bim_created: "BIM · demanda criada", bim_status: "BIM · status", bim_files: "BIM · arquivos", bim_edited: "BIM · editada", bim_deleted: "BIM · excluída",
   finishes_catalog_created: "Catálogo criado", finishes_catalog_updated: "Catálogo atualizado", finishes_block_created: "Acabamentos cadastrados", finishes_block_updated: "Acabamentos atualizados", finishes_deleted: "Acabamentos excluídos",

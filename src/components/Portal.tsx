@@ -7,6 +7,7 @@ import { FinishCatalog, BlockFinishes, FinishRecord, FinishGroup, catalogId, blo
 import LanguageSwitcher from "./LanguageSwitcher";
 import KnowledgeBase from "./KnowledgeBase";
 import AccessProfilesPage from "./AccessProfiles";
+import LinkImportModal, { LinkImportRow } from "./LinkImportModal";
 import { AccessProfile, AccessAction, SpecialPerm, DEFAULT_PROFILES, MODULES as ACCESS_MODULES, BASE_LABELS, mergeProfiles, profileOf, canDo, hasSpecial, defaultProfileId, summarizeProfile } from "@/lib/access";
 import { KbRecord, KbBase, canViewBase, isKbBase } from "@/lib/kb";
 import { KB_SEED } from "@/data/kb-seed";
@@ -55,6 +56,13 @@ export interface ProductionTicket {
   id: string; clientId: string; blockId: string; title: string;
   plan: ServiceType; slaDate: string; priority: Priority;
   assignedTo?: string; status: TicketStatus;
+  /** Texto livre: o que precisa ser feito, observações, link de referência. */
+  desc?: string;
+  /** Quando o ticket nasceu (ISO). Tickets antigos não têm — ver `ticketCreatedAt`. */
+  createdAt?: string;
+  /** Arquivado = fora das listas e dos alertas, sem apagar. Guarda quando e por quem. */
+  archivedAt?: string;
+  archivedBy?: string;
 }
 
 interface SeedUser {
@@ -548,7 +556,7 @@ function retitle(title: string, b: SeedBlock): string {
  */
 function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): ProductionTicket[] {
   return tickets.map((t) => {
-    if (t.blockId !== b.id || t.status === "delivered") return t;
+    if (t.blockId !== b.id || !isOpenTicket(t)) return t;
     let status: TicketStatus = t.status;
     if (b.status === "published") status = "delivered";
     else if (b.status === "internal_review") status = "internal_review";
@@ -558,8 +566,21 @@ function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): Produc
     return next.title === t.title && next.status === t.status && next.slaDate === t.slaDate ? t : next;
   });
 }
+/** Ticket "aberto" = conta para fila, alertas e acompanha o bloco. Entregue ou arquivado, não. */
+const isOpenTicket = (t: ProductionTicket) => t.status !== "delivered" && !t.archivedAt;
+/**
+ * Data de criação para ordenar "do mais recente". Ticket novo grava `createdAt`;
+ * os criados pelo portal antes disso têm o instante no id (tk_<timestamp>); os
+ * migrados do Planner (tk_c2_003…) não têm data nenhuma — usam a do bloco.
+ */
+function ticketCreatedAt(t: ProductionTicket, b?: SeedBlock): string {
+  if (t.createdAt) return t.createdAt;
+  const m = /^tk_(\d{12,})$/.exec(t.id);
+  if (m) return new Date(Number(m[1])).toISOString();
+  return b?.created ?? "";
+}
 /** Para a tela: ticket antigo com título congelado já aparece com a etapa de hoje. */
-const ticketDisplayTitle = (t: ProductionTicket, b?: SeedBlock) => (b && t.status !== "delivered" ? retitle(t.title, b) : t.title);
+const ticketDisplayTitle = (t: ProductionTicket, b?: SeedBlock) => (b && isOpenTicket(t) ? retitle(t.title, b) : t.title);
 
 function checkReadiness(blockId: string, serviceType: ServiceType, assets: SeedAsset[], finishesFilled = false) {
   const required = READINESS_RULES[serviceType] || [];
@@ -1743,6 +1764,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
       slaDate: addDaysISO(todayISO(), SLA_DAYS),
       priority: data.priority,
       status: "new",
+      createdAt: new Date().toISOString(),
     };
     setTickets([...tickets, newTicket]);
 
@@ -2567,10 +2589,11 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     const phase = PRODUCTION_PHASE_LABELS[status];
     if (!phase) return;
     setTickets((prev) => {
-      if (prev.some((t) => t.blockId === block.id && t.status !== "delivered")) return prev;
+      if (prev.some((t) => t.blockId === block.id && isOpenTicket(t))) return prev;
       return [...prev, {
         id: `tk_${Date.now()}`, clientId: block.clientId, blockId: block.id, title: `${block.title} – ${phase}`,
         plan: block.svc, slaDate: due || block.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: block.pri, assignedTo: owner, status: "new" as TicketStatus,
+        createdAt: new Date().toISOString(),
       }];
     });
   };
@@ -2658,7 +2681,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                       onChange={(e) => {
                         const owner = e.target.value || undefined;
                         setBlocks(blocks.map((b) => (b.id === block.id ? { ...b, owner } : b)));
-                        setTickets(tickets.map((t) => (t.blockId === block.id && t.status !== "delivered" ? { ...t, assignedTo: owner } : t)));
+                        setTickets(tickets.map((t) => (t.blockId === block.id && isOpenTicket(t) ? { ...t, assignedTo: owner } : t)));
                         if (owner) ensureTicket(block.status, owner);
                       }}
                       className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400"
@@ -4146,6 +4169,7 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
   const [slaDate, setSlaDate] = useState(initial?.slaDate ?? "");
   const [priority, setPriority] = useState<Priority>(initial?.priority ?? "normal");
   const [plan, setPlan] = useState<ServiceType>(initial?.plan ?? "standard");
+  const [desc, setDesc] = useState(initial?.desc ?? "");
 
   const internalUsers = USERS.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
   const clientBlocks = blocks.filter((b) => b.clientId === clientId);
@@ -4173,6 +4197,9 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
       priority,
       assignedTo: assignedTo || undefined,
       status: initial?.status ?? "new",
+      ...(desc.trim() ? { desc: desc.trim() } : {}),
+      createdAt: initial ? initial.createdAt : new Date().toISOString(),
+      ...(initial?.archivedAt ? { archivedAt: initial.archivedAt, archivedBy: initial.archivedBy } : {}),
     };
     onSave(t);
     onClose();
@@ -4218,7 +4245,7 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
               {(() => {
                 // Criar bloco já abre um ticket "– Modelagem" automaticamente; avisa
                 // para a pessoa não abrir um segundo sem querer.
-                const abertos = blockId ? tickets.filter((t) => t.blockId === blockId && t.status !== "delivered" && t.id !== initial?.id) : [];
+                const abertos = blockId ? tickets.filter((t) => t.blockId === blockId && isOpenTicket(t) && t.id !== initial?.id) : [];
                 return abertos.length ? (
                   <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800">
                     Este bloco já tem {abertos.length} ticket{abertos.length === 1 ? "" : "s"} em aberto: {abertos.map((t) => t.title).join(" · ")}. Confira antes de criar outro.
@@ -4259,6 +4286,10 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
               </select>
             </div>
           </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Descrição</label>
+            <textarea value={desc} onChange={(e) => setDesc(e.target.value)} rows={3} placeholder="O que precisa ser feito, observações do cliente, link de referência…" className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition resize-y" />
+          </div>
           {selectedBlock && (
             <p className="text-xs text-slate-400 bg-slate-50 rounded-xl px-3 py-2">Bloco: {selectedBlock.sku} · {selectedBlock.csku} · Etapa atual: {STATUS_LABELS[selectedBlock.status]}{selectedBlock.dueDate ? ` · Entrega prevista: ${fmtDate(selectedBlock.dueDate)}` : ""}. O prazo salvo aqui vira a data de entrega do bloco.</p>
           )}
@@ -4272,9 +4303,21 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
   );
 }
 
+type TicketSort = "recent" | "oldest" | "late" | "due_far" | "priority" | "brand";
+type TicketDue = "all" | "late" | "week" | "month" | "later";
+/** Ordenação/prazo/busca da tela de tickets sobrevivem a trocar de tela e voltar. */
+const TICKETS_LIST_MEMORY: { sort: TicketSort; due: TicketDue; search: string } = { sort: "late", due: "all", search: "" };
+const PRIORITY_RANK: Record<Priority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
+
 function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const { blocks, setBlocks, tickets, setTickets, clients, users } = useContext(AppContext);
-  const [filter, setFilter] = useState<TicketStatus | "all">("all");
+  const [filter, setFilter] = useState<TicketStatus | "all" | "archived">("all");
+  // Ordenação e prazo: pedidos do Liles e do Victor (2026-09-21) — com muitas marcas
+  // e blocos antigos misturados, a lista precisa mostrar primeiro o que importa.
+  const [sort, setSort] = useState<TicketSort>(TICKETS_LIST_MEMORY.sort);
+  const [due, setDue] = useState<TicketDue>(TICKETS_LIST_MEMORY.due);
+  const [search, setSearch] = useState(TICKETS_LIST_MEMORY.search);
+  useEffect(() => { Object.assign(TICKETS_LIST_MEMORY, { sort, due, search }); }, [sort, due, search]);
   const [filterClient, setFilterClient] = useState<string>("");
   const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
   const [showNewTicket, setShowNewTicket] = useState(false);
@@ -4296,7 +4339,35 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     if (filterAssignee && filterAssignee !== "none" && t.assignedTo !== filterAssignee) return false;
     return true;
   });
-  const visible = scoped.filter((t) => filter === "all" || t.status === filter);
+  const daysTo = (iso: string) => Math.ceil((new Date(`${iso}T12:00:00`).getTime() - Date.now()) / 86400000);
+  const term = search.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const visible = useMemo(() => {
+    const blockOf = (t: ProductionTicket) => blocks.find((b) => b.id === t.blockId);
+    const list = scoped.filter((t) => {
+      // Arquivado só aparece na aba própria; "Todos" é tudo que NÃO está arquivado.
+      if (filter === "archived" ? !t.archivedAt : !!t.archivedAt) return false;
+      if (filter !== "all" && filter !== "archived" && t.status !== filter) return false;
+      if (due !== "all") {
+        if (t.status === "delivered") return false; // prazo só faz sentido para o que está em aberto
+        const d = daysTo(t.slaDate);
+        if (due === "late" ? d >= 0 : due === "week" ? d < 0 || d > 7 : due === "month" ? d < 0 || d > 30 : d <= 30) return false;
+      }
+      if (term) {
+        const b = blockOf(t);
+        const hay = `${t.title} ${t.desc ?? ""} ${b?.title ?? ""} ${b?.sku ?? ""} ${getClientName(t.clientId)}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+        if (!hay.includes(term)) return false;
+      }
+      return true;
+    });
+    const created = (t: ProductionTicket) => ticketCreatedAt(t, blockOf(t));
+    return [...list].sort((a, b) =>
+      sort === "recent" ? created(b).localeCompare(created(a))
+      : sort === "oldest" ? (created(a) || "9999").localeCompare(created(b) || "9999")
+      : sort === "late" ? a.slaDate.localeCompare(b.slaDate)          // mais atrasado primeiro
+      : sort === "due_far" ? b.slaDate.localeCompare(a.slaDate)
+      : sort === "priority" ? PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.slaDate.localeCompare(b.slaDate)
+      : getClientName(a.clientId).localeCompare(getClientName(b.clientId)) || a.slaDate.localeCompare(b.slaDate));
+  }, [scoped, blocks, filter, due, term, sort]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Responsável do ticket = responsável do bloco (a tela do bloco mostra o mesmo campo).
   const syncBlockOwner = (blockId: string | undefined, userId: string | undefined) => {
@@ -4321,6 +4392,15 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     if (previous?.assignedTo !== t.assignedTo) syncBlockOwner(t.blockId, t.assignedTo);
     pushDeadlineToBlock(t, previous);
   };
+  const archiveTicket = (t: ProductionTicket, on: boolean) =>
+    setTickets(tickets.map((x) => (x.id === t.id ? (on ? { ...x, archivedAt: new Date().toISOString(), archivedBy: user.name } : { ...x, archivedAt: undefined, archivedBy: undefined }) : x)));
+  /** Limpeza em lote: tudo que já foi entregue sai da frente, sem apagar. */
+  const archiveDelivered = () => {
+    const alvo = scoped.filter((t) => t.status === "delivered" && !t.archivedAt);
+    if (!alvo.length || !confirm(`Arquivar ${alvo.length} ticket(s) entregue(s)${filterClient ? ` de ${getClientName(filterClient)}` : ""}?\n\nEles saem das listas e continuam na aba "Arquivados".`)) return;
+    const ids = new Set(alvo.map((t) => t.id)); const at = new Date().toISOString();
+    setTickets(tickets.map((x) => (ids.has(x.id) ? { ...x, archivedAt: at, archivedBy: user.name } : x)));
+  };
   const deleteTicket = (t: ProductionTicket) => {
     if (!confirm(`Excluir o ticket "${t.title}"?\n\nO bloco não é afetado.`)) return;
     setTickets(tickets.filter((x) => x.id !== t.id));
@@ -4338,8 +4418,9 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   };
 
   const internalUsers = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
-  const counts = { all: scoped.length, new: 0, in_production: 0, internal_review: 0, delivered: 0 };
-  scoped.forEach((t) => { counts[t.status]++; });
+  const counts = { all: 0, new: 0, in_production: 0, internal_review: 0, delivered: 0, archived: 0 };
+  scoped.forEach((t) => { if (t.archivedAt) counts.archived++; else { counts.all++; counts[t.status]++; } });
+  const lateCount = scoped.filter((t) => isOpenTicket(t) && daysTo(t.slaDate) < 0).length;
 
   // Só listamos no seletor quem/o que de fato tem ticket — evita menu enorme
   // de opções que só levam a tela vazia.
@@ -4369,7 +4450,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        {([["all", "Todos", counts.all], ["new", "Novos", counts.new], ["in_production", "Em Produção", counts.in_production], ["internal_review", "Revisão", counts.internal_review], ["delivered", "Entregues", counts.delivered]] as const).map(([id, label, count]) => (
+        {([["all", "Todos", counts.all], ["new", "Novos", counts.new], ["in_production", "Em Produção", counts.in_production], ["internal_review", "Revisão", counts.internal_review], ["delivered", "Entregues", counts.delivered], ["archived", "Arquivados", counts.archived]] as const).map(([id, label, count]) => (
           <TabBtn key={id} active={filter === id} label={label} count={count} onClick={() => setFilter(id)} />
         ))}
         {!isClient && (
@@ -4403,6 +4484,36 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
         )}
       </div>
 
+      {/* Organização: busca, prazo e ordem. Fica guardado ao sair e voltar da tela. */}
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por título, descrição, produto, SKU ou marca…" className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <select value={due} onChange={(e) => setDue(e.target.value as TicketDue)} title="Filtrar pelo prazo" className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+            <option value="all">Prazo: todos</option>
+            <option value="late">Prazo: atrasados{lateCount ? ` (${lateCount})` : ""}</option>
+            <option value="week">Prazo: vence em 7 dias</option>
+            <option value="month">Prazo: vence em 30 dias</option>
+            <option value="later">Prazo: depois de 30 dias</option>
+          </select>
+          <select value={sort} onChange={(e) => setSort(e.target.value as TicketSort)} title="Ordenação" className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+            <option value="late">Ordem: mais atrasado primeiro</option>
+            <option value="due_far">Ordem: prazo mais distante primeiro</option>
+            <option value="recent">Ordem: mais recente → mais antigo</option>
+            <option value="oldest">Ordem: mais antigo → mais recente</option>
+            <option value="priority">Ordem: prioridade</option>
+            <option value="brand">Ordem: marca</option>
+          </select>
+          {(search || due !== "all") && <button onClick={() => { setSearch(""); setDue("all"); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-1">Limpar</button>}
+          {canEdit && !isClient && filter !== "archived" && counts.delivered > 0 && (
+            <button onClick={archiveDelivered} title="Tira da frente tudo que já foi entregue, sem apagar" className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition"><Archive className="h-3.5 w-3.5" /> Arquivar entregues ({counts.delivered})</button>
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-slate-400">{visible.length} ticket{visible.length === 1 ? "" : "s"} na lista{filter === "archived" ? " · arquivados não contam em alertas nem na fila" : ""}</p>
+      </Card>
+
       {visible.length === 0 ? (
         <Card className="p-4"><EmptyState icon={Hash} title="Nenhum ticket encontrado" desc="Não há tickets para o filtro selecionado." /></Card>
       ) : (
@@ -4411,9 +4522,10 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
             const block = blocks.find((b) => b.id === ticket.blockId);
             const client = clients.find((c) => c.id === ticket.clientId);
             const assignedUser = users.find((u) => u.id === ticket.assignedTo);
-            const slaDate = new Date(ticket.slaDate);
-            const daysLeft = Math.ceil((slaDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-            const slaUrgent = daysLeft <= 3;
+            const daysLeft = daysTo(ticket.slaDate);
+            const closed = !isOpenTicket(ticket);
+            const slaUrgent = !closed && daysLeft <= 3;
+            const createdAt = ticketCreatedAt(ticket, block);
 
             return (
               <Card key={ticket.id} className="p-5 md:p-6">
@@ -4432,12 +4544,15 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                         {block.materialsAt && <span>· materiais em {fmtDate(block.materialsAt)}</span>}
                       </p>
                     )}
+                    {ticket.desc && <p className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{ticket.desc}</p>}
+                    {ticket.archivedAt && <p className="mt-2 text-[11px] text-slate-400">Arquivado em {fmtDate(ticket.archivedAt.slice(0, 10))}{ticket.archivedBy ? ` por ${ticket.archivedBy}` : ""}</p>}
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className={`text-sm font-semibold ${slaUrgent ? "text-rose-600" : "text-slate-700"}`}>
-                      {slaUrgent ? `⚠ ${daysLeft}d restantes` : `${daysLeft}d até SLA`}
+                      {closed ? (ticket.archivedAt ? "Arquivado" : "Entregue") : daysLeft < 0 ? `⚠ ${-daysLeft}d de atraso` : slaUrgent ? `⚠ ${daysLeft}d restantes` : `${daysLeft}d até o prazo`}
                     </p>
-                    <p className="text-xs text-slate-400 mt-0.5">SLA: {fmtDate(ticket.slaDate)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">Prazo: {fmtDate(ticket.slaDate)}</p>
+                    {createdAt && <p className="text-[11px] text-slate-400 mt-0.5">Criado em {fmtDate(createdAt.slice(0, 10))}</p>}
                   </div>
                 </div>
 
@@ -4456,6 +4571,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                   {(canEdit || canDelete) && (
                     <>
                       {canEdit && <button onClick={() => setEditingTicket(ticket)} title="Editar título, bloco, prazo, prioridade e plano" className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition"><Settings className="h-3 w-3" /> Editar</button>}
+                      {canEdit && <button onClick={() => archiveTicket(ticket, !ticket.archivedAt)} title={ticket.archivedAt ? "Volta para as listas" : "Tira das listas e dos alertas, sem apagar"} className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition"><Archive className="h-3 w-3" /> {ticket.archivedAt ? "Desarquivar" : "Arquivar"}</button>}
                       {canDelete && <button onClick={() => deleteTicket(ticket)} title="Excluir ticket" className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-400 hover:border-rose-200 hover:text-rose-600 transition"><X className="h-3 w-3" /></button>}
                     </>
                   )}
@@ -5162,9 +5278,9 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
     if (awaiting.length) items.push({ key: `approvals:${awaiting.length}`, title: `${awaiting.length} bloco${awaiting.length === 1 ? "" : "s"} aguardando o cliente`, desc: "Validação de material ou final pendente", tone: "warn", go: () => setPage("approvals") });
     const blocked = blocks.filter((b) => b.status === "blocked");
     if (blocked.length) items.push({ key: `blocked:${blocked.length}`, title: `${blocked.length} bloco${blocked.length === 1 ? "" : "s"} bloqueado${blocked.length === 1 ? "" : "s"}`, tone: "danger", go: () => setPage("blocks") });
-    const risky = tickets.filter((t) => t.status !== "delivered" && (new Date(t.slaDate).getTime() - now) / dayMs <= 3);
+    const risky = tickets.filter((t) => isOpenTicket(t) && (new Date(t.slaDate).getTime() - now) / dayMs <= 3);
     if (risky.length) items.push({ key: `sla:${risky.map((t) => t.id).join(",")}`, title: `${risky.length} ticket${risky.length === 1 ? "" : "s"} com SLA em risco`, desc: risky.slice(0, 2).map((t) => t.title).join(" · "), tone: "danger", go: () => setPage("tickets") });
-    const unassigned = tickets.filter((t) => t.status !== "delivered" && !t.assignedTo);
+    const unassigned = tickets.filter((t) => isOpenTicket(t) && !t.assignedTo);
     if (unassigned.length) items.push({ key: `unassigned:${unassigned.length}`, title: `${unassigned.length} ticket${unassigned.length === 1 ? "" : "s"} sem responsável`, tone: "warn", go: () => setPage("tickets") });
     const delivered = bimDemands.filter((d) => d.status === "delivered");
     if (delivered.length) items.push({ key: `bim-deliv:${delivered.map((d) => d.id).join(",")}`, title: `${delivered.length} entrega${delivered.length === 1 ? "" : "s"} BIM aguardando aprovação`, desc: delivered.slice(0, 2).map((d) => d.title).join(" · "), tone: "ok", go: () => setPage("bim") });
@@ -5294,7 +5410,9 @@ function EmbedInstructions({ defaultOpen }: { defaultOpen: boolean }) {
 }
 
 function PublicationsPage({ user }: { user: SeedUser }) {
-  const { blocks, publications, setPublications, clients, currentUser } = useContext(AppContext);
+  const { blocks, setBlocks, setTickets, publications, setPublications, clients, currentUser } = useContext(AppContext);
+  const [showImport, setShowImport] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<SeedPub | null>(null);
@@ -5330,6 +5448,25 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   const handleDelete = (id: string) => {
     if (!confirm("Remover esta publicação?")) return;
     setPublications(publications.filter((p) => p.id !== id));
+  };
+
+  const embedFor = (url: string) => `<iframe width="100%" height="640px" frameborder="0" src="${url}" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>`;
+  // Importação em lote (Liles, 2026-09-21): um TXT com os links vira publicações
+  // já ligadas ao bloco e à marca certos. Bloco que já tinha link tem o link trocado.
+  const applyImport = (rows: LinkImportRow[], markPublished: boolean) => {
+    const byPub = new Map(rows.filter((r) => r.existingPubId).map((r) => [r.existingPubId!, r]));
+    const novos: SeedPub[] = rows.filter((r) => !r.existingPubId).map((r, i) => ({ id: `pub_${Date.now()}_${i}`, blockId: r.blockId, url: r.url, embed: embedFor(r.url), env: "production", v: r.v }));
+    setPublications([...publications.map((p) => { const r = byPub.get(p.id); return r ? { ...p, url: r.url, embed: embedFor(r.url), v: r.v } : p; }), ...novos]);
+    if (markPublished) {
+      const ids = new Set(rows.map((r) => r.blockId));
+      const changed = blocks.filter((b) => ids.has(b.id) && b.status !== "published").map((b) => withStatus(b, "published"));
+      const byId = new Map(changed.map((b) => [b.id, b]));
+      setBlocks(blocks.map((b) => byId.get(b.id) ?? b));
+      setTickets((prev) => changed.reduce((acc, b) => syncTicketsWithBlock(acc, b), prev));
+    }
+    setImportMsg(`${novos.length} publicação(ões) criada(s) e ${byPub.size} link(s) atualizado(s)${markPublished ? " · blocos marcados como Publicado" : ""}.`);
+    setTimeout(() => setImportMsg(""), 8000);
+    logActivity({ type: "import", entity: "publications", desc: `Importou ${rows.length} link(s) por TXT (${novos.length} novas, ${byPub.size} atualizadas)` });
   };
 
   // Baixa os links das publicações em TXT — todas as marcas ou só a filtrada.
@@ -5385,11 +5522,18 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                 <FileText className="w-3.5 h-3.5" /> Baixar links (.txt)
               </button>
             )}
+            {canCreate && canEdit && (
+              <button onClick={() => setShowImport(true)} title="Cola ou sobe um .txt com os links do explorar; o portal liga cada um ao bloco e à marca" className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition">
+                <Upload className="w-3.5 h-3.5" /> Importar links (.txt)
+              </button>
+            )}
             {canCreate && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-3 py-1.5 text-xs font-semibold text-slate-900 hover:brightness-110 transition"><Plus className="w-3.5 h-3.5" /> Nova Publicação</button>}
           </div>
         }
       />
 
+      {showImport && <LinkImportModal blocks={blocks} clients={clients} publications={publications} statusLabel={(st) => STATUS_LABELS[st as BlockStatus] ?? st ?? ""} onClose={() => setShowImport(false)} onApply={applyImport} />}
+      {importMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{importMsg}</div>}
       <EmbedInstructions defaultOpen={isClient} />
 
       {pubs.length === 0 ? (

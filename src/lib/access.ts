@@ -132,8 +132,9 @@ export const DEFAULT_PROFILES: AccessProfile[] = [
   },
   {
     id: defaultProfileId("internal_programming"), name: "Programação", base: "internal_programming", system: true,
-    description: "Desenvolvedores: pipeline completo, sem administração.",
-    modules: { ...INTERNAL_BASE }, special: { transition: true, deadlines: true },
+    description: "Desenvolvedores: pipeline completo, sem administração. Cadastram e atualizam os links dos customizadores (inclusive por TXT).",
+    // Quem programa é quem gera os links: cria e edita publicações (importar TXT pede os dois). Excluir segue com o Admin.
+    modules: { ...INTERNAL_BASE, publications: { view: true, create: true, edit: true } }, special: { transition: true, deadlines: true },
   },
   {
     id: defaultProfileId("client"), name: "Cliente", base: "client", system: true,
