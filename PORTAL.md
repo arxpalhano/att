@@ -368,6 +368,11 @@ ticket acompanhando a etapa".
   em produção, publicado → entregue) e prazo (`slaDate = dueDate`). O cartão do ticket mostra a
   *Etapa do bloco* ao vivo, então ticket antigo com título congelado já aparece certo sem regravar.
 - **Prazo é uma data só**: editar o prazo de um ticket ligado a bloco grava `dueDate` manual no bloco.
+- **Ticket move o bloco** (`blockStatusForTicket`, desde 2026-09-23): *Em Produção* tira o bloco de
+  Pronto p/ Iniciar / Aprovado p/ Programação; *Revisão Interna* leva a Revisão Interna; *Entregue*
+  conclui a etapa — modelagem/texturização → Validação Material, programação/revisão → Validação
+  Final, SketchUp → Conversão BIM, BIM → Publicado — e abre o ticket da próxima fase de produção.
+  Um lugar só para atualizar (Jéssica).
 - **Editar/excluir ticket** (título, bloco, prazo, prioridade, plano, responsável): botão *Editar*
   no cartão. **Quem pode mexer em datas e editar ticket: `canEditDeadlines` = toda a equipe interna**
   (admin, Operações, Modelagem e Programação); cliente e terceirizado BIM não. Tudo cai no log de atividades.

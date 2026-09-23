@@ -566,6 +566,32 @@ function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): Produc
     return next.title === t.title && next.status === t.status && next.slaDate === t.slaDate ? t : next;
   });
 }
+/**
+ * Caminho inverso (Jéssica, 2026-09-23): mudar a situação do TICKET move o BLOCO.
+ * Era preciso atualizar nos dois lugares. Regras:
+ *  - "Em Produção" tira o bloco de "Pronto p/ Iniciar" / "Aprovado p/ Programação".
+ *  - "Revisão Interna" leva o bloco em programação para Revisão Interna.
+ *  - "Entregue" conclui a etapa: modelagem/texturização → Validação Material;
+ *    programação/revisão → Validação Final; SketchUp → Conversão BIM; BIM → Publicado.
+ * Devolve null quando o bloco não precisa mudar (ex.: já está adiante).
+ */
+function blockStatusForTicket(ticketStatus: TicketStatus, b: SeedBlock): BlockStatus | null {
+  const s = b.status;
+  if (ticketStatus === "in_production") {
+    if (s === "ready_to_start") return "in_modeling";
+    if (s === "approved_for_programming") return "in_programming";
+    if (s === "internal_review") return "in_programming";
+    return null;
+  }
+  if (ticketStatus === "internal_review") return s === "in_programming" || s === "approved_for_programming" ? "internal_review" : null;
+  if (ticketStatus === "delivered") {
+    if (s === "ready_to_start" || s === "in_modeling" || s === "in_texturing") return "awaiting_client_material_validation";
+    if (s === "approved_for_programming" || s === "in_programming" || s === "internal_review") return "awaiting_client_final_validation";
+    if (s === "sketchup_conversion") return "bim_conversion";
+    if (s === "bim_conversion") return "published";
+  }
+  return null;
+}
 /** Ticket "aberto" = conta para fila, alertas e acompanha o bloco. Entregue ou arquivado, não. */
 const isOpenTicket = (t: ProductionTicket) => t.status !== "delivered" && !t.archivedAt;
 /**
@@ -4406,8 +4432,26 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     setTickets(tickets.filter((x) => x.id !== t.id));
   };
 
+  const [autoMsg, setAutoMsg] = useState("");
   const updateStatus = (id: string, status: TicketStatus) => {
-    const updated = tickets.map((t) => t.id === id ? { ...t, status } : t);
+    const ticket = tickets.find((t) => t.id === id);
+    const block = blocks.find((b) => b.id === ticket?.blockId);
+    let updated = tickets.map((t) => (t.id === id ? { ...t, status } : t));
+    // Situação do ticket move a etapa do bloco (blockStatusForTicket) — e o bloco
+    // novo, por sua vez, ajusta título/prazo dos tickets abertos e abre o ticket da
+    // próxima fase de produção (ex.: SketchUp entregue → nasce o ticket de BIM).
+    const nextStatus = block && ticket ? blockStatusForTicket(status, block) : null;
+    if (block && nextStatus) {
+      const nb = withStatus(block, nextStatus);
+      setBlocks(blocks.map((b) => (b.id === nb.id ? nb : b)));
+      updated = syncTicketsWithBlock(updated, nb);
+      const phase = PRODUCTION_PHASE_LABELS[nextStatus];
+      if (phase && !updated.some((t) => t.blockId === nb.id && isOpenTicket(t))) {
+        updated = [...updated, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: nb.owner, status: "new", createdAt: new Date().toISOString() }];
+      }
+      setAutoMsg(`Bloco "${nb.title}" avançou para ${STATUS_LABELS[nextStatus]}${phase ? ` · ticket de ${phase} criado` : ""}.`);
+      setTimeout(() => setAutoMsg(""), 7000);
+    }
     setTickets(updated);
   };
 
@@ -4433,10 +4477,11 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
     <div className="space-y-6">
       {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onSave={createTicket} />}
       {editingTicket && <NewTicketModal initial={editingTicket} onClose={() => setEditingTicket(null)} onSave={saveTicket} />}
+      {autoMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{autoMsg}</div>}
       <SectionHeader
         eyebrow="Fase 5 · Produção"
         title="Tickets de produção"
-        description="Cada ticket representa um bloco 3D em produção, com SLA, responsável e status atualizado."
+        description="Cada ticket é uma etapa de um bloco 3D. Marcar o ticket como Entregue conclui a etapa e avança o bloco sozinho."
         action={
           <div className="flex items-center gap-2">
             <Badge className="border-slate-200/80 bg-white/80 text-slate-600">{counts.all} tickets</Badge>
