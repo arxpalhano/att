@@ -119,6 +119,9 @@ type SeedActivity = ActivityRecord;
 export interface SeedPub {
   id: string; blockId: string; url: string;
   embed: string; env: string; v: number;
+  /** Quando a publicação entrou no portal / foi alterada pela última vez (ISO). Antigas não têm. */
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 // Rótulos vivem em src/lib/activity.ts (o servidor usa os mesmos para descrever o log).
@@ -5523,6 +5526,9 @@ function EmbedInstructions({ defaultOpen }: { defaultOpen: boolean }) {
   );
 }
 
+type PubSort = "default" | "changed" | "published" | "name";
+const PUBS_LIST_MEMORY: { search: string; sort: PubSort } = { search: "", sort: "default" };
+
 function PublicationsPage({ user }: { user: SeedUser }) {
   const { blocks, setBlocks, setTickets, publications, setPublications, clients, currentUser } = useContext(AppContext);
   const [showImport, setShowImport] = useState(false);
@@ -5535,13 +5541,30 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   const canEdit = can(currentUser, "publications", "edit");
   const canDelete = can(currentUser, "publications", "delete");
   const [filterClient, setFilterClient] = useState<string>("");
+  // Busca e ordenação (Jéssica, 2026-09-24): conferir a importação por TXT sem
+  // rolar a lista inteira. Guardadas ao sair e voltar da tela.
+  const [search, setSearch] = useState(PUBS_LIST_MEMORY.search);
+  const [sort, setSort] = useState<PubSort>(PUBS_LIST_MEMORY.sort);
+  useEffect(() => { Object.assign(PUBS_LIST_MEMORY, { search, sort }); }, [search, sort]);
+  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const term = norm(search.trim());
 
   const isClient = user.role === "client";
+  // Data "de publicação": a da própria publicação ou, nas antigas, a data em que o bloco foi publicado.
+  const pubDate = (p: SeedPub, b?: SeedBlock) => p.createdAt?.slice(0, 10) || b?.published || "";
+  const changedAt = (p: SeedPub, b?: SeedBlock) => p.updatedAt || p.createdAt || (b?.published ? `${b.published}T00:00:00` : "");
   const pubs = publications.filter((p) => {
     const block = blocks.find((b) => b.id === p.blockId);
-    if (isClient) return block?.clientId === user.clientId;
-    if (filterClient) return block?.clientId === filterClient;
+    if (isClient && block?.clientId !== user.clientId) return false;
+    if (filterClient && block?.clientId !== filterClient) return false;
+    if (term && !norm(`${block?.title ?? ""} ${block?.sku ?? ""} ${block?.csku ?? ""} ${p.url} ${block ? getClientName(block.clientId) : ""}`).includes(term)) return false;
     return true;
+  }).sort((a, b) => {
+    const ba = blocks.find((x) => x.id === a.blockId); const bb = blocks.find((x) => x.id === b.blockId);
+    if (sort === "changed") return changedAt(b, bb).localeCompare(changedAt(a, ba));
+    if (sort === "published") return pubDate(b, bb).localeCompare(pubDate(a, ba));
+    if (sort === "name") return (ba?.title ?? "").localeCompare(bb?.title ?? "", "pt-BR", { numeric: true });
+    return 0; // "default" = ordem em que foram cadastradas
   });
   // Marcas que têm publicação (para o seletor)
   const marcasComPub = clients.filter((c) => publications.some((p) => blocks.find((b) => b.id === p.blockId)?.clientId === c.id));
@@ -5553,9 +5576,10 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   const handleSave = (d: { id?: string; blockId: string; url: string; v: number }) => {
     const embed = `<iframe width="100%" height="640px" frameborder="0" src="${d.url}" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>`;
     if (d.id) {
-      setPublications(publications.map((p) => p.id === d.id ? { ...p, blockId: d.blockId, url: d.url, embed, v: d.v } : p));
+      setPublications(publications.map((p) => p.id === d.id ? { ...p, blockId: d.blockId, url: d.url, embed, v: d.v, updatedAt: new Date().toISOString() } : p));
     } else {
-      setPublications([...publications, { id: `pub_${Date.now()}`, blockId: d.blockId, url: d.url, embed, env: "production", v: d.v }]);
+      const now = new Date().toISOString();
+      setPublications([...publications, { id: `pub_${Date.now()}`, blockId: d.blockId, url: d.url, embed, env: "production", v: d.v, createdAt: now, updatedAt: now }]);
     }
     setShowAdd(false); setEditing(null);
   };
@@ -5569,8 +5593,10 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   // já ligadas ao bloco e à marca certos. Bloco que já tinha link tem o link trocado.
   const applyImport = (rows: LinkImportRow[], markPublished: boolean) => {
     const byPub = new Map(rows.filter((r) => r.existingPubId).map((r) => [r.existingPubId!, r]));
-    const novos: SeedPub[] = rows.filter((r) => !r.existingPubId).map((r, i) => ({ id: `pub_${Date.now()}_${i}`, blockId: r.blockId, url: r.url, embed: embedFor(r.url), env: "production", v: r.v }));
-    setPublications([...publications.map((p) => { const r = byPub.get(p.id); return r ? { ...p, url: r.url, embed: embedFor(r.url), v: r.v } : p; }), ...novos]);
+    const now = new Date().toISOString();
+    const novos: SeedPub[] = rows.filter((r) => !r.existingPubId).map((r, i) => ({ id: `pub_${Date.now()}_${i}`, blockId: r.blockId, url: r.url, embed: embedFor(r.url), env: "production", v: r.v, createdAt: now, updatedAt: now }));
+    setPublications([...publications.map((p) => { const r = byPub.get(p.id); return r ? { ...p, url: r.url, embed: embedFor(r.url), v: r.v, updatedAt: now } : p; }), ...novos]);
+    setSort("changed"); setSearch(""); // a lista já abre com o que acabou de entrar no topo, para conferir
     if (markPublished) {
       const ids = new Set(rows.map((r) => r.blockId));
       const changed = blocks.filter((b) => ids.has(b.id) && b.status !== "published").map((b) => withStatus(b, "published"));
@@ -5649,6 +5675,22 @@ function PublicationsPage({ user }: { user: SeedUser }) {
       {showImport && <LinkImportModal blocks={blocks} clients={clients} publications={publications} statusLabel={(st) => STATUS_LABELS[st as BlockStatus] ?? st ?? ""} onClose={() => setShowImport(false)} onApply={applyImport} />}
       {importMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{importMsg}</div>}
       <EmbedInstructions defaultOpen={isClient} />
+      <Card className="p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar por produto, SKU, marca ou trecho do link…" className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500" />
+          </div>
+          <select value={sort} onChange={(e) => setSort(e.target.value as PubSort)} title="Ordenação" className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+            <option value="default">Ordem: cadastro</option>
+            <option value="changed">Ordem: última alteração (recente primeiro)</option>
+            <option value="published">Ordem: data de publicação (recente primeiro)</option>
+            <option value="name">Ordem: nome do produto</option>
+          </select>
+          {(search || sort !== "default") && <button onClick={() => { setSearch(""); setSort("default"); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-1">Limpar</button>}
+        </div>
+        {search && <p className="mt-2 text-[11px] text-slate-400">{pubs.length} publicação(ões) encontrada(s)</p>}
+      </Card>
 
       {pubs.length === 0 ? (
         <Card className="p-4"><EmptyState icon={Globe} title="Nenhuma publicação ainda" desc={canCreate ? "Clique em 'Nova Publicação' para adicionar manualmente." : "Seus blocos aparecerão aqui após aprovação e publicação pela equipe ArchTechTour."} /></Card>
@@ -5663,6 +5705,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                   <div className="flex-1 min-w-0">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{client?.name} · v{pub.v}</p>
                     <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
+                    <p className="mt-1 text-[11px] text-slate-400">{block?.sku}{pubDate(pub, block) ? ` · publicado em ${fmtDate(pubDate(pub, block))}` : ""}{pub.updatedAt ? ` · alterado em ${fmtDate(pub.updatedAt.slice(0, 10))}` : ""}</p>
                     <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>
                   </div>
                   {(canEdit || canDelete) && (

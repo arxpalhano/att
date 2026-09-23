@@ -320,6 +320,10 @@ Pedidos do Liles, do Victor e da Jéssica.
   (desligada por padrão). Testado em leave-one-out nas 472 publicações reais: 420 certos, 22
   deixados para escolher; os 29 "errados" são blocos duplicados no banco (mesmo produto duas vezes).
   Pede `publications` criar + editar no perfil — o padrão de Programação passou a ter.
+- **Publicações com busca e ordenação** (2026-09-24): busca por produto, SKU, marca ou trecho do
+  link; ordem por cadastro, última alteração, data de publicação ou nome. `SeedPub` ganhou
+  `createdAt`/`updatedAt` (gravados ao criar/editar/importar; as antigas usam `block.published`).
+  Depois de importar um TXT a lista já abre por "última alteração", com o lote no topo.
 
 ### Perfis de acesso e filtros em Usuários (desde 2026-09-18)
 
