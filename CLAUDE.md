@@ -110,6 +110,9 @@ Portal em produção, funcional. Resumo do que foi construído (ordem cronológi
   permissões especiais; `can()`/`special()` em Portal.tsx, tipos em `src/lib/access.ts`. Nunca
   voltar a checar `role === "admin"` para permissão — `role` é só escopo de dados. PORTAL.md §6
 
+- ✅ Super admin (`superAdmin` no usuário, 2026-09-24): acima de qualquer perfil; tela **Desempenho
+  da equipe** (`src/components/TeamPerformance.tsx`) só para ele. PORTAL.md §6
+
 **Feedbacks recentes da Jessica (PM) — todos atendidos:** Arctefacto removido dos
 dashboards; dashboards zerados corrigidos (era o parquet ETL); bloco editável+excluível;
 filtro de marca nas publicações.

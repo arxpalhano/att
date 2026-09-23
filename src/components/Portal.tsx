@@ -8,6 +8,7 @@ import LanguageSwitcher from "./LanguageSwitcher";
 import KnowledgeBase from "./KnowledgeBase";
 import AccessProfilesPage from "./AccessProfiles";
 import LinkImportModal, { LinkImportRow } from "./LinkImportModal";
+import TeamPerformance from "./TeamPerformance";
 import { AccessProfile, AccessAction, SpecialPerm, DEFAULT_PROFILES, MODULES as ACCESS_MODULES, BASE_LABELS, mergeProfiles, profileOf, canDo, hasSpecial, defaultProfileId, summarizeProfile } from "@/lib/access";
 import { KbRecord, KbBase, canViewBase, isKbBase } from "@/lib/kb";
 import { KB_SEED } from "@/data/kb-seed";
@@ -76,6 +77,12 @@ interface SeedUser {
   allowedPages?: string[];
   /** Perfil de acesso (src/lib/access.ts). Ausente = perfil padrão do tipo de conta (`role`). */
   profileId?: string;
+  /**
+   * Super admin (desde 2026-09-24): acesso a absolutamente tudo, acima de qualquer
+   * perfil — inclusive Desempenho da equipe e Atividade. Só outro super admin
+   * concede/retira, no cadastro do usuário.
+   */
+  superAdmin?: boolean;
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
 export interface SeedContract {
@@ -217,7 +224,7 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
 // ============================================================
 let USERS: SeedUser[] = [
   { id: "u1", email: "mpesca@archtechtour.com", password: "arch@2025", name: "Mariana Pesca", role: "admin", active: true },
-  { id: "u2", email: "mpalhano@archtechtour.com", password: "arch@2025", name: "Matheus Palhano", role: "admin", active: true },
+  { id: "u2", email: "mpalhano@archtechtour.com", password: "arch@2025", name: "Matheus Palhano", role: "admin", active: true, superAdmin: true },
   { id: "u3", email: "vsalles@archtechtour.com", password: "arch@2025", name: "Victor Salles", role: "internal_modeling", active: true },
   { id: "u4", email: "ijesus@archtechtour.com", password: "arch@2025", name: "Igor Augusto", role: "internal_modeling", active: true },
   { id: "u5", email: "lliles@archtechtour.com", password: "arch@2025", name: "Lucas Liles", role: "internal_programming", active: true },
@@ -507,9 +514,10 @@ const usedBlocksOf = (contractId: string, blocks: SeedBlock[]) => blocks.filter(
  * `can()`/`special()` funcionam em qualquer função, sem hook.
  */
 let PROFILES: AccessProfile[] = DEFAULT_PROFILES;
-/** O usuário pode fazer `action` no módulo? (ver / criar / editar / excluir) */
-const can = (u: SeedUser | null | undefined, moduleId: string, action: AccessAction) => !!u && canDo(u, PROFILES, moduleId, action);
-const special = (u: SeedUser | null | undefined, perm: SpecialPerm) => !!u && hasSpecial(u, PROFILES, perm);
+const isSuperAdmin = (u: SeedUser | null | undefined) => !!u?.superAdmin;
+/** O usuário pode fazer `action` no módulo? (ver / criar / editar / excluir). Super admin pode tudo. */
+const can = (u: SeedUser | null | undefined, moduleId: string, action: AccessAction) => !!u && (isSuperAdmin(u) || canDo(u, PROFILES, moduleId, action));
+const special = (u: SeedUser | null | undefined, perm: SpecialPerm) => !!u && (isSuperAdmin(u) || hasSpecial(u, PROFILES, perm));
 
 /** Prazo padrão de produção, em dias, contado da entrega dos materiais. */
 const SLA_DAYS = 14;
@@ -523,7 +531,7 @@ const addDaysISO = (iso: string, days: number) => { const d = new Date(`${iso}T1
 const canEditDeadlines = (u: SeedUser) => special(u, "deadlines");
 /** Só estas contas abrem a tela Atividade (auditoria de uso da equipe). */
 const ACTIVITY_VIEWERS = ["mpalhano@archtechtour.com", "lliles@archtechtour.com"]; // Lucas Liles liberado em 2026-09-23
-const canSeeActivity = (u: SeedUser) => ACTIVITY_VIEWERS.includes((u.email || "").toLowerCase());
+const canSeeActivity = (u: SeedUser) => isSuperAdmin(u) || ACTIVITY_VIEWERS.includes((u.email || "").toLowerCase());
 
 /**
  * Aplica uma mudança de status ao bloco — ÚNICO lugar que decide os efeitos
@@ -795,6 +803,8 @@ function podeAcessar(user: SeedUser, page: string): boolean {
   // uma), dentro da própria tela. Quem não tem base liberada vê a tela vazia e
   // nem enxerga o item no menu (Sidebar filtra por temBaseLiberada).
   if (page === "kb") return true;
+  if (isSuperAdmin(user)) return true;
+  if (page === "performance") return false; // só super admin
   // Atividade é auditoria de uso da equipe: só o dono do portal enxerga.
   if (page === "activity") return canSeeActivity(user);
   return paginasPermitidas(user).includes(PAGINA_PAI[page] ?? page);
@@ -1138,6 +1148,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "activity", icon: Activity, label: "Atividade" },
         { id: "users", icon: Settings, label: "Usuários" },
         { id: "profiles", icon: Lock, label: "Perfis de acesso" },
+        ...(isSuperAdmin(user) ? [{ id: "performance", icon: BarChart3, label: "Desempenho da equipe" }] : []),
         ...itemKb,
         { id: "agents", icon: Sparkles, label: "Agentes AI" }, // quem vê sai do perfil de acesso (podeAcessar)
       ];
@@ -3633,7 +3644,7 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
   );
 }
 
-type UserFormData = { name: string; email: string; role: UserRole; profileId?: string; clientId: string; password: string; allowedPages?: string[] };
+type UserFormData = { name: string; email: string; role: UserRole; profileId?: string; superAdmin?: boolean; clientId: string; password: string; allowedPages?: string[] };
 
 function UserFormModal({
   title, onClose, onSave, initial,
@@ -3655,6 +3666,8 @@ function UserFormModal({
   const [clientId, setClientId] = useState(initial?.clientId ?? "");
   const [password, setPassword] = useState(initial?.password ?? "");
   const [showPw, setShowPw] = useState(false);
+  const { currentUser: editor } = useContext(AppContext);
+  const [superAdmin, setSuperAdmin] = useState(!!initial?.superAdmin);
   const [acessoTotal, setAcessoTotal] = useState(initial?.allowedPages?.includes("all") ?? false);
   const [paginas, setPaginas] = useState<string[]>(
     initial?.allowedPages?.filter((p) => p !== "all") ?? PAGINAS_PADRAO_CLIENTE
@@ -3714,6 +3727,12 @@ function UserFormModal({
             </select>
             <p className="mt-1 text-[11px] leading-4 text-slate-400">{summarizeProfile(chosen)}. Permissões em <b>Perfis de acesso</b>.</p>
           </div>
+          {isSuperAdmin(editor) && role !== "client" && role !== "freelancer_bim" && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-slate-700">
+              <input type="checkbox" checked={superAdmin} onChange={(e) => setSuperAdmin(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-amber-600" />
+              <span><span className="font-semibold">Super admin</span><span className="block text-[11px] leading-4 text-slate-500">Acesso a absolutamente tudo, acima do perfil: Desempenho da equipe, Atividade, perfis, usuários. Só outro super admin concede.</span></span>
+            </label>
+          )}
           {role === "client" && (
             <>
               <div>
@@ -3763,6 +3782,7 @@ function UserFormModal({
             name: name.trim(), email: email.trim(), role, clientId, password,
             // Perfil padrão do tipo de conta não precisa ficar gravado no usuário.
             profileId: profileId === defaultProfileId(role) ? undefined : profileId,
+            superAdmin: isSuperAdmin(editor) ? (superAdmin || undefined) : initial?.superAdmin,
             allowedPages: role === "client" && !usarPerfil ? (acessoTotal ? ["all"] : paginas) : undefined,
           })}
             disabled={!canSave}
@@ -3815,7 +3835,7 @@ function UsersPage() {
   const handleAdd = (data: UserFormData) => {
     const u: SeedUser = {
       id: `u_${Date.now()}`, name: data.name, email: data.email, password: data.password,
-      role: data.role, active: true, ...(data.profileId ? { profileId: data.profileId } : {}), ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
+      role: data.role, active: true, ...(data.profileId ? { profileId: data.profileId } : {}), ...(data.superAdmin ? { superAdmin: true } : {}), ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
       ...(data.allowedPages?.length ? { allowedPages: data.allowedPages } : {}),
     };
     setUsers([...users, u]);
@@ -3827,7 +3847,7 @@ function UsersPage() {
     setUsers(users.map((u) =>
       u.id === editingUser.id
         ? {
-            ...u, name: data.name, email: data.email, role: data.role, password: data.password, profileId: data.profileId,
+            ...u, name: data.name, email: data.email, role: data.role, password: data.password, profileId: data.profileId, superAdmin: data.superAdmin || undefined,
             clientId: data.role === "client" && data.clientId ? data.clientId : undefined,
             // Vazio = volta ao padrão (PAGINAS_PADRAO_CLIENTE); undefined em não-cliente.
             allowedPages: data.allowedPages?.length ? data.allowedPages : undefined,
@@ -3886,6 +3906,7 @@ function UsersPage() {
               <div>
                 <Badge className={pf.base === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : pf.base === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : pf.system ? "bg-slate-100 text-slate-600 border-slate-200" : "bg-cyan-50 text-cyan-700 border-cyan-200"}>{pf.name}</Badge>
                 {!pf.system && <p className="mt-1 text-[11px] text-slate-400">tipo {ROLE_LABELS[r.role]}</p>}
+                {r.superAdmin && <p className="mt-1 text-[11px] font-semibold text-amber-700">★ Super admin</p>}
               </div>
             );
           } },
@@ -3910,7 +3931,7 @@ function UsersPage() {
             <div className="flex gap-2">
               {canEdit && <button onClick={() => setEditingUser(r)} className="text-xs text-slate-500 hover:text-slate-800 hover:underline">Editar</button>}
               {canEdit && canDelete && <span className="text-slate-200">|</span>}
-              {canDelete && r.id !== currentUser?.id && <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>}
+              {canDelete && r.id !== currentUser?.id && (!r.superAdmin || isSuperAdmin(currentUser)) && <button onClick={() => setConfirmDelete(r.id)} className="text-xs text-red-500 hover:text-red-700 hover:underline">Remover</button>}
               {!canEdit && !canDelete && <span className="text-xs text-slate-300">—</span>}
             </div>
           )},
@@ -7273,6 +7294,7 @@ export default function Portal() {
       case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage setPage={setPage} setSelectedBlock={setSelectedBlock} setSelectedContract={setSelectedContract} />;
       case "users": return <UsersPage />;
+      case "performance": return <TeamPerformance users={users} blocks={blocks} tickets={tickets} clients={clients} />;
       case "profiles": return <AccessProfilesPage profiles={profiles} setProfiles={setProfiles} users={users} actorName={currentUser.name} loadError={profilesError}
         perms={{ create: can(currentUser, "profiles", "create"), edit: can(currentUser, "profiles", "edit"), delete: can(currentUser, "profiles", "delete") }} />;
       case "finishes": return <FinishesPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;

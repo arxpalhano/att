@@ -81,7 +81,7 @@ export const PAGE_LABELS: Record<string, string> = {
   dashboard: "Dashboard", onboarding: "Onboarding", blocks: "Blocos", block_detail: "Detalhe do bloco",
   contracts: "Contratos", contract_detail: "Detalhe do contrato", clients: "Clientes", approvals: "Aprovações",
   queue: "Fila de Trabalho", tickets: "Tickets", publications: "Publicações", analytics: "Analytics",
-  activity: "Atividade", users: "Usuários", profiles: "Perfis de acesso", finishes: "Acabamentos", bim: "BIM · Terceirizados",
+  activity: "Atividade", users: "Usuários", profiles: "Perfis de acesso", performance: "Desempenho da equipe", finishes: "Acabamentos", bim: "BIM · Terceirizados",
   bim_minhas: "Minhas demandas", kb: "Base de Conhecimento", agents: "Agentes AI",
   agent_sherlock_codes: "Agente Sherlock Codes", agent_monk_lighthouse: "Agente Monk Lighthouse",
   agent_yoda_kanban: "Agente Yoda Kanban", agent_harvey_closer: "Agente Harvey Closer",
@@ -229,7 +229,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       if (!before) return [base({ ...ctx, type: "user_created", desc: `Usuário criado: ${label} · ${cur.email ?? ""}` })];
       if (!after) return [base({ ...ctx, type: "user_deleted", desc: `Usuário excluído: ${label}` })];
       // A senha nunca aparece na descrição — só o fato de ter mudado.
-      const fields = changedFields(before, after, { name: "nome", email: "e-mail", role: "tipo de conta", profileId: "perfil de acesso", clientId: "cliente", active: "ativo", allowedPages: "telas liberadas", password: "senha" });
+      const fields = changedFields(before, after, { name: "nome", email: "e-mail", role: "tipo de conta", profileId: "perfil de acesso", superAdmin: "super admin", clientId: "cliente", active: "ativo", allowedPages: "telas liberadas", password: "senha" });
       return fields.length ? [base({ ...ctx, type: "user_edited", desc: `Usuário editado: ${label}${listOf(fields)}` })] : [];
     }
 

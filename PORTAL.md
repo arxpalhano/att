@@ -297,6 +297,22 @@ Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`
 marca tudo como visto; clicar navega direto.
 
 
+### Super admin e Desempenho da equipe (desde 2026-09-24)
+
+- **`SeedUser.superAdmin`**: acesso a absolutamente tudo, acima de qualquer perfil (`can()`,
+  `special()` e `podeAcessar()` devolvem true). Concedido/retirado só por outro super admin, no
+  cadastro do usuário (checkbox âmbar). Matheus (`u2`) é super admin no seed e no banco. Um super
+  admin não pode ser removido por quem não é.
+- **Desempenho da equipe** (`performance`, `src/components/TeamPerformance.tsx`): só super admin.
+  Lê `/api/activity?days=N` e cruza com blocos/tickets. KPIs: tickets entregues (por semana, % no
+  prazo = entregue até o `slaDate`), blocos publicados, lead time materiais → publicado, atrasados/
+  em aberto/sem responsável; **capacidade** (entregas por semana → blocos por mês, semanas para
+  esvaziar a fila); **por pessoa** (entregas, no prazo, publicou, etapas movidas, ações, dias ativos,
+  carga, atrasados, última atividade); gráficos de entregas por semana por pessoa e dias médios por
+  etapa (intervalo entre dois `status_changed` do mesmo bloco; etapas do cliente em cinza); **por
+  cliente** (publicados no período, fila, atrasados). Entregas são deduplicadas por ticket.
+  Limitação: o log completo existe desde 14/09/2026.
+
 ### Tickets organizáveis e importação de links por TXT (desde 2026-09-21)
 
 Pedidos do Liles, do Victor e da Jéssica.
