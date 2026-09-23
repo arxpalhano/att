@@ -311,7 +311,12 @@ marca tudo como visto; clicar navega direto.
   carga, atrasados, última atividade); gráficos de entregas por semana por pessoa e dias médios por
   etapa (intervalo entre dois `status_changed` do mesmo bloco; etapas do cliente em cinza); **por
   cliente** (publicados no período, fila, atrasados). Entregas são deduplicadas por ticket.
-  Limitação: o log completo existe desde 14/09/2026.
+  **Métrica principal = ciclo por etapa** (2026-09-24): do dia em que o ticket caiu para a pessoa
+  (`ticket_assigned` / `ticket_created … responsável X`, nome resolvido contra Usuários) até ela
+  mandar adiante (ticket → Entregue ou `status_changed` do bloco); reatribuição sem concluir não
+  conta. Ticket que já estava com alguém no início do mapeamento conta a partir dele. Tabela
+  "Etapa a etapa" lista cada ciclo. **Mapeamento começa em 2026-09-21** (`MAPPING_START`); nada
+  anterior entra nas contas.
 
 ### Tickets organizáveis e importação de links por TXT (desde 2026-09-21)
 
