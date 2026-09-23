@@ -3406,6 +3406,20 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
   const [q, setQ] = useState("");
   const [showNav, setShowNav] = useState(false);
   const [limit, setLimit] = useState(150);
+  // Dia ou intervalo específico (Jéssica, 2026-09-23): "o que foi feito no dia 22".
+  // Filtra em cima do período carregado; se o dia cair fora dele, o período é ampliado.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const inRange = (a: SeedActivity) => {
+    if (!dateFrom && !dateTo) return true;
+    const local = new Date(a.at); const d = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
+    return (!dateFrom || d >= dateFrom) && (!dateTo || d <= dateTo);
+  };
+  useEffect(() => {
+    if (!dateFrom || days === 0) return;
+    const ageDays = Math.ceil((Date.now() - new Date(`${dateFrom}T00:00:00`).getTime()) / 86400000);
+    if (ageDays > days) setDays(ageDays > 90 ? 0 : 90);
+  }, [dateFrom, days]);
 
   // Sempre lê do servidor (não do estado em memória): o que está aqui é o que está no banco.
   const load = useCallback(async () => {
@@ -3425,12 +3439,13 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return items.filter((a) =>
+      inRange(a) &&
       (showNav || !isNavigation(a)) &&
       (person === "all" || a.userId === person) &&
       (entity === "all" || entityOf(a) === entity) &&
       (!needle || `${a.desc} ${actorName(a)} ${a.entityLabel ?? ""} ${blocks.find((b) => b.id === a.blockId)?.sku ?? ""}`.toLowerCase().includes(needle)),
     );
-  }, [items, person, entity, q, showNav, blocks]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, person, entity, q, showNav, blocks, dateFrom, dateTo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Resumo por pessoa. Parte da lista de usuários (não do log): quem não tem
   // linha de atividade aparece com zero — é exatamente quem não está usando.
@@ -3554,6 +3569,12 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
           <select value={days} onChange={(e) => setDays(Number(e.target.value))} className={selectCls}>
             <option value={7}>Últimos 7 dias</option><option value={30}>Últimos 30 dias</option><option value={90}>Últimos 90 dias</option><option value={0}>Todo o histórico</option>
           </select>
+          <span className="inline-flex items-center gap-1 text-xs text-slate-500">
+            <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); if (!dateTo || dateTo < e.target.value) setDateTo(e.target.value); }} title="De (dia)" className={selectCls} />
+            <span>até</span>
+            <input type="date" value={dateTo} min={dateFrom || undefined} onChange={(e) => setDateTo(e.target.value)} title="Até (dia)" className={selectCls} />
+            {(dateFrom || dateTo) && <button onClick={() => { setDateFrom(""); setDateTo(""); }} className="font-semibold text-slate-500 hover:text-slate-800">limpar</button>}
+          </span>
           <select value={person} onChange={(e) => setPerson(e.target.value)} className={selectCls}>
             <option value="all">Todas as pessoas</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
