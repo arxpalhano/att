@@ -186,19 +186,24 @@ const VALID_TRANSITIONS: Record<BlockStatus, BlockStatus[]> = {
   client_files_under_review: ["ready_to_start", "awaiting_client_files", "blocked", "on_hold"],
   ready_to_start: ["in_modeling", "blocked", "on_hold"],
   in_modeling: ["in_texturing", "awaiting_client_material_validation", "blocked", "on_hold"],
-  in_texturing: ["awaiting_client_material_validation", "in_modeling", "blocked", "on_hold"],
+  // Ajuste de textura num produto que já passou pela validação vai direto para a
+  // programação, sem o cliente validar material de novo (Victor, 2026-09-24).
+  in_texturing: ["awaiting_client_material_validation", "approved_for_programming", "in_modeling", "blocked", "on_hold"],
   awaiting_client_material_validation: ["approved_for_programming", "in_texturing", "in_modeling", "blocked", "on_hold"],
   approved_for_programming: ["in_programming", "blocked", "on_hold"],
   in_programming: ["internal_review", "blocked", "on_hold"],
   internal_review: ["awaiting_client_final_validation", "in_programming", "blocked", "on_hold"],
-  awaiting_client_final_validation: ["approved", "internal_review", "blocked", "on_hold"],
+  awaiting_client_final_validation: ["approved", "internal_review", "in_texturing", "in_modeling", "blocked", "on_hold"],
   // Depois de aprovado: SketchUp → BIM → publicado (Igor, 2026-09-18). O SKP só
   // começa com o customizador aprovado, senão ajuste de modelagem vira retrabalho
   // em SKP e em BIM. approved → bim_conversion segue aceito para blocos antigos.
-  approved: ["sketchup_conversion", "bim_conversion", "published"],
+  approved: ["sketchup_conversion", "bim_conversion", "published", "in_texturing", "in_modeling", "approved_for_programming"],
   sketchup_conversion: ["bim_conversion", "published", "approved"],
   bim_conversion: ["published", "sketchup_conversion", "approved"],
-  published: ["sketchup_conversion", "bim_conversion", "archived"],
+  // Publicado não é fim de linha: ajuste de modelagem/textura reabre o ciclo e
+  // volta para a programação republicar (Jéssica/Victor, 2026-09-24). Também
+  // vale de Aprovado / Validação Final.
+  published: ["in_modeling", "in_texturing", "approved_for_programming", "sketchup_conversion", "bim_conversion", "archived"],
   blocked: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_texturing", "in_programming", "archived"],
   on_hold: ["draft", "awaiting_client_files", "ready_to_start", "in_modeling", "in_texturing", "in_programming", "archived"],
   archived: [],

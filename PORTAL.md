@@ -376,6 +376,11 @@ ticket acompanhando a etapa".
 - **Editar/excluir ticket** (título, bloco, prazo, prioridade, plano, responsável): botão *Editar*
   no cartão. **Quem pode mexer em datas e editar ticket: `canEditDeadlines` = toda a equipe interna**
   (admin, Operações, Modelagem e Programação); cliente e terceirizado BIM não. Tudo cai no log de atividades.
+- **Ajuste depois de publicado** (2026-09-24, Jéssica/Victor): `published`, `approved` e
+  `awaiting_client_final_validation` aceitam voltar para `in_modeling` / `in_texturing` /
+  `approved_for_programming`, e `in_texturing → approved_for_programming` pula a validação de
+  material (ajuste em produto já validado). O bloco reabre o ciclo, o ticket da fase nasce e a
+  programação republica. `published` (data) fica gravado.
 - **Etapa `sketchup_conversion` ("Conversão SketchUp")** entre *Aprovado* e *Conversão BIM*:
   `approved → sketchup_conversion → bim_conversion → published`. SKP e BIM só começam com o
   customizador aprovado — ajuste de modelagem antes disso não gera retrabalho nos dois.
