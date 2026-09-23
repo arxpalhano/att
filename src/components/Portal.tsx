@@ -1905,10 +1905,19 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
           } },
           ...(!isClient ? [{ label: "SKP · RVT · GSM", render: (r: SeedBlock) => {
             const keys = [["skp", "SKP"], ["rvt", "RVT"], ["gsm", "GSM"]] as const;
-            if (!grid || !can(user, "blocks", "edit")) return <span className="flex gap-1">{keys.map(([k, l]) => <span key={k} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.bim?.[k] ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-300"}`}>{l}</span>)}</span>;
+            // Os selos são botões: um clique marca/desmarca, em qualquer modo (quem tem
+            // permissão de editar bloco). Não precisa entrar na grade só para isso.
+            const editable = can(user, "blocks", "edit");
             return (
-              <span onClick={stop} className="flex gap-2">
-                {keys.map(([k, l]) => <label key={k} className="flex cursor-pointer items-center gap-1 text-[11px] text-slate-600"><input type="checkbox" checked={!!r.bim?.[k]} onChange={() => toggleBim(r, k)} className="h-3.5 w-3.5 rounded border-slate-300 accent-teal-600" />{l}</label>)}
+              <span onClick={stop} className="flex gap-1">
+                {keys.map(([k, l]) => {
+                  const on = !!r.bim?.[k];
+                  return editable ? (
+                    <button key={k} type="button" onClick={() => toggleBim(r, k)} title={on ? `${l} entregue — clique para desmarcar` : `Marcar ${l} como entregue`} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold transition ${on ? "bg-teal-600 text-white hover:bg-teal-700" : "border border-dashed border-slate-300 bg-white text-slate-400 hover:border-teal-400 hover:text-teal-600"}`}>{on ? "✓ " : ""}{l}</button>
+                  ) : (
+                    <span key={k} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${on ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-300"}`}>{l}</span>
+                  );
+                })}
               </span>
             );
           } }] : []),
@@ -1930,7 +1939,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
             return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>;
           } },
         ]} />
-        {grid && <p className="px-5 py-3 text-[11px] text-slate-400">Modo grade: as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco.</p>}
+        <p className="px-5 py-3 text-[11px] text-slate-400">{grid ? "Modo grade: etapa, responsável e entrega viram campos na linha; as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco." : "SKP · RVT · GSM: clique no selo para marcar como entregue. Para mudar etapa, responsável e entrega na própria lista, use \"Editar em grade\"."}</p>
       </Card>
 
       {/* Modal Criar Bloco */}
