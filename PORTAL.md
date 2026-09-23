@@ -380,6 +380,11 @@ ticket acompanhando a etapa".
   `approved → sketchup_conversion → bim_conversion → published`. SKP e BIM só começam com o
   customizador aprovado — ajuste de modelagem antes disso não gera retrabalho nos dois.
   (`approved → bim_conversion` continua aceito para blocos antigos.)
+- **Lista de blocos em grade** (`grid`, desde 2026-09-23 — Jéssica/Igor): botão "Editar em grade"
+  troca badges por controles na própria linha — etapa (transições válidas ou qualquer status, conforme
+  o perfil), **SKP · RVT · GSM** (checkboxes = `bim` do bloco, o que o Igor marca ao terminar o SKP),
+  responsável (sincroniza tickets abertos) e entrega (data manual). Mudar a etapa passa por
+  `withStatus` + `syncTicketsWithBlock` e abre o ticket da fase, igual ao detalhe do bloco.
 - **Lista de blocos**: busca, status, marca e ordenação ficam guardados (`BLOCKS_LIST_MEMORY`)
   enquanto se abre/edita blocos; "Limpar filtros" zera. Ordenação nova: numérica pelo SKU
   (`2026_21` < `2026_98` < `2026_137`), nome A–Z, entrega mais próxima.

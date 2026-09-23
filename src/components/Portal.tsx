@@ -1716,16 +1716,44 @@ function ClientDashboard({ user, setPage, setSelectedBlock }: { user: SeedUser; 
 // ============================================================
 // BLOCKS LIST
 // ============================================================
+const isClientRole = (u: SeedUser) => u.role === "client" || u.role === "freelancer_bim";
 // Filtros da lista de blocos sobrevivem a abrir/editar um bloco e voltar. Antes
 // viviam só no useState da tela: salvar um produto devolvia a Jéssica para
 // "todas as marcas / todos os status" e ela tinha de filtrar tudo de novo.
 type BlockSort = "recent" | "sku" | "sku_desc" | "title" | "due";
-const BLOCKS_LIST_MEMORY: { search: string; status: string; client: string; sort: BlockSort } = { search: "", status: "all", client: "all", sort: "recent" };
+const BLOCKS_LIST_MEMORY: { search: string; status: string; client: string; sort: BlockSort; grid: boolean } = { search: "", status: "all", client: "all", sort: "recent", grid: false };
 /** "2026_21_GH…" < "2026_98_GH…" < "2026_137_GH…" — comparação que entende número dentro do texto. */
 const naturalCompare = (a: string, b: string) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });
 
 function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all" }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void; initialStatus?: string }) {
-  const { blocks, setBlocks, activities, setActivities, tickets, setTickets } = useContext(AppContext);
+  const { blocks, setBlocks, activities, setActivities, tickets, setTickets, users } = useContext(AppContext);
+  // Modo grade (Jéssica/Igor, 2026-09-23): edita etapa, SKP/RVT/GSM, responsável e
+  // entrega direto na linha, como no Notion — sem abrir bloco por bloco.
+  const [grid, setGrid] = useState(BLOCKS_LIST_MEMORY.grid);
+  useEffect(() => { BLOCKS_LIST_MEMORY.grid = grid; }, [grid]);
+  const patchBlock = (id: string, patch: Partial<SeedBlock>) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
+  const changeStatus = (b: SeedBlock, status: BlockStatus) => {
+    const nb = withStatus(b, status);
+    setBlocks((prev) => prev.map((x) => (x.id === nb.id ? nb : x)));
+    setTickets((prev) => {
+      const synced = syncTicketsWithBlock(prev, nb);
+      const phase = PRODUCTION_PHASE_LABELS[status];
+      if (!phase || synced.some((t) => t.blockId === nb.id && isOpenTicket(t))) return synced;
+      return [...synced, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: nb.owner, status: "new" as TicketStatus, createdAt: new Date().toISOString() }];
+    });
+  };
+  const changeOwner = (b: SeedBlock, owner: string | undefined) => {
+    patchBlock(b.id, { owner });
+    setTickets((prev) => prev.map((t) => (t.blockId === b.id && isOpenTicket(t) ? { ...t, assignedTo: owner } : t)));
+  };
+  const toggleBim = (b: SeedBlock, k: "skp" | "rvt" | "gsm") => {
+    const bim = { skp: false, rvt: false, gsm: false, ...(b.bim ?? {}), [k]: !b.bim?.[k] };
+    patchBlock(b.id, { bim: bim.skp || bim.rvt || bim.gsm ? bim : undefined });
+  };
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const cell = "rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-cyan-400";
+  const internalUsers = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
+  const canGrid = !isClientRole(user);
   const [search, setSearch] = useState(BLOCKS_LIST_MEMORY.search);
   // Card do dashboard (initialStatus) vence a memória; sem ele, vale o último filtro usado.
   const [filterStatus, setFilterStatus] = useState(initialStatus !== "all" ? initialStatus : BLOCKS_LIST_MEMORY.status);
@@ -1810,6 +1838,11 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
               <BarChart3 className="w-3.5 h-3.5" /> Exportar CSV
             </button>
           )}
+          {canGrid && (
+            <button onClick={() => setGrid(!grid)} title="Editar etapa, SKP/RVT/GSM, responsável e entrega direto na lista" className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors ${grid ? "border-cyan-600 bg-cyan-600 text-white hover:bg-cyan-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>
+              <Layers className="w-3.5 h-3.5" /> {grid ? "Grade: editando" : "Editar em grade"}
+            </button>
+          )}
           {can(user, "blocks", "create") && (
             <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors">
               <Plus className="w-3.5 h-3.5" /> Novo Bloco
@@ -1850,15 +1883,46 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
           { label: "Título", render: (r: SeedBlock) => <div><p className="font-medium text-slate-800">{r.title}</p><p className="text-xs text-slate-400">{r.csku}</p></div> },
           ...(!isClient ? [{ label: "Cliente", render: (r: SeedBlock) => <span className="text-xs">{getClientCode(r.clientId)}</span> }] : []),
           { label: "Tipo", render: (r: SeedBlock) => <ServiceBadge type={r.svc} /> },
-          { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
+          { label: "Status", render: (r: SeedBlock) => {
+            const override = special(user, "statusOverride"); const transition = special(user, "transition");
+            if (!grid || (!override && !transition)) return <StatusBadge status={r.status} />;
+            const opts = override ? (Object.keys(STATUS_LABELS) as BlockStatus[]) : Array.from(new Set([r.status, ...(VALID_TRANSITIONS[r.status] || [])]));
+            return (
+              <span onClick={stop}>
+                <select value={r.status} onChange={(e) => changeStatus(r, e.target.value as BlockStatus)} className={`${cell} max-w-[180px] ${STATUS_COLORS[r.status]?.replace("border-", "border-") ?? ""}`}>
+                  {opts.map((st) => <option key={st} value={st}>{STATUS_LABELS[st]}</option>)}
+                </select>
+              </span>
+            );
+          } },
+          ...(!isClient ? [{ label: "SKP · RVT · GSM", render: (r: SeedBlock) => {
+            const keys = [["skp", "SKP"], ["rvt", "RVT"], ["gsm", "GSM"]] as const;
+            if (!grid || !can(user, "blocks", "edit")) return <span className="flex gap-1">{keys.map(([k, l]) => <span key={k} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${r.bim?.[k] ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-300"}`}>{l}</span>)}</span>;
+            return (
+              <span onClick={stop} className="flex gap-2">
+                {keys.map(([k, l]) => <label key={k} className="flex cursor-pointer items-center gap-1 text-[11px] text-slate-600"><input type="checkbox" checked={!!r.bim?.[k]} onChange={() => toggleBim(r, k)} className="h-3.5 w-3.5 rounded border-slate-300 accent-teal-600" />{l}</label>)}
+              </span>
+            );
+          } }] : []),
           { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
-          ...(!isClient ? [{ label: "Responsável", render: (r: SeedBlock) => <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> }] : []),
+          ...(!isClient ? [{ label: "Responsável", render: (r: SeedBlock) => grid ? (
+            <span onClick={stop}>
+              <select value={r.owner ?? ""} onChange={(e) => changeOwner(r, e.target.value || undefined)} className={`${cell} max-w-[150px]`}>
+                <option value="">—</option>
+                {internalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </span>
+          ) : <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> }] : []),
           { label: "Entrega", render: (r: SeedBlock) => {
+            const late = !!r.dueDate && r.dueDate < todayISO() && !["published", "archived", "approved"].includes(r.status);
+            if (grid && canEditDeadlines(user)) {
+              return <span onClick={stop}><input type="date" value={r.dueDate ?? ""} onChange={(e) => { const iso = e.target.value; const nb = { ...r, dueDate: iso || undefined, dueManual: iso ? true : undefined }; patchBlock(r.id, { dueDate: nb.dueDate, dueManual: nb.dueManual }); setTickets((prev) => syncTicketsWithBlock(prev, nb)); }} className={`${cell} ${late ? "border-rose-300 text-rose-600" : ""}`} /></span>;
+            }
             if (!r.dueDate) return <span className="text-xs text-slate-300">—</span>;
-            const late = r.dueDate < todayISO() && !["published", "archived", "approved"].includes(r.status);
             return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>;
           } },
         ]} />
+        {grid && <p className="px-5 py-3 text-[11px] text-slate-400">Modo grade: as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco.</p>}
       </Card>
 
       {/* Modal Criar Bloco */}
