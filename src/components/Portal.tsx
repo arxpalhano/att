@@ -514,7 +514,7 @@ const addDaysISO = (iso: string, days: number) => { const d = new Date(`${iso}T1
  */
 const canEditDeadlines = (u: SeedUser) => special(u, "deadlines");
 /** Só estas contas abrem a tela Atividade (auditoria de uso da equipe). */
-const ACTIVITY_VIEWERS = ["mpalhano@archtechtour.com"];
+const ACTIVITY_VIEWERS = ["mpalhano@archtechtour.com", "lliles@archtechtour.com"]; // Lucas Liles liberado em 2026-09-23
 const canSeeActivity = (u: SeedUser) => ACTIVITY_VIEWERS.includes((u.email || "").toLowerCase());
 
 /**

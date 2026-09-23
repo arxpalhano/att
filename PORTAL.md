@@ -383,7 +383,7 @@ ticket acompanhando a etapa".
 - **Lista de blocos**: busca, status, marca e ordenação ficam guardados (`BLOCKS_LIST_MEMORY`)
   enquanto se abre/edita blocos; "Limpar filtros" zera. Ordenação nova: numérica pelo SKU
   (`2026_21` < `2026_98` < `2026_137`), nome A–Z, entrega mais próxima.
-- **Tela Atividade só para o dono do portal**: `ACTIVITY_VIEWERS` (e-mails) em `podeAcessar` — some
+- **Tela Atividade só para o dono do portal e o Lucas Liles** (desde 2026-09-23): `ACTIVITY_VIEWERS` (e-mails) em `podeAcessar` — some
   do menu e falha fechada para os demais, inclusive outros admins.
 - `fmtDate` ancora datas sem hora ao meio-dia (antes "2026-09-18" aparecia como 17/09 no Brasil).
 

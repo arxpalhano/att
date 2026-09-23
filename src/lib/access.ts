@@ -84,7 +84,7 @@ export const MODULES: ModuleDef[] = [
   { id: "profiles", label: "Perfis de acesso", actions: ["view", "create", "edit", "delete"], audiences: ["internal"], hint: "Quem edita perfis consegue dar a si mesmo qualquer permissão." },
   { id: "agents", label: "Agentes AI", actions: ["view"], audiences: ["internal"] },
 ];
-export const NOT_IN_MATRIX = "Base de Conhecimento é liberada base a base (na própria tela). Atividade só aparece para o dono do portal.";
+export const NOT_IN_MATRIX = "Base de Conhecimento é liberada base a base (na própria tela). Atividade só aparece para o dono do portal e para o Lucas Liles.";
 
 export const SPECIALS: Array<{ id: SpecialPerm; label: string; hint: string; audiences: Audience[] }> = [
   { id: "transition", label: "Mover bloco entre etapas", hint: "Botões de transição no detalhe do bloco.", audiences: ["internal", "client"] },
