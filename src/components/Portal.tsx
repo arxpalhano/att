@@ -836,24 +836,35 @@ function TabBtn({ active, label, count, onClick }: { active: boolean; label: str
   );
 }
 
-function DataTable({ columns, data, onRowClick }: { columns: any[]; data: any[]; onRowClick?: (row: any) => void }) {
+/**
+ * `grid` = visual de planilha (Jéssica, 2026-09-23): linhas e colunas com borda
+ * visível, zebra e células mais justas — a lista "toda branca" ficava difícil
+ * de acompanhar com muitas colunas editáveis.
+ */
+function DataTable({ columns, data, onRowClick, grid = false }: { columns: any[]; data: any[]; onRowClick?: (row: any) => void; grid?: boolean }) {
   if (!data.length) return <EmptyState icon={Clipboard} title="Nenhum registro encontrado" desc="Tente ajustar os filtros ou criar um novo item." />;
+  const th = grid
+    ? "border-b border-r border-slate-200 bg-slate-100 px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500 last:border-r-0 whitespace-nowrap"
+    : "px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400";
+  const td = grid
+    ? "border-b border-r border-slate-200 px-3 py-2 align-middle text-sm text-slate-700 last:border-r-0"
+    : "px-5 py-4 align-top text-sm text-slate-600";
   return (
-    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/75">
+    <div className={`overflow-hidden rounded-[28px] border ${grid ? "border-slate-300 bg-white" : "border-slate-200/80 bg-white/75"}`}>
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
-          <thead className="bg-slate-50/85 backdrop-blur">
+        <table className={`w-full border-collapse ${grid ? "text-[13px]" : ""}`}>
+          <thead className={grid ? "" : "bg-slate-50/85 backdrop-blur"}>
             <tr>
               {columns.map((col: any, i: number) => (
-                <th key={i} className="px-5 py-4 text-left text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{col.label}</th>
+                <th key={i} className={th}>{col.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data.map((row: any, ri: number) => (
-              <tr key={ri} onClick={() => onRowClick?.(row)} className={`group border-t border-slate-100/90 ${onRowClick ? "cursor-pointer hover:bg-slate-50/80" : ""} transition-colors`}>
+              <tr key={ri} onClick={() => onRowClick?.(row)} className={`group ${grid ? (ri % 2 ? "bg-slate-50/70" : "bg-white") : "border-t border-slate-100/90"} ${onRowClick ? `cursor-pointer ${grid ? "hover:bg-cyan-50/60" : "hover:bg-slate-50/80"}` : ""} transition-colors`}>
                 {columns.map((col: any, ci: number) => (
-                  <td key={ci} className="px-5 py-4 align-top text-sm text-slate-600">{col.render ? col.render(row) : row[col.key]}</td>
+                  <td key={ci} className={td}>{col.render ? col.render(row) : row[col.key]}</td>
                 ))}
               </tr>
             ))}
@@ -1886,9 +1897,9 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
         {hasFilters && <p className="mt-2 text-[11px] text-slate-400">{filtered.length} bloco{filtered.length === 1 ? "" : "s"} no filtro · o filtro fica guardado enquanto você abre e edita os blocos.</p>}
       </Card>
       <Card>
-        <DataTable data={filtered} onRowClick={(row) => { setSelectedBlock(row.id); setPage("block_detail"); }} columns={[
-          { label: "SKU", render: (r: SeedBlock) => <span className="font-mono text-xs text-slate-500">{r.sku}</span> },
-          { label: "Título", render: (r: SeedBlock) => <div><p className="font-medium text-slate-800">{r.title}</p><p className="text-xs text-slate-400">{r.csku}</p></div> },
+        <DataTable grid data={filtered} onRowClick={(row) => { setSelectedBlock(row.id); setPage("block_detail"); }} columns={[
+          { label: "SKU", render: (r: SeedBlock) => <span className="block max-w-[220px] truncate font-mono text-[11px] text-slate-500" title={r.sku}>{r.sku}</span> },
+          { label: "Título", render: (r: SeedBlock) => <div className="max-w-[320px]"><p className="font-medium leading-5 text-slate-800">{r.title}</p>{r.csku && r.csku !== r.sku && <p className="truncate text-[11px] text-slate-400" title={r.csku}>{r.csku}</p>}</div> },
           ...(!isClient ? [{ label: "Cliente", render: (r: SeedBlock) => <span className="text-xs">{getClientCode(r.clientId)}</span> }] : []),
           { label: "Tipo", render: (r: SeedBlock) => <ServiceBadge type={r.svc} /> },
           { label: "Status", render: (r: SeedBlock) => {
