@@ -55,32 +55,39 @@ function daysBetween(inicio: string, fim: string): number {
 
 // Portfólio fictício da "marca" ArchTechTour. Slug segue o padrão real
 // `{Cliente}-{Produto}` — `produtoDisplay` do builder tira o prefixo.
+//
+// ESCALA (2026-09-25, pedido da Mari): os volumes foram calibrados para
+// reproduzir, num mês de 31 dias, a ordem de grandeza do melhor dashboard
+// real da base (≈7,4 mil visitantes, ≈13 mil carregamentos, ≈740 interações,
+// ≈166 blocos, 02:44 de sessão, ≈21,7 mil eventos) — para o vídeo do site
+// mostrar números expressivos sem expor o nome do cliente real. Só as
+// proporções foram copiadas; produtos, origens e cidades continuam fictícios.
 const PRODUTOS: Array<{ slug: string; peso: number; tempoSeg: number }> = [
-  { slug: "ArchTechTour-Poltrona-Aurora",    peso: 22, tempoSeg: 214 },
-  { slug: "ArchTechTour-Sofa-Horizonte",     peso: 18, tempoSeg: 258 },
-  { slug: "ArchTechTour-Mesa-Lumen",         peso: 14, tempoSeg: 171 },
-  { slug: "ArchTechTour-Cadeira-Vertice",    peso: 12, tempoSeg: 143 },
-  { slug: "ArchTechTour-Luminaria-Orbe",     peso: 10, tempoSeg: 126 },
-  { slug: "ArchTechTour-Estante-Trama",      peso: 9,  tempoSeg: 197 },
-  { slug: "ArchTechTour-Banqueta-Duna",      peso: 8,  tempoSeg: 98 },
-  { slug: "ArchTechTour-Namoradeira-Brisa",  peso: 7,  tempoSeg: 232 },
+  { slug: "ArchTechTour-Poltrona-Aurora",    peso: 34, tempoSeg: 296 },
+  { slug: "ArchTechTour-Sofa-Horizonte",     peso: 21, tempoSeg: 312 },
+  { slug: "ArchTechTour-Mesa-Lumen",         peso: 13, tempoSeg: 241 },
+  { slug: "ArchTechTour-Cadeira-Vertice",    peso: 10, tempoSeg: 188 },
+  { slug: "ArchTechTour-Luminaria-Orbe",     peso: 8,  tempoSeg: 173 },
+  { slug: "ArchTechTour-Estante-Trama",      peso: 6,  tempoSeg: 227 },
+  { slug: "ArchTechTour-Banqueta-Duna",      peso: 4,  tempoSeg: 121 },
+  { slug: "ArchTechTour-Namoradeira-Brisa",  peso: 4,  tempoSeg: 264 },
 ];
 
 const ORIGENS: Array<{ origem: string; peso: number }> = [
-  { origem: "www.archtechtour.com", peso: 57 },
-  { origem: "Direto",               peso: 21 },
-  { origem: "www.instagram.com",    peso: 10 },
-  { origem: "www.google.com",       peso: 6 },
-  { origem: "br.pinterest.com",     peso: 4 },
-  { origem: "www.linkedin.com",     peso: 2 },
+  { origem: "www.archtechtour.com", peso: 86 },
+  { origem: "Direto",               peso: 7 },
+  { origem: "www.instagram.com",    peso: 3 },
+  { origem: "www.google.com",       peso: 2 },
+  { origem: "br.pinterest.com",     peso: 1.4 },
+  { origem: "www.linkedin.com",     peso: 0.6 },
 ];
 
 const CIDADES: Array<{ cidade: string; peso: number }> = [
-  { cidade: "São Paulo",      peso: 41 },
-  { cidade: "Rio de Janeiro", peso: 17 },
-  { cidade: "Belo Horizonte", peso: 12 },
-  { cidade: "Curitiba",       peso: 9 },
-  { cidade: "Porto Alegre",   peso: 7 },
+  { cidade: "São Paulo",      peso: 46 },
+  { cidade: "Rio de Janeiro", peso: 16 },
+  { cidade: "Belo Horizonte", peso: 14 },
+  { cidade: "Curitiba",       peso: 13 },
+  { cidade: "Porto Alegre",   peso: 11 },
 ];
 
 function produtoDisplay(slug: string): string {
@@ -96,8 +103,8 @@ export function buildDemoAnalytics(inicio: string, fim: string): AnalyticsJSON {
   const jitter = (base: number, amp = 0.15) => base * (1 + (rnd() * 2 - 1) * amp);
   const dias = daysBetween(inicio, fim);
 
-  // 1. Sessões por dia — ~95 carregamentos/dia úteis, fim de semana cai,
-  //    leve tendência de alta ao longo do período.
+  // 1. Sessões por dia — ~530 carregamentos/dia útil, fim de semana cai
+  //    forte (≈13 mil no mês), leve tendência de alta ao longo do período.
   const sessoes_por_dia: Array<{ data: string; sessoes: number }> = [];
   const d0 = new Date(inicio + "T12:00:00Z");
   for (let i = 0; i < dias; i++) {
@@ -105,27 +112,27 @@ export function buildDemoAnalytics(inicio: string, fim: string): AnalyticsJSON {
     d.setUTCDate(d0.getUTCDate() + i);
     const dow = d.getUTCDay();
     const fimDeSemana = dow === 0 || dow === 6;
-    const tendencia = 1 + (i / Math.max(1, dias - 1)) * 0.22;
-    const base = (fimDeSemana ? 38 : 95) * tendencia;
-    sessoes_por_dia.push({ data: toISO(d), sessoes: Math.max(8, Math.round(jitter(base, 0.22))) });
+    const tendencia = 1 + (i / Math.max(1, dias - 1)) * 0.1;
+    const base = (fimDeSemana ? (dow === 0 ? 110 : 190) : 530) * tendencia;
+    sessoes_por_dia.push({ data: toISO(d), sessoes: Math.max(40, Math.round(jitter(base, 0.14))) });
   }
   const sessoes_unicas = sessoes_por_dia.reduce((s, r) => s + r.sessoes, 0);
 
   // 2. KPIs derivados (proporções típicas de um cliente com boa performance)
-  const usuarios_unicos = Math.round(sessoes_unicas * jitter(0.68, 0.04));
+  const usuarios_unicos = Math.round(sessoes_unicas * jitter(0.572, 0.03));
   const media_sessoes = Math.round((sessoes_unicas / usuarios_unicos) * 100) / 100;
 
-  const sketchup = Math.round(sessoes_unicas * jitter(0.034, 0.1));
-  const revit    = Math.round(sessoes_unicas * jitter(0.021, 0.1));
-  const archicad = Math.round(sessoes_unicas * jitter(0.012, 0.1));
-  const botao_ar     = Math.round(sessoes_unicas * jitter(0.041, 0.1));
-  const botao_ar_ios = Math.round(sessoes_unicas * jitter(0.027, 0.1));
-  const botao_whatsapp = Math.round(sessoes_unicas * jitter(0.016, 0.1));
+  const sketchup = Math.round(sessoes_unicas * jitter(0.0100, 0.1));
+  const revit    = Math.round(sessoes_unicas * jitter(0.0008, 0.1));
+  const archicad = Math.round(sessoes_unicas * jitter(0.0020, 0.1));
+  const botao_ar     = Math.round(sessoes_unicas * jitter(0.0260, 0.1));
+  const botao_ar_ios = Math.round(sessoes_unicas * jitter(0.0146, 0.1));
+  const botao_whatsapp = Math.round(sessoes_unicas * jitter(0.0031, 0.1));
 
   const total_downloads = sketchup + revit + archicad;
   const engajamento_real = total_downloads + botao_ar + botao_ar_ios + botao_whatsapp;
-  const total_eventos = Math.round(sessoes_unicas * jitter(1.74, 0.05)) + engajamento_real;
-  const tempo_medio_min = Math.round(jitter(3.7, 0.08) * 100) / 100;
+  const total_eventos = Math.round(sessoes_unicas * jitter(1.61, 0.04)) + engajamento_real;
+  const tempo_medio_min = Math.round(jitter(2.73, 0.06) * 100) / 100;
 
   const eventos_por_tipo = [
     { rotulo: "botao_ar", total: botao_ar },

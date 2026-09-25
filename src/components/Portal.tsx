@@ -5513,13 +5513,26 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
 // ============================================================
 // FASE 7 — PUBLICAÇÕES
 // ============================================================
-function PublicationFormModal({ title, onClose, onSave, initial, blocks }: {
+function PublicationFormModal({ title, onClose, onSave, initial, blocks, defaultClientId }: {
   title: string; onClose: () => void;
   onSave: (d: { id?: string; blockId: string; url: string; v: number }) => void;
-  initial?: SeedPub; blocks: SeedBlock[];
+  initial?: SeedPub; blocks: SeedBlock[]; defaultClientId?: string;
 }) {
-  const publishedBlocks = blocks.filter((b) => b.status === "published");
-  const [blockId, setBlockId] = useState(initial?.blockId ?? publishedBlocks[0]?.id ?? "");
+  const { clients, publications } = useContext(AppContext);
+  // Escolha do bloco com marca + busca (Jéssica, 2026-09-25): 780+ blocos num
+  // <select> só era achável rolando. Qualquer etapa entra na lista (o link pode
+  // ser cadastrado antes de o bloco virar "Publicado"); publicados aparecem primeiro.
+  const initialBlock = blocks.find((b) => b.id === initial?.blockId);
+  const [clientId, setClientId] = useState(initialBlock?.clientId ?? defaultClientId ?? "");
+  const [query, setQuery] = useState("");
+  const [blockId, setBlockId] = useState(initial?.blockId ?? "");
+  const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const q = norm(query.trim());
+  const candidates = blocks
+    .filter((b) => b.status !== "archived" && (!clientId || b.clientId === clientId) && (!q || b.id === blockId || norm(`#${b.n} ${b.title} ${b.sku} ${b.csku ?? ""}`).includes(q)))
+    .sort((a, b) => Number(b.status === "published") - Number(a.status === "published") || a.title.localeCompare(b.title, "pt-BR", { numeric: true }));
+  const hasPub = (id: string) => publications.some((p) => p.blockId === id && p.id !== initial?.id);
+  const chosen = blocks.find((b) => b.id === blockId);
   const [url, setUrl] = useState(initial?.url ?? "");
   const [v, setV] = useState(String(initial?.v ?? 1));
   const canSave = blockId && url.trim().startsWith("http");
@@ -5531,10 +5544,23 @@ function PublicationFormModal({ title, onClose, onSave, initial, blocks }: {
           <button onClick={onClose}><X className="w-4 h-4 text-slate-400" /></button>
         </div>
         <div className="space-y-3">
-          <div><label className="text-xs font-medium text-slate-500">Bloco *</label>
-            <select value={blockId} onChange={(e) => setBlockId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
-              {publishedBlocks.map((b) => <option key={b.id} value={b.id}>{b.title} ({b.sku})</option>)}
+          <div>
+            <label className="text-xs font-medium text-slate-500">Bloco *</label>
+            <div className="mt-1 grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
+              <select value={clientId} onChange={(e) => { setClientId(e.target.value); setBlockId(""); setQuery(""); }} className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
+                <option value="">Todas as marcas</option>
+                {[...clients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nome, SKU ou nº…" className="w-full rounded-xl border border-slate-200 py-2 pl-8 pr-3 text-sm outline-none focus:border-cyan-400" />
+              </div>
+            </div>
+            <select value={blockId} onChange={(e) => setBlockId(e.target.value)} size={Math.min(8, Math.max(3, candidates.length + 1))} className="mt-2 w-full px-2 py-1 rounded-xl border border-slate-200 text-sm">
+              <option value="">Escolher bloco… ({candidates.length})</option>
+              {candidates.map((b) => <option key={b.id} value={b.id}>#{b.n} · {b.title} · {b.sku}{b.status !== "published" ? ` · ${STATUS_LABELS[b.status]}` : ""}{hasPub(b.id) ? " · já tem link" : ""}</option>)}
             </select>
+            {chosen && <p className="mt-1 text-[11px] text-slate-500">{getClientName(chosen.clientId)} · {STATUS_LABELS[chosen.status]}{hasPub(chosen.id) ? " · este bloco já tem uma publicação (vai ficar com duas)" : ""}</p>}
           </div>
           <div><label className="text-xs font-medium text-slate-500">URL do customizador *</label><input value={url} onChange={(e) => setUrl(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="https://explorar.archtechtour.com/cliente/ver-N/produto/index.html" /></div>
           <div><label className="text-xs font-medium text-slate-500">Versão</label><input type="number" value={v} onChange={(e) => setV(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
@@ -5803,7 +5829,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
           })}
         </div>
       )}
-      {showAdd && <PublicationFormModal title="Nova Publicação" onClose={() => setShowAdd(false)} onSave={handleSave} blocks={blocks} />}
+      {showAdd && <PublicationFormModal title="Nova Publicação" defaultClientId={filterClient || (isClient ? user.clientId : undefined)} onClose={() => setShowAdd(false)} onSave={handleSave} blocks={blocks} />}
       {editing && <PublicationFormModal title="Editar Publicação" onClose={() => setEditing(null)} onSave={handleSave} initial={editing} blocks={blocks} />}
     </div>
   );
