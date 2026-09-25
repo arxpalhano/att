@@ -603,6 +603,13 @@ reais. Como funciona:
   normalmente, só que sem Athena). Sessões diárias com padrão útil/fim de semana e
   tendência de alta; 8 produtos fictícios da "marca" ArchTechTour; origens,
   cidades e eventos com os mesmos rótulos reais (`botao_ar`, `sketchup`, …).
+- **Escala (2026-09-25, pedido da Mari para o vídeo do site):** os volumes foram
+  recalibrados para reproduzir, num mês, a ordem de grandeza do dashboard real mais
+  expressivo da base (≈7,4 mil visitantes, ≈13 mil carregamentos, ≈740 interações,
+  ≈166 blocos, 02:44 de sessão, ≈21,7 mil eventos). Só as proporções foram
+  copiadas — nomes de produto, origem (`www.archtechtour.com`) e cidades continuam
+  fictícios, sem nenhuma referência ao cliente real. Constantes no topo do
+  `analytics-demo.ts` (pesos dos produtos, taxas por sessão, base diária).
 - As três rotas interceptam o alias ANTES de qualquer query: `GET /api/analytics/
   archtechtour` (últimos 30 dias), `POST .../refresh` (período pedido, **não grava
   no S3**) e `GET /api/analytics/clients` (entra por último no seletor do admin;
