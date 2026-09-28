@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useT } from "@/lib/i18n";
-import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug } from "@/lib/bim";
+import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_PRICE_TIERS, bimTierPrice, bimItemPrice, bimDemandTotal, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug } from "@/lib/bim";
 import { FinishCatalog, BlockFinishes, FinishRecord, FinishGroup, catalogId, blockFinishesId, slugId, SUGGESTED_GROUPS, emptyCatalog, emptyBlockFinishes, isFilled } from "@/lib/finishes";
 import LanguageSwitcher from "./LanguageSwitcher";
 import KnowledgeBase from "./KnowledgeBase";
@@ -1926,7 +1926,9 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
             );
           } },
           ...(!isClient ? [{ label: "SKP · RVT · GSM", render: (r: SeedBlock) => {
+            // GSM = objeto de biblioteca do ArchiCAD (o arquivo "ArchiCAD" que os terceirizados entregam); RVT = Revit; SKP = SketchUp.
             const keys = [["skp", "SKP"], ["rvt", "RVT"], ["gsm", "GSM"]] as const;
+            const full: Record<string, string> = { skp: "SketchUp (.skp)", rvt: "Revit (.rvt)", gsm: "ArchiCAD (.gsm)" };
             // Os selos são botões: um clique marca/desmarca, em qualquer modo (quem tem
             // permissão de editar bloco). Não precisa entrar na grade só para isso.
             const editable = can(user, "blocks", "edit");
@@ -1935,7 +1937,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
                 {keys.map(([k, l]) => {
                   const on = !!r.bim?.[k];
                   return editable ? (
-                    <button key={k} type="button" onClick={() => toggleBim(r, k)} title={on ? `${l} entregue — clique para desmarcar` : `Marcar ${l} como entregue`} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold transition ${on ? "bg-teal-600 text-white hover:bg-teal-700" : "border border-dashed border-slate-300 bg-white text-slate-400 hover:border-teal-400 hover:text-teal-600"}`}>{on ? "✓ " : ""}{l}</button>
+                    <button key={k} type="button" onClick={() => toggleBim(r, k)} title={on ? `${full[k]} entregue — clique para desmarcar` : `Marcar ${full[k]} como entregue`} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold transition ${on ? "bg-teal-600 text-white hover:bg-teal-700" : "border border-dashed border-slate-300 bg-white text-slate-400 hover:border-teal-400 hover:text-teal-600"}`}>{on ? "✓ " : ""}{l}</button>
                   ) : (
                     <span key={k} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${on ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-300"}`}>{l}</span>
                   );
@@ -3376,11 +3378,17 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
 }
 
 function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
-  const { blocks } = useContext(AppContext);
+  const { blocks, users } = useContext(AppContext);
   const [view, setView] = useState("my");
+  // Ver a fila de outra pessoa (Matheus, 2026-09-28): "Meus Itens"/"Meu Backup" passam a ser de quem estiver escolhido.
+  const team = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
+  const [who, setWho] = useState(user.id);
+  const mine = who === user.id;
+  const whoName = users.find((u) => u.id === who)?.name.split(" ")[0] ?? "";
+  const openStatus = (b: SeedBlock) => !["archived", "published"].includes(b.status);
   const views: Record<string, { label: string; data: SeedBlock[] }> = {
-    my: { label: "Meus Itens", data: blocks.filter((b) => b.owner === user.id) },
-    backup: { label: "Meu Backup", data: blocks.filter((b) => b.backup === user.id) },
+    my: { label: mine ? "Meus Itens" : `Itens de ${whoName}`, data: blocks.filter((b) => b.owner === who && openStatus(b)) },
+    backup: { label: mine ? "Meu Backup" : `Backup de ${whoName}`, data: blocks.filter((b) => b.backup === who && openStatus(b)) },
     unassigned: { label: "Sem Responsável", data: blocks.filter((b) => !b.owner && !["draft", "archived", "published"].includes(b.status)) },
     blocked: { label: "Bloqueados", data: blocks.filter((b) => b.status === "blocked") },
     awaiting: { label: "Aguardando Cliente", data: blocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)) },
@@ -3388,7 +3396,15 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
   const current = views[view];
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-slate-800">Fila de Trabalho</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-bold text-slate-800">Fila de Trabalho</h1>
+        <label className="flex items-center gap-2 text-xs text-slate-500">
+          Fila de
+          <select value={who} onChange={(e) => { setWho(e.target.value); setView("my"); }} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
+            {team.map((u) => <option key={u.id} value={u.id}>{u.id === user.id ? `${u.name} (eu)` : u.name}</option>)}
+          </select>
+        </label>
+      </div>
       <div className="flex gap-2 flex-wrap">{Object.entries(views).map(([k, v]) => <TabBtn key={k} active={view === k} label={v.label} count={v.data.length} onClick={() => setView(k)} />)}</div>
       <Card>
         <DataTable data={current.data} onRowClick={(row) => { setSelectedBlock(row.id); setPage("block_detail"); }} columns={[
@@ -3398,6 +3414,7 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
           { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
           { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
           { label: "Tipo", render: (r: SeedBlock) => <ServiceBadge type={r.svc} /> },
+          { label: "Entrega", render: (r: SeedBlock) => { if (!r.dueDate) return <span className="text-xs text-slate-300">—</span>; const late = r.dueDate < todayISO(); return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>; } },
         ]} />
       </Card>
     </div>
@@ -4777,7 +4794,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
 // ============================================================
 const BIM_ALL_FORMATS: BimFormat[] = ["archicad", "revit", "sketchup"];
 
-function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus, onEdit, onDelete, onFreelancerNotes }: {
+function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus, onEdit, onDelete, onFreelancerNotes, onItemPatch, canReviewPrice }: {
   d: BimDemand;
   mode: "internal" | "freelancer";
   clientName: string;
@@ -4787,7 +4804,12 @@ function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus
   onEdit?: () => void;
   onDelete?: () => void;
   onFreelancerNotes?: (text: string) => void;
+  /** Modelos / proposta de valor (terceirizado) e aprovação do valor (equipe). */
+  onItemPatch?: (itemId: string, patch: Partial<BimDemandItem>) => void;
+  canReviewPrice?: boolean;
 }) {
+  const priceSum = bimDemandTotal(d);
+  const usesTable = d.items.some((it) => it.models || it.proposedPrice != null);
   const [open, setOpen] = useState(mode === "freelancer" && bimIsOpen(d));
   const [notesDraft, setNotesDraft] = useState(d.freelancerNotes || "");
   const prog = bimProgress(d);
@@ -4815,7 +4837,9 @@ function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus
           <p>Pedido {fmtDate(d.requestedAt)}</p>
           <p className={late ? "text-rose-600 font-semibold" : ""}>Prazo {fmtDate(d.dueAt)}</p>
           {d.deliveredAt && <p className="text-emerald-700">Entregue {fmtDate(d.deliveredAt)}</p>}
-          {mode === "internal" && d.unitPrice ? <p className="mt-1 text-slate-400">R$ {d.unitPrice.toLocaleString("pt-BR")}/produto · total R$ {(d.unitPrice * d.productCount).toLocaleString("pt-BR")}</p> : null}
+          {usesTable ? (
+            <p className="mt-1 text-slate-500">Total R$ {priceSum.total.toLocaleString("pt-BR")}{priceSum.pending ? <span className="ml-1 font-semibold text-amber-700">· {priceSum.pending} valor(es) a aprovar</span> : null}{priceSum.open ? <span className="ml-1 text-slate-400">· {priceSum.open} a combinar</span> : null}</p>
+          ) : mode === "internal" && d.unitPrice ? <p className="mt-1 text-slate-400">R$ {d.unitPrice.toLocaleString("pt-BR")}/produto · total R$ {(d.unitPrice * d.productCount).toLocaleString("pt-BR")}</p> : null}
         </div>
       </div>
 
@@ -4865,6 +4889,7 @@ function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus
                 <p className="text-sm font-medium text-slate-800 truncate">{it.code || it.name}</p>
                 {it.code && it.name && it.code !== it.name && <p className="text-xs text-slate-400 truncate">{it.name}</p>}
               </div>
+              {onItemPatch && <BimItemPrice it={it} mode={mode} canReview={!!canReviewPrice} onPatch={(p) => onItemPatch(it.id, p)} />}
               <div className="flex flex-wrap gap-1.5">
                 {it.formats.map((f) => {
                   const done = it.done.includes(f);
@@ -4892,6 +4917,51 @@ function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus
         <p className="mt-3 text-sm text-amber-900 rounded-xl bg-amber-50 border border-amber-100 px-3 py-2 whitespace-pre-wrap"><span className="text-xs font-semibold uppercase tracking-wider text-amber-600 mr-2">Terceirizado</span>{d.freelancerNotes}</p>
       )}
     </Card>
+  );
+}
+
+/** Modelos e valor de um produto da demanda BIM (tabela do terceirizado + proposta/aprovação). */
+function BimItemPrice({ it, mode, canReview, onPatch }: { it: BimDemandItem; mode: "internal" | "freelancer"; canReview: boolean; onPatch: (p: Partial<BimDemandItem>) => void }) {
+  const { currentUser } = useContext(AppContext);
+  const [models, setModels] = useState(it.models ? String(it.models) : "");
+  const [proposal, setProposal] = useState(it.proposedPrice != null ? String(it.proposedPrice) : "");
+  const price = bimItemPrice(it);
+  const tier = it.models ? bimTierPrice(it.models) : null;
+  const inputCls = "w-16 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-sky-400";
+  const saveModels = () => {
+    const n = Number(models) || undefined;
+    if (n === it.models) return;
+    // Mudou a quantidade: a proposta antiga deixa de valer se a tabela cobrir.
+    const covered = n != null && bimTierPrice(n) != null;
+    onPatch({ models: n, ...(covered ? { proposedPrice: undefined, priceStatus: undefined, priceReviewedBy: undefined, priceReviewedAt: undefined } : {}) });
+  };
+  const propose = () => { const v = Number(proposal.replace(",", ".")); if (!v || v <= 0) return; onPatch({ proposedPrice: v, priceStatus: "pending", priceReviewedBy: undefined, priceReviewedAt: undefined }); };
+  const review = (ok: boolean) => onPatch({ priceStatus: ok ? "approved" : "rejected", priceReviewedBy: currentUser?.name, priceReviewedAt: new Date().toISOString() });
+  const chip = price.state === "pending" ? "bg-amber-50 text-amber-700 border-amber-200" : price.state === "approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : price.state === "rejected" ? "bg-rose-50 text-rose-700 border-rose-200" : price.state === "open" ? "bg-slate-100 text-slate-500 border-slate-200" : "bg-white text-slate-600 border-slate-200";
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      {mode === "freelancer" ? (
+        <label className="flex items-center gap-1 text-slate-500">modelos <input type="number" min={1} value={models} onChange={(e) => setModels(e.target.value)} onBlur={saveModels} className={inputCls} /></label>
+      ) : it.models ? <span className="text-slate-500">{it.models} modelo{it.models === 1 ? "" : "s"}</span> : null}
+      {price.state !== "unset" && (
+        <span className={`rounded-lg border px-2 py-0.5 font-semibold ${chip}`}>
+          {price.value != null ? `R$ ${price.value.toLocaleString("pt-BR")}` : "a combinar"}
+          {price.state === "pending" ? " · aguardando aprovação" : price.state === "approved" ? " · aprovado" : price.state === "rejected" ? " · recusado" : ""}
+        </span>
+      )}
+      {mode === "freelancer" && (price.state === "open" || price.state === "rejected" || (tier == null && it.models)) && price.state !== "pending" && price.state !== "approved" && (
+        <span className="flex items-center gap-1">
+          <input value={proposal} onChange={(e) => setProposal(e.target.value)} placeholder="R$" className={inputCls} />
+          <button onClick={propose} className="rounded-lg bg-sky-600 px-2 py-1 font-semibold text-white hover:bg-sky-700">Propor valor</button>
+        </span>
+      )}
+      {mode === "internal" && canReview && price.state === "pending" && (
+        <span className="flex gap-1">
+          <button onClick={() => review(true)} className="rounded-lg bg-emerald-600 px-2 py-1 font-semibold text-white hover:bg-emerald-700">Aprovar</button>
+          <button onClick={() => review(false)} className="rounded-lg border border-rose-200 bg-white px-2 py-1 font-semibold text-rose-600 hover:bg-rose-50">Recusar</button>
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -5115,6 +5185,8 @@ function BimPage({ user }: { user: SeedUser }) {
           {list.map((d) => (
             <BimDemandCard key={d.id} d={d} mode="internal" clientName={clientOf(d.clientId)} freelancerName={nameOf(d.freelancerId)}
               onToggle={(itemId, fmt) => toggle(d, itemId, fmt)} onStatus={(st) => setStatus(d, st)}
+              onItemPatch={(itemId, p) => setBimDemands((prev) => prev.map((x) => (x.id === d.id ? { ...x, items: x.items.map((it) => (it.id === itemId ? { ...it, ...p } : it)), updatedAt: new Date().toISOString() } : x)))}
+              canReviewPrice={canEdit}
               onEdit={canEdit ? () => setEditing(d) : undefined} onDelete={canDelete ? () => remove(d) : undefined} />
           ))}
         </div>
@@ -5171,7 +5243,8 @@ function BimMinhasDemandasPage({ user }: { user: SeedUser }) {
             {open.map((d) => (
               <BimDemandCard key={d.id} d={d} mode="freelancer" clientName={clientOf(d.clientId)}
                 onToggle={(itemId, fmt) => toggle(d, itemId, fmt)} onStatus={(st) => setStatus(d, st)}
-                onFreelancerNotes={(text) => update({ ...d, freelancerNotes: text || undefined })} />
+                onFreelancerNotes={(text) => update({ ...d, freelancerNotes: text || undefined })}
+                onItemPatch={(itemId, p) => update({ ...d, items: d.items.map((it) => (it.id === itemId ? { ...it, ...p } : it)) })} />
             ))}
           </div>
         )}

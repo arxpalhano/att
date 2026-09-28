@@ -47,6 +47,56 @@ export interface BimDemandItem {
   formats: BimFormat[];
   /** Formatos já entregues (marcados pelo freelancer). */
   done: BimFormat[];
+  /** Quantidade de modelos (variações) do produto — define o preço pela tabela (BIM_PRICE_TIERS). */
+  models?: number;
+  /** Valor proposto pelo terceirizado quando a tabela não cobre ("a combinar", 21+ modelos). */
+  proposedPrice?: number;
+  /** Situação do valor proposto: aguardando a equipe, aprovado ou recusado. */
+  priceStatus?: "pending" | "approved" | "rejected";
+  /** Quem aprovou/recusou e quando. */
+  priceReviewedBy?: string;
+  priceReviewedAt?: string;
+}
+
+/**
+ * Tabela de preço do terceirizado por produto, pela quantidade de modelos
+ * (combinada com o Danilo em 2026-09-28): até 5 → R$ 40; 6 a 10 → R$ 60;
+ * 11 a 15 → R$ 80; 16 a 20 → R$ 100; 21 ou mais → a combinar (o terceirizado
+ * propõe o valor e a equipe aprova ou recusa).
+ */
+export const BIM_PRICE_TIERS: Array<{ max: number; price: number; label: string }> = [
+  { max: 5, price: 40, label: "até 5 modelos" },
+  { max: 10, price: 60, label: "6 a 10 modelos" },
+  { max: 15, price: 80, label: "11 a 15 modelos" },
+  { max: 20, price: 100, label: "16 a 20 modelos" },
+];
+/** Preço da tabela para N modelos; null = acima da tabela (a combinar). */
+export function bimTierPrice(models: number): number | null {
+  const n = Math.max(1, Math.floor(models || 1));
+  return BIM_PRICE_TIERS.find((t) => n <= t.max)?.price ?? null;
+}
+/**
+ * Valor que vale para o item: aprovado (quando houve proposta) → tabela.
+ * `pending` = proposta aguardando aprovação; `open` = acima da tabela sem proposta.
+ */
+export function bimItemPrice(it: BimDemandItem): { value: number | null; state: "table" | "approved" | "pending" | "rejected" | "open" | "unset" } {
+  if (it.proposedPrice != null && it.priceStatus === "approved") return { value: it.proposedPrice, state: "approved" };
+  if (it.proposedPrice != null && it.priceStatus === "pending") return { value: it.proposedPrice, state: "pending" };
+  if (!it.models) return { value: null, state: "unset" };
+  const tier = bimTierPrice(it.models);
+  if (tier != null) return { value: tier, state: it.priceStatus === "rejected" ? "rejected" : "table" };
+  return { value: null, state: it.priceStatus === "rejected" ? "rejected" : "open" };
+}
+/** Total da demanda pelos itens: soma o que tem valor definido e conta o que falta. */
+export function bimDemandTotal(d: BimDemand): { total: number; priced: number; pending: number; open: number } {
+  let total = 0, priced = 0, pending = 0, open = 0;
+  d.items.forEach((it) => {
+    const p = bimItemPrice(it);
+    if (p.state === "pending") pending++;
+    else if (p.value != null && (p.state === "table" || p.state === "approved")) { total += p.value; priced++; }
+    else if (p.state === "open" || p.state === "rejected") open++;
+  });
+  return { total, priced, pending, open };
 }
 
 export interface BimDemand {

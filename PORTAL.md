@@ -297,6 +297,19 @@ Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`
 marca tudo como visto; clicar navega direto.
 
 
+### Fila de outras pessoas e preço BIM por quantidade de modelos (desde 2026-09-28)
+
+- **Fila de Trabalho**: seletor "Fila de" (equipe interna) troca "Meus Itens"/"Meu Backup" pela fila
+  de outra pessoa; publicados e arquivados saem da lista; coluna Entrega.
+- **Preço do terceirizado BIM por produto** (`BIM_PRICE_TIERS` em `src/lib/bim.ts`, combinado com o
+  Danilo): até 5 modelos R$ 40 · 6–10 R$ 60 · 11–15 R$ 80 · 16–20 R$ 100 · 21+ a combinar. O
+  terceirizado informa os **modelos** de cada produto em "Minhas demandas"; acima da tabela ele
+  **propõe o valor** (`proposedPrice`, `priceStatus: pending`) e quem edita BIM **aprova ou recusa**
+  no card da demanda. O total da demanda passa a vir dos itens (`bimDemandTotal`); demanda sem
+  modelos informados continua com o `unitPrice` antigo. O terceirizado agora vê os valores dos
+  próprios itens (antes não via valor nenhum).
+- GSM nos selos de bloco = objeto de biblioteca do **ArchiCAD** (tooltip explica SKP/RVT/GSM).
+
 ### Super admin e Desempenho da equipe (desde 2026-09-24)
 
 - **`SeedUser.superAdmin`**: acesso a absolutamente tudo, acima de qualquer perfil (`can()`,
