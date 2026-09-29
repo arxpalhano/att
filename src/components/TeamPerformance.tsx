@@ -18,7 +18,7 @@ import { ActivityRecord, BLOCK_STATUS_LABELS, isNavigation } from "@/lib/activit
 
 interface PUser { id: string; name: string; role: string; active?: boolean }
 interface PBlock { id: string; clientId: string; title: string; status: string; owner?: string; materialsAt?: string; published?: string; dueDate?: string }
-interface PTicket { id: string; blockId: string; clientId: string; status: string; slaDate: string; assignedTo?: string; archivedAt?: string }
+interface PTicket { id: string; blockId: string; clientId: string; status: string; slaDate: string; assignedTo?: string; archivedAt?: string; stageDue?: string; stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }> }
 interface PClient { id: string; name: string }
 
 interface Props { users: PUser[]; blocks: PBlock[]; tickets: PTicket[]; clients: PClient[] }
@@ -74,7 +74,7 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
 
   // ---- ciclos: do dia em que o ticket caiu para a pessoa até o dia em que ela
   // mandou para a próxima etapa (ticket Entregue ou bloco mudou de status).
-  type Cycle = { ticketId: string; label: string; userId: string; blockId: string; clientId?: string; start: string; end: string | null; days: number; onTime: boolean | null; slaDate: string; startNote?: string };
+  type Cycle = { ticketId: string; label: string; userId: string; blockId: string; clientId?: string; start: string; end: string | null; days: number; onTime: boolean | null; slaDate: string; startNote?: string; commit?: string; firstCommit?: string; replans: number; keptCommit: boolean | null; keptFirst: boolean | null; commitLateDays: number | null };
   const cycles = useMemo<Cycle[]>(() => {
     const userByName = new Map(users.map((u) => [u.name.toLowerCase(), u.id]));
     const byTicket = new Map<string, ActivityRecord[]>();
@@ -107,17 +107,27 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
         if (endedByReassign) return; // passou para outra pessoa sem concluir: não é ciclo dela
         const finish = end ?? now;
         const daysN = Math.max(0, (new Date(finish).getTime() - new Date(as.at).getTime()) / 86400000);
-        out.push({ ticketId: t.id, label, userId: as.userId, blockId: t.blockId, clientId: t.clientId, start: as.at, end, days: Math.round(daysN * 10) / 10, onTime: end ? dayKey(end) <= t.slaDate : null, slaDate: t.slaDate, startNote: as.note });
+        // Compromisso da etapa: só o que ESSA pessoa assumiu (histórico do ticket feito por ela).
+        const who = users.find((u) => u.id === as.userId)?.name;
+        const mineHist = (t.stageDueHistory ?? []).filter((h) => h.by === who && h.at >= as.at && (!end || h.at <= end));
+        const firstCommit = mineHist[0]?.to;
+        const commit = mineHist.length ? mineHist[mineHist.length - 1].to : undefined;
+        const endDay = end ? dayKey(end) : null;
+        const lateDays = commit ? Math.ceil((new Date(`${endDay ?? dayKey(now)}T12:00:00`).getTime() - new Date(`${commit}T12:00:00`).getTime()) / 86400000) : null;
+        out.push({ ticketId: t.id, label, userId: as.userId, blockId: t.blockId, clientId: t.clientId, start: as.at, end, days: Math.round(daysN * 10) / 10, onTime: end ? dayKey(end) <= t.slaDate : null, slaDate: t.slaDate, startNote: as.note,
+          commit, firstCommit, replans: mineHist.filter((h) => h.from).length,
+          keptCommit: endDay && commit ? endDay <= commit : null, keptFirst: endDay && firstCommit ? endDay <= firstCommit : null,
+          commitLateDays: lateDays != null && lateDays > 0 ? lateDays : lateDays != null ? 0 : null });
       });
     });
     return out;
   }, [items, tickets, users]);
 
   // ---- por pessoa
-  type Row = { id: string; name: string; role: string; actions: number; moves: number; delivered: number; onTime: number; published: number; activeDays: number; openLoad: number; late: number; last: string; done: number; avgDays: number; medDays: number; doneOnTime: number; openCycles: number; openAvgAge: number };
+  type Row = { id: string; name: string; role: string; actions: number; moves: number; delivered: number; onTime: number; published: number; activeDays: number; openLoad: number; late: number; last: string; done: number; avgDays: number; medDays: number; doneOnTime: number; openCycles: number; openAvgAge: number; withCommit: number; kept: number; keptFirst: number; replans: number; avgLate: number; lateNow: number };
   const rows = useMemo<Row[]>(() => {
     const map = new Map<string, Row>();
-    team.forEach((u) => map.set(u.id, { id: u.id, name: u.name, role: u.role, actions: 0, moves: 0, delivered: 0, onTime: 0, published: 0, activeDays: 0, openLoad: 0, late: 0, last: "", done: 0, avgDays: NaN, medDays: NaN, doneOnTime: 0, openCycles: 0, openAvgAge: NaN }));
+    team.forEach((u) => map.set(u.id, { id: u.id, name: u.name, role: u.role, actions: 0, moves: 0, delivered: 0, onTime: 0, published: 0, activeDays: 0, openLoad: 0, late: 0, last: "", done: 0, avgDays: NaN, medDays: NaN, doneOnTime: 0, openCycles: 0, openAvgAge: NaN, withCommit: 0, kept: 0, keptFirst: 0, replans: 0, avgLate: NaN, lateNow: 0 }));
     const days_ = new Map<string, Set<string>>();
     const deliveredSeen = new Set<string>();
     work.forEach((a) => {
@@ -153,6 +163,14 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
       r.medDays = closed.length ? closed[Math.floor((closed.length - 1) / 2)] : NaN;
       r.doneOnTime = mine.filter((c) => c.end && c.onTime).length;
       r.openCycles = open.length;
+      const committedClosed = mine.filter((c) => c.end && c.commit);
+      r.withCommit = committedClosed.length;
+      r.kept = committedClosed.filter((c) => c.keptCommit).length;
+      r.keptFirst = committedClosed.filter((c) => c.keptFirst).length;
+      r.replans = mine.reduce((n, c) => n + c.replans, 0);
+      const lates = committedClosed.filter((c) => (c.commitLateDays ?? 0) > 0).map((c) => c.commitLateDays!);
+      r.avgLate = lates.length ? lates.reduce((a, b) => a + b, 0) / lates.length : NaN;
+      r.lateNow = open.filter((c) => c.commit && (c.commitLateDays ?? 0) > 0).length;
       r.openAvgAge = open.length ? open.reduce((a, c) => a + c.days, 0) / open.length : NaN;
     });
     return Array.from(map.values()).sort((a, b) => b.done - a.done || b.delivered - a.delivered || b.moves - a.moves);
@@ -310,11 +328,36 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
       </div>
 
       <div className={card}>
+        <p className="text-sm font-semibold text-slate-800">Compromisso de prazo por etapa</p>
+        <p className="mt-1 text-xs text-slate-500">Cada pessoa assume a data em que entrega a etapa ao pegar o ticket; mudar depois exige justificativa. <b>Cumpriu</b> = entregou até a última data assumida. <b>Acertou de primeira</b> = entregou até a primeira data, sem replanejar — é a medida de previsibilidade.</p>
+        <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200">
+          <table className="w-full border-collapse text-sm">
+            <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500">
+              <tr>{["Pessoa", "Etapas com data", "Cumpriu", "Acertou de primeira", "Replanejamentos", "Atraso médio", "Atrasadas agora"].map((h) => <th key={h} className="border-b border-r border-slate-200 px-3 py-2.5 last:border-r-0 whitespace-nowrap">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((r, i) => (
+                <tr key={r.id} className={i % 2 ? "bg-slate-50/70" : "bg-white"}>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 font-medium text-slate-800">{r.name}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{r.withCommit}{r.done > r.withCommit ? <span className="text-[11px] text-slate-400"> de {r.done}</span> : null}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 text-center font-semibold">{pct(r.kept, r.withCommit)}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{pct(r.keptFirst, r.withCommit)}</td>
+                  <td className={`border-b border-r border-slate-200 px-3 py-2 text-center ${r.replans > r.withCommit ? "font-semibold text-amber-700" : ""}`}>{r.replans}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{Number.isFinite(r.avgLate) ? `${fmt1(r.avgLate)} d` : "—"}</td>
+                  <td className={`border-b border-slate-200 px-3 py-2 text-center ${r.lateNow ? "font-semibold text-rose-600" : ""}`}>{r.lateNow}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className={card}>
         <p className="text-sm font-semibold text-slate-800">Etapa a etapa{person !== "all" ? ` · ${nameOf(person)}` : ""}</p>
         <p className="mt-1 text-xs text-slate-500">Cada linha é um ticket que caiu para a pessoa: quando recebeu, quando mandou adiante e quantos dias levou. Em andamento aparece primeiro.</p>
         <div className="mt-3 max-h-[28rem] overflow-auto rounded-2xl border border-slate-200">
           <table className="w-full border-collapse text-xs">
-            <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500"><tr>{["Pessoa", "Ticket", "Marca", "Recebeu", "Mandou adiante", "Dias", "Prazo"].map((h) => <th key={h} className="border-b border-r border-slate-200 px-3 py-2 last:border-r-0 whitespace-nowrap">{h}</th>)}</tr></thead>
+            <thead className="sticky top-0 bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500"><tr>{["Pessoa", "Ticket", "Marca", "Recebeu", "Compromisso", "Mandou adiante", "Dias", "Prazo"].map((h) => <th key={h} className="border-b border-r border-slate-200 px-3 py-2 last:border-r-0 whitespace-nowrap">{h}</th>)}</tr></thead>
             <tbody>
               {cycles.filter((c) => (person === "all" || c.userId === person) && (!c.end || c.end >= since)).sort((a, b) => (a.end ? 1 : 0) - (b.end ? 1 : 0) || b.days - a.days).slice(0, 200).map((c, i) => (
                 <tr key={`${c.ticketId}-${c.start}`} className={i % 2 ? "bg-slate-50/70" : "bg-white"}>
@@ -322,6 +365,7 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
                   <td className="border-b border-r border-slate-200 px-3 py-1.5"><span className="block max-w-[360px] truncate" title={c.label}>{c.label}</span>{c.startNote && <span className="text-[10px] text-slate-400">{c.startNote}</span>}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{c.clientId ? clientName(c.clientId) : "—"}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{new Date(c.start).toLocaleDateString("pt-BR")}</td>
+                  <td className={`border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap ${c.keptCommit === false || (!c.end && (c.commitLateDays ?? 0) > 0) ? "font-semibold text-rose-600" : c.keptCommit ? "text-emerald-700" : "text-slate-500"}`}>{c.commit ? new Date(`${c.commit}T12:00:00`).toLocaleDateString("pt-BR") : <span className="text-slate-300">sem data</span>}{c.replans ? <span className="ml-1 text-[10px] text-amber-700">({c.replans}× replanejada)</span> : null}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{c.end ? new Date(c.end).toLocaleDateString("pt-BR") : <span className="font-semibold text-amber-700">em andamento</span>}</td>
                   <td className={`border-b border-r border-slate-200 px-3 py-1.5 text-center font-semibold ${!c.end && c.days > 14 ? "text-rose-600" : "text-slate-800"}`}>{fmt1(c.days)}</td>
                   <td className={`border-b border-slate-200 px-3 py-1.5 whitespace-nowrap ${c.onTime === false ? "text-rose-600" : c.onTime ? "text-emerald-700" : "text-slate-500"}`}>{new Date(`${c.slaDate}T12:00:00`).toLocaleDateString("pt-BR")}{c.onTime === true ? " ✓" : c.onTime === false ? " atrasou" : ""}</td>

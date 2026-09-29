@@ -64,6 +64,17 @@ export interface ProductionTicket {
   /** Arquivado = fora das listas e dos alertas, sem apagar. Guarda quando e por quem. */
   archivedAt?: string;
   archivedBy?: string;
+  /**
+   * Compromisso da ETAPA (desde 2026-09-29): a data que o responsável assume ao
+   * pegar o ticket. Diferente de `slaDate` (entrega geral ao cliente). Passou da
+   * data com o ticket aberto = etapa atrasada (avisa a pessoa e a coordenação).
+   * A primeira definição é livre; toda mudança depois exige justificativa e fica
+   * em `stageDueHistory` — é a base dos KPIs de cumprimento e replanejamento.
+   */
+  stageDue?: string;
+  stageDueSetBy?: string;
+  stageDueSetAt?: string;
+  stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }>;
 }
 
 interface SeedUser {
@@ -608,6 +619,39 @@ function blockStatusForTicket(ticketStatus: TicketStatus, b: SeedBlock): BlockSt
   }
   return null;
 }
+/** Ordem do pipeline para a barra de progresso do produto (0 → 1). */
+const PIPELINE_ORDER: BlockStatus[] = ["draft", "awaiting_client_files", "client_files_under_review", "ready_to_start", "in_modeling", "in_texturing", "awaiting_client_material_validation", "approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "sketchup_conversion", "bim_conversion", "published"];
+const blockProgress = (b: SeedBlock) => { const i = PIPELINE_ORDER.indexOf(b.status); return i < 0 ? 0 : i / (PIPELINE_ORDER.length - 1); };
+/**
+ * Timeline do produto (Matheus, 2026-09-29): a barra enche conforme a ETAPA avança
+ * e muda de cor conforme o TEMPO se aproxima da entrega ao cliente — verde com
+ * folga, âmbar a partir de 60% do prazo consumido (ou se o tempo corre mais que a
+ * produção), vermelho a partir de 90% ou vencido.
+ */
+function BlockTimeline({ b, compact = false }: { b: SeedBlock; compact?: boolean }) {
+  const prog = blockProgress(b);
+  if (b.status === "published") return <div className={`h-1.5 w-full rounded-full bg-emerald-500 ${compact ? "" : "h-2.5"}`} title="Publicado" />;
+  if (!b.dueDate) return null;
+  const start = new Date(`${b.materialsAt || b.created}T12:00:00`).getTime();
+  const end = new Date(`${b.dueDate}T12:00:00`).getTime();
+  const elapsed = end > start ? Math.min(1.5, Math.max(0, (Date.now() - start) / (end - start))) : 1;
+  const tone = elapsed >= 0.9 ? "bg-rose-500" : elapsed >= 0.6 || elapsed - prog > 0.25 ? "bg-amber-400" : "bg-emerald-500";
+  const daysLeft = Math.ceil((end - Date.now()) / 86400000);
+  const tip = `${STATUS_LABELS[b.status]} · ${Math.round(prog * 100)}% do caminho · ${Math.round(Math.min(elapsed, 1) * 100)}% do prazo consumido · ${daysLeft < 0 ? `${-daysLeft}d atrasado` : `${daysLeft}d para a entrega`}`;
+  return (
+    <div title={tip} className={`relative w-full overflow-hidden rounded-full bg-slate-200 ${compact ? "h-1.5" : "h-2.5"}`}>
+      <div className={`h-full rounded-full ${tone} transition-all`} style={{ width: `${Math.max(4, prog * 100)}%` }} />
+      {/* marcador de "hoje" dentro do prazo */}
+      <div className="absolute top-0 h-full w-0.5 bg-slate-700/60" style={{ left: `${Math.min(100, elapsed * 100)}%` }} />
+    </div>
+  );
+}
+
+/** Etapa com compromisso vencido (ticket aberto e data assumida já passou). */
+const stageLate = (t: ProductionTicket) => isOpenTicket(t) && !!t.stageDue && t.stageDue < todayISO();
+/** Quem coordena recebe os avisos de atraso de etapa de todo mundo (Jéssica e admins). */
+const isCoordinator = (u: SeedUser) => isSuperAdmin(u) || u.role === "admin" || u.role === "internal_ops";
+
 /** Ticket "aberto" = conta para fila, alertas e acompanha o bloco. Entregue ou arquivado, não. */
 const isOpenTicket = (t: ProductionTicket) => t.status !== "delivered" && !t.archivedAt;
 /**
@@ -1825,7 +1869,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
     a.click(); URL.revokeObjectURL(url);
   };
 
-  const handleCreateBlock = (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }): string => {
+  const handleCreateBlock = (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority; dueDate?: string }): string => {
     const clientBlocks = blocks.filter((b) => b.clientId === data.clientId);
     const n = clientBlocks.length + 1;
     const clientCode = getClientCode(data.clientId);
@@ -1834,6 +1878,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
       n, sku: `${clientCode}-${String(n).padStart(3, "0")}`, csku: data.clientSku,
       title: data.title, svc: data.serviceType, status: "draft",
       pri: data.priority, created: new Date().toISOString().slice(0, 10),
+      ...(data.dueDate ? { dueDate: data.dueDate, dueManual: true } : {}),
     };
     setBlocks([...blocks, newBlock]); // o servidor registra "Bloco criado" ao gravar
 
@@ -1845,7 +1890,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
       blockId: newBlock.id,
       title: `${data.title} – Modelagem`,
       plan: data.serviceType,
-      slaDate: addDaysISO(todayISO(), SLA_DAYS),
+      slaDate: data.dueDate || addDaysISO(todayISO(), SLA_DAYS),
       priority: data.priority,
       status: "new",
       createdAt: new Date().toISOString(),
@@ -1954,13 +1999,25 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
               </select>
             </span>
           ) : <span className="text-xs text-slate-500">{r.owner ? getUserName(r.owner) : "—"}</span> }] : []),
-          { label: "Entrega", render: (r: SeedBlock) => {
+          ...(!isClient ? [{ label: "Prazo do resp.", render: (r: SeedBlock) => {
+            const t = tickets.filter((x) => x.blockId === r.id && isOpenTicket(x)).sort((a, b) => (a.stageDue || "9999").localeCompare(b.stageDue || "9999"))[0];
+            if (!t) return <span className="text-xs text-slate-300">—</span>;
+            if (!t.stageDue) return <span className="text-[11px] text-amber-700" title="O responsável ainda não definiu a data da etapa">sem data</span>;
+            const late = stageLate(t);
+            return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-600"}`} title={`Compromisso da etapa · ${t.title}`}>{fmtDate(t.stageDue)}{late ? " ⚠" : ""}</span>;
+          } }] : []),
+          { label: "Entrega ao cliente", render: (r: SeedBlock) => {
             const late = !!r.dueDate && r.dueDate < todayISO() && !["published", "archived", "approved"].includes(r.status);
             if (grid && canEditDeadlines(user)) {
-              return <span onClick={stop}><input type="date" value={r.dueDate ?? ""} onChange={(e) => { const iso = e.target.value; const nb = { ...r, dueDate: iso || undefined, dueManual: iso ? true : undefined }; patchBlock(r.id, { dueDate: nb.dueDate, dueManual: nb.dueManual }); setTickets((prev) => syncTicketsWithBlock(prev, nb)); }} className={`${cell} ${late ? "border-rose-300 text-rose-600" : ""}`} /></span>;
+              return <span onClick={stop} className="block min-w-[130px]"><input type="date" value={r.dueDate ?? ""} onChange={(e) => { const iso = e.target.value; const nb = { ...r, dueDate: iso || undefined, dueManual: iso ? true : undefined }; patchBlock(r.id, { dueDate: nb.dueDate, dueManual: nb.dueManual }); setTickets((prev) => syncTicketsWithBlock(prev, nb)); }} className={`${cell} ${late ? "border-rose-300 text-rose-600" : !r.dueDate && !["published", "archived"].includes(r.status) ? "border-rose-300 bg-rose-50" : ""}`} /><span className="mt-1 block"><BlockTimeline b={r} compact /></span></span>;
             }
-            if (!r.dueDate) return <span className="text-xs text-slate-300">—</span>;
-            return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>;
+            if (!r.dueDate) return r.status === "published" || r.status === "archived" ? <span className="text-xs text-slate-300">—</span> : <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-600" title="Toda entrega precisa de data: defina no bloco ou em Editar em grade">sem prazo</span>;
+            return (
+              <div className="min-w-[110px]">
+                <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-600"}`}>{fmtDate(r.dueDate)}</span>
+                <div className="mt-1"><BlockTimeline b={r} compact /></div>
+              </div>
+            );
           } },
         ]} />
         <p className="px-5 py-3 text-[11px] text-slate-400">{grid ? "Modo grade: etapa, responsável e entrega viram campos na linha; as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco." : "SKP · RVT · GSM: clique no selo para marcar como entregue. Para mudar etapa, responsável e entrega na própria lista, use \"Editar em grade\"."}</p>
@@ -2332,7 +2389,7 @@ function UploadModal({ blockId, clientId, allowedCategories, onClose, onUploaded
 function CreateBlockModal({ user, onClose, onCreate }: {
   user: SeedUser;
   onClose: () => void;
-  onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority }) => string;
+  onCreate: (data: { title: string; clientSku: string; clientId: string; contractId: string; serviceType: ServiceType; priority: Priority; dueDate?: string }) => string;
 }) {
   const { assets, setAssets, setActivities, blocks } = useContext(AppContext);
   const isClient = user.role === "client";
@@ -2342,6 +2399,8 @@ function CreateBlockModal({ user, onClose, onCreate }: {
   const [contractId, setContractId] = useState("");
   const [serviceType, setServiceType] = useState<ServiceType>("standard");
   const [priority, setPriority] = useState<Priority>("normal");
+  // Entrega ao cliente é obrigatória para a equipe (Matheus, 2026-09-29); cliente não define.
+  const [dueDate, setDueDate] = useState(!isClient ? addDaysISO(todayISO(), SLA_DAYS) : "");
   // Upload step
   const [uploadBlockId, setUploadBlockId] = useState<string | null>(null);
   const [pendingFiles, setPendingFiles] = useState<Record<string, File>>({});
@@ -2350,7 +2409,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
   const availableContracts = CONTRACTS.filter((c) => c.clientId === clientId && c.active);
   const selectedContract = CONTRACTS.find((c) => c.id === contractId);
   const hasCapacity = selectedContract ? usedBlocksOf(selectedContract.id, blocks) < selectedContract.totalBlocks : false;
-  const canSubmit = title.trim() && clientSku.trim() && clientId && contractId && hasCapacity;
+  const canSubmit = title.trim() && clientSku.trim() && clientId && contractId && hasCapacity && (isClient || !!dueDate);
   const requiredCats = READINESS_RULES[serviceType] || [];
 
   // If block was created, show the upload step
@@ -2417,6 +2476,12 @@ function CreateBlockModal({ user, onClose, onCreate }: {
                 {(Object.entries(PRIORITY_LABELS) as [Priority, string][]).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
             </div>
+            {!isClient && (
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Entrega ao cliente *</label>
+                <input type="date" value={dueDate} min={todayISO()} onChange={(e) => setDueDate(e.target.value)} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40" />
+              </div>
+            )}
           </div>
 
           {/* File upload per required category */}
@@ -2483,7 +2548,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
           <button
             onClick={() => {
               if (!canSubmit) return;
-              const newId = onCreate({ title: title.trim(), clientSku: clientSku.trim(), clientId, contractId, serviceType, priority });
+              const newId = onCreate({ title: title.trim(), clientSku: clientSku.trim(), clientId, contractId, serviceType, priority, ...(dueDate ? { dueDate } : {}) });
               if (Object.keys(pendingFiles).length > 0) {
                 setUploadBlockId(newId);
               }
@@ -2787,6 +2852,19 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
         </div>
         <div className="flex items-center gap-2"><ServiceBadge type={block.svc} /><PriorityDot priority={block.pri} /></div>
       </div>
+
+      {(block.dueDate || block.status === "published") && (
+        <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-3">
+          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+            <span>Progresso do produto · <b className="text-slate-700">{STATUS_LABELS[block.status]}</b></span>
+            {block.dueDate && <span>Entrega ao cliente <b className="text-slate-700">{fmtDate(block.dueDate)}</b>{block.materialsAt ? ` · materiais em ${fmtDate(block.materialsAt)}` : ""}</span>}
+          </div>
+          <BlockTimeline b={block} />
+        </div>
+      )}
+      {!block.dueDate && !isClient && !["published", "archived"].includes(block.status) && (
+        <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-medium text-rose-700">Este bloco está sem data de entrega ao cliente. Defina em "Entrega prevista" (Visão Geral) — toda entrega precisa de prazo.</p>
+      )}
 
       <div className="flex gap-2 flex-wrap">
         {(["overview", "finishes", "assets", "approvals", "activity", "publication"] as const).map((t) => (
@@ -4498,8 +4576,66 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
   );
 }
 
+/** Compromisso da etapa no cartão do ticket: assumir data, replanejar com justificativa, histórico. */
+function StageCommitment({ ticket, user, onSave }: { ticket: ProductionTicket; user: SeedUser; onSave: (t: ProductionTicket) => void }) {
+  const isAssignee = !!ticket.assignedTo && ticket.assignedTo === user.id;
+  const canSet = isAssignee || canEditDeadlines(user);
+  const [editing, setEditing] = useState(false);
+  const [date, setDate] = useState(ticket.stageDue ?? "");
+  const [reason, setReason] = useState("");
+  const [showHist, setShowHist] = useState(false);
+  const open = isOpenTicket(ticket);
+  const hist = ticket.stageDueHistory ?? [];
+  const replans = hist.filter((h) => h.from).length;
+  const daysTo = ticket.stageDue ? Math.ceil((new Date(`${ticket.stageDue}T12:00:00`).getTime() - Date.now()) / 86400000) : null;
+  const beyondFinal = !!ticket.stageDue && ticket.stageDue > ticket.slaDate;
+  const needReason = !!ticket.stageDue;
+  const valid = !!date && date !== ticket.stageDue && (!needReason || reason.trim().length >= 10);
+  const save = () => {
+    if (!valid) return;
+    const at = new Date().toISOString();
+    onSave({ ...ticket, stageDue: date, stageDueSetBy: user.name, stageDueSetAt: at,
+      stageDueHistory: [...hist, { ...(ticket.stageDue ? { from: ticket.stageDue } : {}), to: date, ...(needReason ? { reason: reason.trim() } : {}), by: user.name, at }] });
+    setEditing(false); setReason("");
+  };
+  if (!ticket.assignedTo && !ticket.stageDue) return null;
+  return (
+    <div className={`mt-3 rounded-xl border px-3 py-2 text-xs ${!open ? "border-slate-200 bg-slate-50" : stageLate(ticket) ? "border-rose-200 bg-rose-50" : ticket.stageDue ? "border-sky-200 bg-sky-50/60" : "border-amber-200 bg-amber-50"}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-slate-700">Compromisso da etapa:</span>
+        {ticket.stageDue ? (
+          <>
+            <span className="font-semibold text-slate-900">{fmtDate(ticket.stageDue)}</span>
+            {open && daysTo !== null && <span className={daysTo < 0 ? "font-semibold text-rose-700" : daysTo <= 1 ? "font-semibold text-amber-700" : "text-slate-500"}>{daysTo < 0 ? `${-daysTo}d atrasada` : daysTo === 0 ? "vence hoje" : `faltam ${daysTo}d`}</span>}
+            {beyondFinal && open && <span className="rounded bg-rose-100 px-1.5 py-0.5 font-semibold text-rose-700">passa da entrega geral ({fmtDate(ticket.slaDate)})</span>}
+            <span className="text-slate-400">· por {ticket.stageDueSetBy}</span>
+            {replans > 0 && <button onClick={() => setShowHist(!showHist)} className="text-slate-500 underline decoration-dotted">{replans} replanejamento{replans === 1 ? "" : "s"}</button>}
+          </>
+        ) : (
+          <span className="text-amber-800">{isAssignee ? "defina a data em que você entrega esta etapa" : `aguardando ${getUserName(ticket.assignedTo!)} definir a data`}</span>
+        )}
+        {open && canSet && !editing && <button onClick={() => { setDate(ticket.stageDue ?? ""); setEditing(true); }} className="ml-auto rounded-lg border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-600 hover:border-slate-300">{ticket.stageDue ? "Replanejar" : "Definir minha data"}</button>}
+      </div>
+      {editing && (
+        <div className="mt-2 flex flex-wrap items-start gap-2">
+          <input type="date" value={date} min={todayISO()} onChange={(e) => setDate(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />
+          {needReason && <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Por que a data mudou? (obrigatório, mín. 10 caracteres)" className="min-w-[260px] flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs" />}
+          <button onClick={save} disabled={!valid} className="rounded-lg bg-slate-900 px-3 py-1 font-semibold text-white disabled:opacity-30">Salvar</button>
+          <button onClick={() => setEditing(false)} className="px-2 py-1 text-slate-500">Cancelar</button>
+          {date && date > ticket.slaDate && <p className="w-full text-[11px] font-semibold text-rose-700">Essa data passa da entrega geral ao cliente ({fmtDate(ticket.slaDate)}). A coordenação vai ver o alerta.</p>}
+        </div>
+      )}
+      {showHist && (
+        <ul className="mt-2 space-y-1 border-t border-slate-200 pt-2 text-[11px] text-slate-600">
+          {hist.map((h, i) => <li key={i}>{fmtDate(h.at.slice(0, 10))} · {h.by}: {h.from ? `${fmtDate(h.from)} → ` : "assumiu "}{fmtDate(h.to)}{h.reason ? ` — “${h.reason}”` : ""}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 type TicketSort = "recent" | "oldest" | "late" | "due_far" | "priority" | "brand";
-type TicketDue = "all" | "late" | "week" | "month" | "later";
+type TicketDue = "all" | "late" | "week" | "month" | "later" | "stage_late" | "no_commit";
 /** Ordenação/prazo/busca da tela de tickets sobrevivem a trocar de tela e voltar. */
 const TICKETS_LIST_MEMORY: { sort: TicketSort; due: TicketDue; search: string } = { sort: "late", due: "all", search: "" };
 const PRIORITY_RANK: Record<Priority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
@@ -4542,7 +4678,9 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
       // Arquivado só aparece na aba própria; "Todos" é tudo que NÃO está arquivado.
       if (filter === "archived" ? !t.archivedAt : !!t.archivedAt) return false;
       if (filter !== "all" && filter !== "archived" && t.status !== filter) return false;
-      if (due !== "all") {
+      if (due === "stage_late" && !stageLate(t)) return false;
+      if (due === "no_commit" && (!isOpenTicket(t) || !t.assignedTo || !!t.stageDue)) return false;
+      if (due !== "all" && due !== "stage_late" && due !== "no_commit") {
         if (t.status === "delivered") return false; // prazo só faz sentido para o que está em aberto
         const d = daysTo(t.slaDate);
         if (due === "late" ? d >= 0 : due === "week" ? d < 0 || d > 7 : due === "month" ? d < 0 || d > 30 : d <= 30) return false;
@@ -4711,6 +4849,8 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
             <option value="week">Prazo: vence em 7 dias</option>
             <option value="month">Prazo: vence em 30 dias</option>
             <option value="later">Prazo: depois de 30 dias</option>
+            <option value="stage_late">Etapa atrasada (compromisso vencido)</option>
+            <option value="no_commit">Sem data de compromisso</option>
           </select>
           <select value={sort} onChange={(e) => setSort(e.target.value as TicketSort)} title="Ordenação" className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
             <option value="late">Ordem: mais atrasado primeiro</option>
@@ -4759,6 +4899,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                       </p>
                     )}
                     {ticket.desc && <p className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{ticket.desc}</p>}
+                    {!isClient && <StageCommitment ticket={ticket} user={user} onSave={(t) => setTickets(tickets.map((x) => (x.id === t.id ? t : x)))} />}
                     {ticket.archivedAt && <p className="mt-2 text-[11px] text-slate-400">Arquivado em {fmtDate(ticket.archivedAt.slice(0, 10))}{ticket.archivedBy ? ` por ${ticket.archivedBy}` : ""}</p>}
                   </div>
                   <div className="text-right flex-shrink-0">
@@ -5550,6 +5691,17 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
     if (blocked.length) items.push({ key: `blocked:${blocked.length}`, title: `${blocked.length} bloco${blocked.length === 1 ? "" : "s"} bloqueado${blocked.length === 1 ? "" : "s"}`, tone: "danger", go: () => setPage("blocks") });
     const risky = tickets.filter((t) => isOpenTicket(t) && (new Date(t.slaDate).getTime() - now) / dayMs <= 3);
     if (risky.length) items.push({ key: `sla:${risky.map((t) => t.id).join(",")}`, title: `${risky.length} ticket${risky.length === 1 ? "" : "s"} com SLA em risco`, desc: risky.slice(0, 2).map((t) => t.title).join(" · "), tone: "danger", go: () => setPage("tickets") });
+    // Compromisso da etapa: a própria pessoa vê as dela; a coordenação vê as de todos.
+    const myLate = tickets.filter((t) => t.assignedTo === currentUser.id && stageLate(t));
+    myLate.forEach((t) => items.push({ key: `stage-late:${t.id}:${t.stageDue}`, title: `Sua etapa está atrasada: ${t.title}`, desc: `Você se comprometeu com ${fmtDate(t.stageDue!)}. Entregue ou replaneje com justificativa.`, tone: "danger", go: () => setPage("tickets") }));
+    const myNoDate = tickets.filter((t) => t.assignedTo === currentUser.id && isOpenTicket(t) && !t.stageDue);
+    if (myNoDate.length) items.push({ key: `stage-nodate:${myNoDate.map((t) => t.id).join(",")}`, title: `${myNoDate.length} ticket${myNoDate.length === 1 ? "" : "s"} seu${myNoDate.length === 1 ? "" : "s"} sem data de compromisso`, desc: "Defina quando você entrega cada etapa", tone: "warn", go: () => setPage("tickets") });
+    if (isCoordinator(currentUser)) {
+      const teamLate = tickets.filter((t) => t.assignedTo !== currentUser.id && stageLate(t));
+      if (teamLate.length) items.push({ key: `stage-team-late:${teamLate.map((t) => `${t.id}${t.stageDue}`).join(",")}`, title: `${teamLate.length} etapa${teamLate.length === 1 ? "" : "s"} da equipe atrasada${teamLate.length === 1 ? "" : "s"}`, desc: teamLate.slice(0, 3).map((t) => `${getUserName(t.assignedTo!).split(" ")[0]}: ${t.title}`).join(" · "), tone: "danger", go: () => setPage("tickets") });
+      const beyond = tickets.filter((t) => isOpenTicket(t) && t.stageDue && t.stageDue > t.slaDate);
+      if (beyond.length) items.push({ key: `stage-beyond:${beyond.map((t) => `${t.id}${t.stageDue}`).join(",")}`, title: `${beyond.length} compromisso${beyond.length === 1 ? "" : "s"} passa${beyond.length === 1 ? "" : "m"} da entrega ao cliente`, desc: beyond.slice(0, 2).map((t) => t.title).join(" · "), tone: "warn", go: () => setPage("tickets") });
+    }
     const unassigned = tickets.filter((t) => isOpenTicket(t) && !t.assignedTo);
     if (unassigned.length) items.push({ key: `unassigned:${unassigned.length}`, title: `${unassigned.length} ticket${unassigned.length === 1 ? "" : "s"} sem responsável`, tone: "warn", go: () => setPage("tickets") });
     const delivered = bimDemands.filter((d) => d.status === "delivered");

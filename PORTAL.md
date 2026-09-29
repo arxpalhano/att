@@ -297,6 +297,38 @@ Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`
 marca tudo como visto; clicar navega direto.
 
 
+### Compromisso de prazo por etapa (desde 2026-09-29)
+
+Cada ticket é uma etapa; além do `slaDate` (entrega geral ao cliente, = `dueDate` do bloco) ele
+ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume ao pegar o ticket.
+
+- **Assumir:** o responsável (ou quem tem "Alterar prazos") clica "Definir minha data" no cartão do
+  ticket. A primeira vez é livre.
+- **Replanejar:** exige justificativa (mín. 10 caracteres). Tudo fica em `stageDueHistory`
+  (`from`, `to`, `reason`, `by`, `at`) e no log (`ticket_commitment`).
+- **Alertas (sino):** a pessoa vê as etapas dela atrasadas e as sem data; a **coordenação**
+  (`isCoordinator`: super admin, admin, Operações) vê as atrasadas de todos e os compromissos que
+  **passam da entrega geral ao cliente**. O cartão mostra "passa da entrega geral" em vermelho.
+- **Não empurra a data do cliente sozinho**: compromisso além do `slaDate` vira alerta para a
+  coordenação decidir.
+- **Tickets:** filtros "Etapa atrasada" e "Sem data de compromisso".
+- **KPIs (Desempenho):** por pessoa — etapas com data, % **cumpriu** (entregou até a última data
+  assumida), % **acertou de primeira** (até a primeira data, sem replanejar = previsibilidade),
+  replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
+  dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
+
+### Prazos visíveis na lista de blocos e timeline do produto (desde 2026-09-29)
+
+- **Todos os Blocos** ganhou a coluna **Prazo do resp.** (compromisso da etapa do ticket aberto;
+  "sem data" em âmbar, ⚠ vermelho se vencido) ao lado de Responsável, e a última coluna virou
+  **Entrega ao cliente** (`dueDate`), com "sem prazo" em vermelho quando falta.
+- **Entrega ao cliente é obrigatória** ao criar bloco pela equipe (vem com hoje + 14 dias, editável;
+  cliente não define). Bloco em produção sem data mostra aviso vermelho no detalhe.
+- **Timeline do produto** (`BlockTimeline`): a barra enche pela etapa (ordem do pipeline em
+  `PIPELINE_ORDER`) e muda de cor pelo tempo consumido entre materiais/criação e a entrega — verde,
+  âmbar a partir de 60% (ou se o tempo corre 25 pontos à frente da produção), vermelho a partir de
+  90% ou vencido; traço escuro marca "hoje". Aparece na lista (coluna Entrega) e no topo do bloco.
+
 ### Link do customizador nas Aprovações (desde 2026-09-29)
 
 Cada aprovação pendente mostra o link da publicação mais recente do bloco (maior `v`), com botão
