@@ -3298,8 +3298,14 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
   // critério do dashboard e do badge da sidebar — os três sempre batem.
   const isClient = user.role === "client";
   const [tab, setTab] = useState("pending");
-  const { blocks, setBlocks, setTickets, activities, clients } = useContext(AppContext);
+  const { blocks, setBlocks, setTickets, activities, clients, publications } = useContext(AppContext);
   const scope = isClient ? blocks.filter((b) => b.clientId === user.clientId) : blocks;
+  // Link do customizador na própria aprovação (Jéssica, 2026-09-29): o cliente
+  // confere exatamente a versão que estamos pedindo para aprovar. Com link, os
+  // botões só liberam depois que ele abre o customizador.
+  const pubFor = (blockId: string) => publications.filter((p) => p.blockId === blockId).sort((a, b) => b.v - a.v)[0];
+  const [opened, setOpened] = useState<Set<string>>(new Set());
+  const markOpened = (id: string) => setOpened((prev) => new Set(prev).add(id));
   const pending = scope.filter(isAwaitingClient).sort((a, b) => (b.created || "").localeCompare(a.created || ""));
   const scopeIds = new Set(scope.map((b) => b.id));
   const resolved = activities
@@ -3339,11 +3345,23 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
                   <Badge className="bg-amber-100 text-amber-700 border-amber-200">Pendente</Badge>
                 </div>
                 <p className="text-xs text-slate-400 mt-2">Aguardando desde a última mudança de status{revisions > 0 ? ` · ${revisions} revisão${revisions > 1 ? "ões" : ""} já solicitada${revisions > 1 ? "s" : ""}` : ""}</p>
+                {(() => {
+                  const pub = pubFor(block.id);
+                  if (!pub) return <p className={`mt-3 rounded-xl px-3 py-2 text-xs ${isClient ? "bg-slate-50 text-slate-500" : "border border-amber-200 bg-amber-50 text-amber-800"}`}>{isClient ? "O link para conferir este produto ainda não foi disponibilizado. Se precisar, fale com a equipe ArchTechTour." : "Sem link cadastrado em Publicações — o cliente vai decidir sem ver o customizador. Cadastre o link antes de pedir a aprovação."}</p>;
+                  const seen = opened.has(block.id);
+                  return (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-sky-200 bg-sky-50/70 px-3 py-2">
+                      <a href={pub.url} target="_blank" rel="noreferrer" onClick={() => markOpened(block.id)} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700"><ExternalLink className="h-3.5 w-3.5" /> {isClient ? "Abrir o customizador para conferir" : "Abrir o link enviado ao cliente"}</a>
+                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-500" title={pub.url}>v{pub.v} · {pub.url.replace(/^https?:\/\//, "")}</span>
+                      {isClient && (seen ? <span className="text-[11px] font-semibold text-emerald-700">✓ conferido</span> : <span className="text-[11px] text-slate-500">abra antes de aprovar ou pedir revisão</span>)}
+                    </div>
+                  );
+                })()}
                 {isClient ? (
                   <div className="space-y-2 mt-3">
                     <div className="flex gap-2">
-                      <button onClick={() => decide(block, "approve")} className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700"><ThumbsUp className="w-3.5 h-3.5" /> Aprovar</button>
-                      <button onClick={() => decide(block, "reject")} disabled={limitReached} className="flex items-center gap-1 px-4 py-2 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"><ThumbsDown className="w-3.5 h-3.5" /> Solicitar revisão {!limitReached ? `(${MAX_CLIENT_REVISIONS - revisions} restantes)` : ""}</button>
+                      <button onClick={() => decide(block, "approve")} disabled={!!pubFor(block.id) && !opened.has(block.id)} title={pubFor(block.id) && !opened.has(block.id) ? "Abra o customizador acima para conferir antes de aprovar" : undefined} className="flex items-center gap-1 px-4 py-2 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed"><ThumbsUp className="w-3.5 h-3.5" /> Aprovar</button>
+                      <button onClick={() => decide(block, "reject")} disabled={limitReached || (!!pubFor(block.id) && !opened.has(block.id))} className="flex items-center gap-1 px-4 py-2 bg-white text-red-600 border border-red-200 text-xs font-medium rounded-lg hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"><ThumbsDown className="w-3.5 h-3.5" /> Solicitar revisão {!limitReached ? `(${MAX_CLIENT_REVISIONS - revisions} restantes)` : ""}</button>
                     </div>
                     {limitReached && <p className="text-xs text-red-600 font-medium flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Revisões gratuitas esgotadas — contate info@archtechtour.com para solicitar revisão adicional.</p>}
                   </div>

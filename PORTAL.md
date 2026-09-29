@@ -297,6 +297,14 @@ Contador de não lidas por usuário em `localStorage` (`att_notif_seen_<userId>`
 marca tudo como visto; clicar navega direto.
 
 
+### Link do customizador nas Aprovações (desde 2026-09-29)
+
+Cada aprovação pendente mostra o link da publicação mais recente do bloco (maior `v`), com botão
+"Abrir o customizador para conferir". Para o **cliente**, Aprovar e Solicitar revisão só liberam
+depois que ele abre o link naquela sessão — assim aprova a versão certa e não pede revisão do que já
+foi resolvido (Jéssica). Sem link cadastrado, a equipe vê um aviso para cadastrar antes de pedir a
+aprovação; o cliente vê que o link ainda não foi disponibilizado e os botões seguem liberados.
+
 ### Fila de outras pessoas e preço BIM por quantidade de modelos (desde 2026-09-28)
 
 - **Fila de Trabalho**: seletor "Fila de" (equipe interna) troca "Meus Itens"/"Meu Backup" pela fila
