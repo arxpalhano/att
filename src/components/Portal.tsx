@@ -108,6 +108,13 @@ export interface SeedBlock {
   clientRevisions?: number; // número de revisões solicitadas pelo cliente
   /** Arquivos BIM já entregues (espelho dos checkboxes SKP/RVT/GSM do Notion). */
   bim?: { skp: boolean; rvt: boolean; gsm: boolean };
+  /**
+   * Conferências da entrega (Jéssica, 2026-10-01), marcadas como os selos de BIM:
+   * `embed` = embed colocado no site do cliente; `site` = publicado no site da ATT
+   * (archtechtour.com); `trace` = rastreabilidade (eventos de analytics) conferida
+   * no customizador. Guarda quem marcou e quando, para saber se "já teve antes".
+   */
+  checks?: Partial<Record<BlockCheck, { by: string; at: string }>>;
   /** Modelador responsável (texto livre — no Notion era "pessoa"). */
   modeler?: string;
   /**
@@ -124,6 +131,12 @@ export interface SeedBlock {
   notionTech?: string;
   importedAt?: string;
 }
+type BlockCheck = "embed" | "site" | "trace";
+const BLOCK_CHECKS: Array<{ k: BlockCheck; short: string; full: string }> = [
+  { k: "embed", short: "EMBED", full: "Embed no site do cliente" },
+  { k: "site", short: "SITE ATT", full: "Publicação no site da ATT" },
+  { k: "trace", short: "RASTR.", full: "Rastreabilidade (analytics) conferida" },
+];
 interface SeedAsset {
   id: string; blockId: string; cat: AssetCategory;
   name: string; size: number; v: number; by: string;
@@ -1824,6 +1837,11 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
     const bim = { skp: false, rvt: false, gsm: false, ...(b.bim ?? {}), [k]: !b.bim?.[k] };
     patchBlock(b.id, { bim: bim.skp || bim.rvt || bim.gsm ? bim : undefined });
   };
+  const toggleCheck = (b: SeedBlock, k: BlockCheck) => {
+    const checks = { ...(b.checks ?? {}) };
+    if (checks[k]) delete checks[k]; else checks[k] = { by: user.name, at: new Date().toISOString() };
+    patchBlock(b.id, { checks: Object.keys(checks).length ? checks : undefined });
+  };
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const cell = "rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 outline-none focus:border-cyan-400";
   const internalUsers = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
@@ -1990,6 +2008,22 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
               </span>
             );
           } }] : []),
+          ...(!isClient ? [{ label: "Embed · Site · Rastr.", render: (r: SeedBlock) => {
+            const editable = can(user, "blocks", "edit");
+            return (
+              <span onClick={stop} className="flex gap-1">
+                {BLOCK_CHECKS.map(({ k, short, full }) => {
+                  const c = r.checks?.[k];
+                  const tip = c ? `${full} — marcado por ${c.by} em ${fmtDate(c.at.slice(0, 10))}${editable ? " · clique para desmarcar" : ""}` : editable ? `Marcar: ${full}` : `${full}: não conferido`;
+                  return editable ? (
+                    <button key={k} type="button" onClick={() => toggleCheck(r, k)} title={tip} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold transition ${c ? "bg-indigo-600 text-white hover:bg-indigo-700" : "border border-dashed border-slate-300 bg-white text-slate-400 hover:border-indigo-400 hover:text-indigo-600"}`}>{c ? "✓ " : ""}{short}</button>
+                  ) : (
+                    <span key={k} title={tip} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-semibold ${c ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-300"}`}>{short}</span>
+                  );
+                })}
+              </span>
+            );
+          } }] : []),
           { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
           ...(!isClient ? [{ label: "Responsável", render: (r: SeedBlock) => grid ? (
             <span onClick={stop}>
@@ -2020,7 +2054,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
             );
           } },
         ]} />
-        <p className="px-5 py-3 text-[11px] text-slate-400">{grid ? "Modo grade: etapa, responsável e entrega viram campos na linha; as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco." : "SKP · RVT · GSM: clique no selo para marcar como entregue. Para mudar etapa, responsável e entrega na própria lista, use \"Editar em grade\"."}</p>
+        <p className="px-5 py-3 text-[11px] text-slate-400">{grid ? "Modo grade: etapa, responsável e entrega viram campos na linha; as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco." : "SKP · RVT · GSM e Embed · Site ATT · Rastreabilidade: clique no selo para marcar. Para mudar etapa, responsável e entrega na própria lista, use \"Editar em grade\"."}</p>
       </Card>
 
       {/* Modal Criar Bloco */}
@@ -2901,6 +2935,22 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                   </div>
                 )}
                 {!isClient && <div><p className="text-xs text-slate-400">Backup</p><p className="font-medium text-slate-700">{block.backup ? getUserName(block.backup) : "—"}</p></div>}
+                {!isClient && (
+                  <div className="col-span-2">
+                    <p className="text-xs text-slate-400">Conferências da entrega</p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {BLOCK_CHECKS.map(({ k, full }) => {
+                        const c = block.checks?.[k];
+                        const toggle = () => { const checks = { ...(block.checks ?? {}) }; if (checks[k]) delete checks[k]; else checks[k] = { by: user.name, at: new Date().toISOString() }; setBlocks(blocks.map((b) => (b.id === block.id ? { ...b, checks: Object.keys(checks).length ? checks : undefined } : b))); };
+                        return (
+                          <button key={k} type="button" disabled={!can(user, "blocks", "edit")} onClick={toggle} title={c ? `Marcado por ${c.by} em ${fmtDate(c.at.slice(0, 10))}` : "Ainda não conferido"} className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:cursor-default ${c ? "border-indigo-600 bg-indigo-600 text-white" : "border-dashed border-slate-300 bg-white text-slate-500 hover:border-indigo-400"}`}>
+                            {c ? "✓ " : ""}{full}{c ? <span className="ml-1 font-normal opacity-80">· {c.by.split(" ")[0]} {fmtDate(c.at.slice(0, 10))}</span> : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs text-slate-400">Entrega prevista</p>
                   {canEditDeadlines(user) ? (
@@ -3789,7 +3839,10 @@ function UserFormModal({
     setPaginas((atual) => (atual.includes(id) ? atual.filter((p) => p !== id) : [...atual, id]));
 
   const isEdit = !!initial;
-  const canSave = name.trim() && email.trim() && (!isEdit || password.trim());
+  // Cliente sem marca vinculada entrava e ficava preso em "Carregando" no Analytics
+  // (caso Enzo/Wentz, 2026-10-01): a marca é obrigatória para o tipo Cliente.
+  const missingClient = role === "client" && !clientId;
+  const canSave = name.trim() && email.trim() && (!isEdit || password.trim()) && !missingClient;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4" onClick={onClose}>
@@ -3855,6 +3908,7 @@ function UserFormModal({
                   <option value="">Selecione...</option>
                   {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                {missingClient && <p className="mt-1 text-xs font-medium text-rose-600">Escolha a marca — sem ela o usuário entra mas não vê nada.</p>}
               </div>
               <div className="rounded-xl border border-slate-200 p-3">
                 <label className="block text-xs font-medium text-slate-500 mb-2">Telas liberadas</label>
@@ -4023,7 +4077,7 @@ function UsersPage() {
               </div>
             );
           } },
-          { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : "\u2014" },
+          { label: "Cliente", render: (r: SeedUser) => r.clientId ? getClientName(r.clientId) : r.role === "client" ? <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[11px] font-semibold text-rose-600" title="Edite o usuário e escolha a marca">sem marca</span> : "\u2014" },
           { label: "Acesso", render: (r: SeedUser) => {
             const ids = paginasPermitidas(r);
             const excecao = r.role === "client" && !!r.allowedPages?.length;
@@ -7173,6 +7227,8 @@ function AnalyticsPage({ user }: { user: SeedUser }) {
 
       {clientAlias ? (
         <AnalyticsDashboard clientAlias={clientAlias} clientName={clientName} canRefresh={!isClient} />
+      ) : isClient && !clientPortalEntry ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-6 text-center text-sm text-amber-800">Seu usuário ainda não está vinculado a uma marca. Fale com a equipe ArchTechTour para liberar o seu dashboard.</div>
       ) : (
         <div className="flex items-center justify-center h-32 text-sm text-slate-400">{t("portal.loading")}</div>
       )}

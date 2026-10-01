@@ -317,6 +317,16 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### Conferências da entrega e cliente sem marca (desde 2026-10-01)
+
+- **`checks` no bloco** (Jéssica): três selos como os de BIM — **Embed** (embed no site do cliente),
+  **Site ATT** (publicado em archtechtour.com) e **Rastr.** (rastreabilidade/analytics conferida).
+  Cada marcação guarda quem e quando (`{ by, at }`), visível no tooltip e no cartão Informações do
+  bloco — serve para saber se "já teve antes". Coluna própria em Todos os Blocos; pede `blocks.edit`.
+- **Usuário cliente sem marca** (caso Enzo/Wentz): salvar como Cliente sem escolher a marca deixava o
+  Analytics em "Carregando" para sempre. Agora a marca é obrigatória no formulário, a lista de
+  usuários marca "sem marca" em vermelho e o Analytics mostra um aviso em vez de carregar.
+
 ### Prazos visíveis na lista de blocos e timeline do produto (desde 2026-09-29)
 
 - **Todos os Blocos** ganhou a coluna **Prazo do resp.** (compromisso da etapa do ticket aberto;

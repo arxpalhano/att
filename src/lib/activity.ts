@@ -171,7 +171,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       }
       const fields = changedFields(before, after, {
         title: "título", sku: "SKU", csku: "SKU do cliente", desc: "descrição", svc: "plano", pri: "prioridade",
-        owner: "responsável", backup: "backup", modeler: "modelador", bim: "arquivos BIM", contractId: "contrato", clientId: "cliente",
+        owner: "responsável", backup: "backup", modeler: "modelador", bim: "arquivos BIM", checks: "embed/site ATT/rastreabilidade", contractId: "contrato", clientId: "cliente",
         dueDate: "data de entrega", dueManual: "prazo manual/automático", materialsAt: "materiais recebidos",
       });
       if (fields.length) out.push(base({ ...ctx, type: "block_edited", desc: `Bloco editado: ${label}${listOf(fields)}` }));
