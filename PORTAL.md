@@ -326,7 +326,10 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
 - **Pendências de BIM** (aba na Fila de Trabalho, só coordenação — `isCoordinator`): marca os
   produtos, escolhe Danilo/Raquel e atribui. O ticket passa para o terceirizado e o produto entra
   numa **demanda BIM** dele da mesma marca (aberta, ou uma nova) — é isso que ele vê em "Minhas
-  demandas"; antes da atribuição ele não vê nada. Sino avisa a coordenação. Na tela Tickets o ticket
+  demandas"; antes da atribuição ele não vê nada. Com produtos de **uma marca** dá para escolher a
+  **remessa** (uma aberta do terceirizado ou "+ Nova remessa" com nome e prazo; o nome sugerido
+  segue a numeração da marca, ex. "Dexco Remessa 04"); com várias marcas, cada uma vai para a
+  remessa aberta dela ou nasce uma por marca. Sino avisa a coordenação. Na tela Tickets o ticket
   de BIM mostra "aguardando atribuição" / "BIM com Fulano" no lugar do seletor de responsável.
 - **Aprovar a entrega BIM** (BIM · Terceirizados) marca SKP/RVT/GSM no bloco conforme os formatos
   entregues, entrega o ticket de BIM e move o bloco para Publicado.

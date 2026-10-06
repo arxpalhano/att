@@ -3577,6 +3577,24 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [target, setTarget] = useState("");
   const [msg, setMsg] = useState("");
+  // Remessa de destino (Matheus, 2026-10-06): com produtos de UMA marca dá para escolher
+  // uma remessa aberta do terceirizado ou criar uma nova com nome e prazo. Com várias
+  // marcas marcadas, cada marca vai para a remessa aberta dela (ou nasce uma por marca).
+  const [remessa, setRemessa] = useState("auto"); // "auto" | "new" | id da demanda
+  const [newTitle, setNewTitle] = useState("");
+  const [newDue, setNewDue] = useState("");
+  const pickedBlocks = bimPending.filter((b) => picked.has(b.id));
+  const pickedClients = Array.from(new Set(pickedBlocks.map((b) => b.clientId)));
+  const oneClient = pickedClients.length === 1 ? pickedClients[0] : "";
+  const openRemessas = target && oneClient ? bimDemands.filter((d) => d.freelancerId === target && d.clientId === oneClient && bimIsOpen(d) && d.status !== "delivered") : [];
+  /** "Dexco Remessa 04": segue a numeração das remessas que a marca já tem (de qualquer terceirizado). */
+  const suggestTitle = (clientId: string) => {
+    const past = bimDemands.filter((d) => d.clientId === clientId).map((d) => /^(.*?)\s*Remessa\s*(\d+)/i.exec(d.title)).filter(Boolean) as RegExpExecArray[];
+    const next = past.reduce((n, m) => Math.max(n, Number(m[2])), 0) + 1;
+    const prefix = past.length ? past[past.length - 1][1].trim() : getClientName(clientId);
+    return `${prefix} Remessa ${String(next).padStart(2, "0")}`;
+  };
+  useEffect(() => { setRemessa("auto"); setNewTitle(oneClient ? suggestTitle(oneClient) : ""); setNewDue(addDaysISO(todayISO(), SLA_DAYS)); }, [oneClient, target]); // eslint-disable-line react-hooks/exhaustive-deps
   const togglePick = (id: string) => setPicked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const assignBim = () => {
     const freelancer = freelancers.find((f) => f.id === target);
@@ -3598,20 +3616,25 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
       chosen.forEach((t) => { const l = byClient.get(t.clientId) ?? []; l.push(t); byClient.set(t.clientId, l); });
       byClient.forEach((list, clientId) => {
         const mkItem = (t: ProductionTicket, i: number): BimDemandItem => { const b = blocks.find((x) => x.id === t.blockId); return { id: `bi_${Date.now()}_${i}_${t.id.slice(-4)}`, blockId: t.blockId, code: b?.sku ?? "", name: b?.title ?? t.title, formats: ["archicad", "revit"], done: [] }; };
-        const open = next.find((d) => d.freelancerId === freelancer.id && d.clientId === clientId && ["not_started", "waiting_info", "in_progress"].includes(d.status));
-        const due = list.map((t) => t.slaDate).sort().slice(-1)[0] || addDaysISO(today, SLA_DAYS);
+        // Uma marca só: vale a escolha da tela (remessa existente ou nova). Várias marcas: automático por marca.
+        const chosenId = oneClient && remessa !== "auto" && remessa !== "new" ? remessa : "";
+        const forceNew = !!oneClient && remessa === "new";
+        const open = forceNew ? undefined : chosenId ? next.find((d) => d.id === chosenId)
+          : next.find((d) => d.freelancerId === freelancer.id && d.clientId === clientId && ["not_started", "waiting_info", "in_progress"].includes(d.status));
+        const due = forceNew && newDue ? newDue : list.map((t) => t.slaDate).sort().slice(-1)[0] || addDaysISO(today, SLA_DAYS);
         if (open) {
           const fresh = list.filter((t) => !open.items.some((it) => it.blockId === t.blockId)).map(mkItem);
           const items = [...open.items, ...fresh];
           next = next.map((d) => (d.id === open.id ? { ...d, items, productCount: Math.max(d.productCount, items.length), updatedAt: now } : d));
         } else {
           const items = list.map(mkItem);
-          next.push({ id: `bd_${Date.now()}_${clientId}`, freelancerId: freelancer.id, clientId, title: `${getClientName(clientId)} · BIM ${fmtDate(today)}`, productCount: items.length, items, status: "not_started", requestedAt: today, dueAt: due < today ? addDaysISO(today, SLA_DAYS) : due, createdBy: user.id, createdAt: now, updatedAt: now });
+          next.push({ id: `bd_${Date.now()}_${clientId}`, freelancerId: freelancer.id, clientId, title: (forceNew && newTitle.trim()) || suggestTitle(clientId), productCount: items.length, items, status: "not_started", requestedAt: today, dueAt: due < today ? addDaysISO(today, SLA_DAYS) : due, createdBy: user.id, createdAt: now, updatedAt: now });
         }
       });
       return next;
     });
-    setMsg(`${chosen.length} produto(s) enviados para ${freelancer.name}. Já aparecem em "Minhas demandas" dele(a).`);
+    const onde = oneClient && remessa !== "auto" && remessa !== "new" ? `na remessa "${bimDemands.find((d) => d.id === remessa)?.title ?? ""}"` : oneClient && remessa === "new" ? `na nova remessa "${newTitle.trim() || suggestTitle(oneClient)}"` : "na remessa aberta de cada marca (ou numa nova)";
+    setMsg(`${chosen.length} produto(s) enviados para ${freelancer.name}, ${onde}. Já aparecem em "Minhas demandas" dele(a).`);
     setPicked(new Set()); setTimeout(() => setMsg(""), 8000);
   };
 
@@ -3641,8 +3664,30 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
                   <option value="">Enviar para…</option>
                   {freelancers.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
                 </select>
+                {target && oneClient && (
+                  <select value={remessa} onChange={(e) => setRemessa(e.target.value)} title="Em qual remessa (demanda BIM) os produtos entram" className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white max-w-[260px]">
+                    <option value="auto">{openRemessas.length ? `Remessa: ${openRemessas[0].title} (aberta)` : "Remessa: criar automaticamente"}</option>
+                    {openRemessas.slice(1).map((d) => <option key={d.id} value={d.id}>Remessa: {d.title} · {d.items.length} produto(s)</option>)}
+                    <option value="new">+ Nova remessa…</option>
+                  </select>
+                )}
+                {target && oneClient && remessa === "new" && (
+                  <>
+                    <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Nome da remessa" className="w-52 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm" />
+                    <label className="flex items-center gap-1 text-xs text-slate-500">prazo <input type="date" value={newDue} min={todayISO()} onChange={(e) => setNewDue(e.target.value)} className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm" /></label>
+                  </>
+                )}
                 <button onClick={assignBim} disabled={!target || picked.size === 0} className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-30">Atribuir {picked.size || ""} produto{picked.size === 1 ? "" : "s"}</button>
               </div>
+              {target && picked.size > 0 && (
+                <p className="mt-2 text-[11px] text-slate-500">
+                  {pickedClients.length > 1
+                    ? `Você marcou produtos de ${pickedClients.length} marcas: cada marca vai para a remessa aberta dela com ${users.find((u) => u.id === target)?.name.split(" ")[0]} (ou nasce uma remessa por marca). Para escolher a remessa, marque uma marca por vez.`
+                    : remessa === "new" ? "Será criada uma remessa nova com esse nome e prazo."
+                    : remessa !== "auto" ? "Os produtos entram na remessa escolhida."
+                    : openRemessas.length ? `Os produtos entram em "${openRemessas[0].title}", que já está aberta. Troque no seletor se quiser outra ou uma nova.` : `Não há remessa aberta dessa marca com ${users.find((u) => u.id === target)?.name.split(" ")[0]}: será criada "${oneClient ? suggestTitle(oneClient) : ""}".`}
+                </p>
+              )}
               <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200">
                 <table className="w-full border-collapse text-sm">
                   <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500"><tr>{["", "Produto", "Marca", "Ticket de BIM", "Entrega ao cliente", "SKP · RVT · GSM"].map((h) => <th key={h} className="border-b border-slate-200 px-3 py-2.5">{h}</th>)}</tr></thead>
