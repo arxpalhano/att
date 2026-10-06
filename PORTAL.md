@@ -340,7 +340,15 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   `ticket_created · responsável X`, nome igual ao do usuário, feito por outra pessoa, últimos 7
   dias), um por ticket, enquanto o ticket estiver aberto e com a pessoa. Vale para equipe e
   terceirizados. O refresh traz também as atividades dos últimos 2 dias para o aviso chegar com o
-  portal aberto (até 60 s de atraso). Não há e-mail nem push — só o sino.
+  portal aberto (até 60 s de atraso).
+- **E-mail "Novo ticket para você"** (`src/lib/ticket-notify.ts`, chamado por `applyDelta` quando a
+  entidade é `tickets`): toda criação com responsável ou troca de responsável manda e-mail para quem
+  recebeu, com botão "Abrir ticket" → `https://app.archtechtour.com/portal?ticket=<id>` (o portal
+  guarda o id em `sessionStorage`, sobrevive ao login Microsoft e abre a tela Tickets só com ele).
+  Um e-mail por pessoa por gravação (lote = lista). **Só equipe interna com e-mail
+  @archtechtour.com** — SES em sandbox; **Danilo e Raquel de fora por enquanto** (decisão do
+  Matheus). Quem atribui a si mesmo não recebe. Remetente `portal@archtechtour.com`. Falha de envio
+  só vai para o log do servidor.
 - **Refresh do estado**: ao voltar o foco para a aba e a cada 60 s o portal relê as tabelas e troca
   as que não têm alteração local pendente (`refreshState`). Causa raiz do desalinhamento visto em
   06/10: aba aberta há dias gravava por cima (bloco com um responsável, ticket com outro; ticket já

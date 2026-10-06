@@ -4869,6 +4869,14 @@ function StageCommitment({ ticket, user, onSave }: { ticket: ProductionTicket; u
   );
 }
 
+/**
+ * Link de e-mail `/portal?ticket=<id>`: o id fica guardado até a pessoa estar logada
+ * (o login Microsoft redireciona e perde a query) e a tela Tickets abre só com ele.
+ */
+const TICKET_LINK_KEY = "att_open_ticket";
+const readTicketLink = (): string => { try { return sessionStorage.getItem(TICKET_LINK_KEY) || ""; } catch { return ""; } };
+const clearTicketLink = () => { try { sessionStorage.removeItem(TICKET_LINK_KEY); } catch { /* sem storage */ } };
+
 type TicketSort = "recent" | "oldest" | "late" | "due_far" | "priority" | "brand";
 type TicketDue = "all" | "late" | "week" | "month" | "later" | "stage_late" | "no_commit";
 /** Ordenação/prazo/busca da tela de tickets sobrevivem a trocar de tela e voltar. */
@@ -4884,6 +4892,9 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const [due, setDue] = useState<TicketDue>(TICKETS_LIST_MEMORY.due);
   const [search, setSearch] = useState(TICKETS_LIST_MEMORY.search);
   useEffect(() => { Object.assign(TICKETS_LIST_MEMORY, { sort, due, search }); }, [sort, due, search]);
+  // Veio pelo link do e-mail: mostra só aquele ticket, até a pessoa pedir "ver todos".
+  const [focusId, setFocusId] = useState<string>(() => readTicketLink());
+  useEffect(() => { if (focusId) clearTicketLink(); }, [focusId]);
   const [filterClient, setFilterClient] = useState<string>("");
   const [filterAssignee, setFilterAssignee] = useState<string>(""); // "" = todos · "none" = sem responsável
   const [showNewTicket, setShowNewTicket] = useState(false);
@@ -4909,6 +4920,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
   const term = search.trim().normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const visible = useMemo(() => {
     const blockOf = (t: ProductionTicket) => blocks.find((b) => b.id === t.blockId);
+    if (focusId) { const only = tickets.filter((t) => t.id === focusId && (!isClient || t.clientId === user.clientId)); if (only.length) return only; }
     const list = scoped.filter((t) => {
       // Arquivado só aparece na aba própria; "Todos" é tudo que NÃO está arquivado.
       if (filter === "archived" ? !t.archivedAt : !!t.archivedAt) return false;
@@ -4935,7 +4947,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
       : sort === "due_far" ? b.slaDate.localeCompare(a.slaDate)
       : sort === "priority" ? PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.slaDate.localeCompare(b.slaDate)
       : getClientName(a.clientId).localeCompare(getClientName(b.clientId)) || a.slaDate.localeCompare(b.slaDate));
-  }, [scoped, blocks, filter, due, term, sort]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [scoped, blocks, filter, due, term, sort, focusId, tickets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Responsável do ticket = responsável do bloco (a tela do bloco mostra o mesmo campo).
   const syncBlockOwner = (blockId: string | undefined, userId: string | undefined) => {
@@ -5020,6 +5032,12 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
       {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onSave={createTicket} />}
       {editingTicket && <NewTicketModal initial={editingTicket} onClose={() => setEditingTicket(null)} onSave={saveTicket} />}
       {autoMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{autoMsg}</div>}
+      {focusId && (
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          <span className="flex-1">{tickets.some((t) => t.id === focusId) ? "Mostrando o ticket do link que você abriu." : "O ticket do link não existe mais (pode ter sido excluído)."}</span>
+          <button onClick={() => setFocusId("")} className="rounded-xl bg-sky-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-800">Ver todos os tickets</button>
+        </div>
+      )}
       <SectionHeader
         eyebrow="Fase 5 · Produção"
         title="Tickets de produção"
@@ -7613,6 +7631,16 @@ export default function Portal() {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState("");
   const [selectedContract, setSelectedContract] = useState("");
+  // Link de e-mail /portal?ticket=<id>: guarda o id, limpa a URL e, com a pessoa logada, abre Tickets.
+  useEffect(() => {
+    try {
+      const id = new URLSearchParams(window.location.search).get("ticket");
+      if (!id) return;
+      sessionStorage.setItem(TICKET_LINK_KEY, id);
+      window.history.replaceState(window.history.state, "", window.location.pathname);
+    } catch { /* sem storage */ }
+  }, []);
+  useEffect(() => { if (currentUser && readTicketLink()) setPage("tickets"); }, [currentUser]);
   // Botão Voltar do navegador (Matheus, 2026-10-06): o portal é uma página só, então
   // "voltar" saía para a landing. Cada tela aberta vira uma entrada no histórico e o
   // Voltar/Avançar passam a navegar entre as telas do portal.

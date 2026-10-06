@@ -22,6 +22,7 @@ import { DynamoDBDocumentClient, ScanCommand, ScanCommandOutput } from "@aws-sdk
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { authOptions } from "./auth-options";
 import { bootstrapAmplifyCredentials } from "./amplify-credentials";
+import { assignmentOf, notifyTicketAssignments, TicketAssignment } from "./ticket-notify";
 import { scanAll, getItem, putItem, deleteItem, replaceAll, TABLES } from "./dynamo";
 import {
   ACTOR_HEADER, ActivityActor, ActivityDraft, ActivityEntity, ActivityRecord, NameResolver, NO_NAMES,
@@ -107,9 +108,11 @@ export async function applyDelta(table: string, entity: ActivityEntity, delta: S
   const drafts: ActivityDraft[] = [];
   let created = 0;
   const createdDrafts: ActivityDraft[] = [];
+  const assignments: TicketAssignment[] = []; // tickets que acabaram de cair para alguém → e-mail
   for (const item of upsert) {
     const before = await getItem<Record<string, unknown>>(table, item.id);
     await putItem(table, item);
+    if (entity === "tickets") { const a = assignmentOf(before as (Record<string, unknown> & { id: string }) | null, item); if (a) assignments.push(a); }
     const d = describeChange(entity, before, item, actor, names);
     if (!before) { created++; createdDrafts.push(...d); } else drafts.push(...d);
   }
@@ -123,6 +126,8 @@ export async function applyDelta(table: string, entity: ActivityEntity, delta: S
     drafts.push(...describeChange(entity, before, null, actor, names));
   }
   const activities = await writeActivities(drafts, actor, sessionEmail, "server");
+  // Aviso por e-mail (nunca derruba a gravação; aguardado porque a Lambda congela após responder).
+  if (assignments.length) await notifyTicketAssignments(assignments, actor);
   return { activities, upserted: upsert.length, deleted: del.length };
 }
 
