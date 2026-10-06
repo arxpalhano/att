@@ -195,7 +195,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       }
       if (!before.archivedAt && after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket arquivado: ${label}` }));
       if (before.archivedAt && !after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket desarquivado: ${label}` }));
-      const fields = changedFields(before, after, { title: "título", desc: "descrição", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente" });
+      const fields = changedFields(before, after, { title: "título", desc: "descrição", attachments: "anexos", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente" });
       if (fields.length) out.push(base({ ...ctx, type: "ticket_edited", desc: `Ticket editado: ${label}${listOf(fields)}` }));
       return out;
     }

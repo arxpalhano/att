@@ -349,6 +349,13 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   @archtechtour.com** — SES em sandbox; **Danilo e Raquel de fora por enquanto** (decisão do
   Matheus). Quem atribui a si mesmo não recebe. Remetente `portal@archtechtour.com`. Falha de envio
   só vai para o log do servidor.
+- **Cartão do ticket com atalhos e anexos** (2026-10-06): botões "Abrir bloco" e "Abrir
+  customizador · vN" (publicação mais recente do bloco) — revisar sem passar por Blocos → Publicação.
+  **Anexos** (`ticket.attachments`, mesmo tipo `KbAttachment`): arrastar imagens/arquivos para o
+  cartão ou "Anexar imagem"; miniatura para imagem, ícone para o resto; seguem com o ticket quando ele
+  muda de pessoa. Ficam em `s3://archtechtour-assets/kb/tickets/<ticketId>/` pelas rotas
+  `/api/kb/upload` (baseId `tickets`) e `/api/kb/file` — sem infra nova. Remove quem enviou ou quem
+  edita tickets.
 - **Refresh do estado**: ao voltar o foco para a aba e a cada 60 s o portal relê as tabelas e troca
   as que não têm alteração local pendente (`refreshState`). Causa raiz do desalinhamento visto em
   06/10: aba aberta há dias gravava por cima (bloco com um responsável, ticket com outro; ticket já

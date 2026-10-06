@@ -10,7 +10,7 @@ import AccessProfilesPage from "./AccessProfiles";
 import LinkImportModal, { LinkImportRow } from "./LinkImportModal";
 import TeamPerformance from "./TeamPerformance";
 import { AccessProfile, AccessAction, SpecialPerm, DEFAULT_PROFILES, MODULES as ACCESS_MODULES, BASE_LABELS, mergeProfiles, profileOf, canDo, hasSpecial, defaultProfileId, summarizeProfile } from "@/lib/access";
-import { KbRecord, KbBase, canViewBase, isKbBase } from "@/lib/kb";
+import { KbRecord, KbBase, KbAttachment, canViewBase, isKbBase, KB_ALLOWED_EXTENSIONS, KB_MAX_FILE_MB, kbExt, fmtKbSize } from "@/lib/kb";
 import { KB_SEED } from "@/data/kb-seed";
 import { ActivityRecord, BLOCK_STATUS_LABELS, TICKET_STATUS_LABELS as SHARED_TICKET_STATUS_LABELS, ENTITY_LABELS, TYPE_LABELS, PAGE_LABELS, isNavigation } from "@/lib/activity";
 import { setActivityActor, actorHeaders, logActivity } from "@/lib/activity-client";
@@ -75,6 +75,12 @@ export interface ProductionTicket {
   stageDueSetBy?: string;
   stageDueSetAt?: string;
   stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }>;
+  /**
+   * Anexos do ticket (imagens de referência, prints, PDFs) — acompanham o ticket quando
+   * ele muda de pessoa. Ficam no S3 em `kb/tickets/<ticketId>/…`, pelas mesmas rotas de
+   * anexo da Base de Conhecimento (/api/kb/upload e /api/kb/file).
+   */
+  attachments?: KbAttachment[];
 }
 
 interface SeedUser {
@@ -4811,6 +4817,78 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
   );
 }
 
+const ticketFileUrl = (a: KbAttachment, inline = false) => `/api/kb/file?key=${encodeURIComponent(a.key)}&name=${encodeURIComponent(a.name)}${inline ? "&inline=1" : ""}`;
+const isImageName = (name: string) => [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(kbExt(name));
+/** Sobe um arquivo para kb/tickets/<ticketId>/ com URL pré-assinada (direto do browser para o S3). */
+async function uploadTicketFile(file: File, ticketId: string): Promise<string> {
+  const r = await fetch("/api/kb/upload", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fileName: file.name, fileType: file.type || "application/octet-stream", size: file.size, baseId: "tickets", articleId: ticketId }) });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Erro ao preparar o upload");
+  const { uploadUrl, key, contentType } = await r.json();
+  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: file });
+  if (!put.ok) throw new Error(`S3 respondeu ${put.status}`);
+  return key as string;
+}
+
+/**
+ * Anexos no cartão do ticket (Matheus, 2026-10-06): o Victor arrasta a imagem de
+ * referência para o cartão e, quando o ticket passa para o Liles, ela já está lá.
+ * `dropFiles` chega do cartão inteiro (arrastar em qualquer ponto dele).
+ */
+function TicketAttachments({ ticket, user, canRemoveAll, onChange, dropFiles, onDropHandled }: {
+  ticket: ProductionTicket; user: SeedUser; canRemoveAll: boolean;
+  onChange: (atts: KbAttachment[]) => void; dropFiles: File[] | null; onDropHandled: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState("");
+  const [err, setErr] = useState("");
+  const atts = ticket.attachments ?? [];
+  const send = async (files: File[]) => {
+    setErr("");
+    let cur = [...(ticket.attachments ?? [])];
+    for (const f of files) {
+      if (!KB_ALLOWED_EXTENSIONS.includes(kbExt(f.name))) { setErr(`"${f.name}": tipo de arquivo não permitido.`); continue; }
+      if (f.size > KB_MAX_FILE_MB * 1024 * 1024) { setErr(`"${f.name}": acima de ${KB_MAX_FILE_MB} MB.`); continue; }
+      try {
+        setBusy(f.name);
+        const key = await uploadTicketFile(f, ticket.id);
+        cur = [...cur, { id: `tf_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, key, name: f.name, size: f.size, type: f.type || "application/octet-stream", uploadedAt: new Date().toISOString(), uploadedBy: user.name }];
+        onChange(cur);
+      } catch (e) { setErr(`"${f.name}": ${(e as Error).message}`); }
+    }
+    setBusy("");
+  };
+  useEffect(() => { if (dropFiles && dropFiles.length) { void send(dropFiles); onDropHandled(); } }, [dropFiles]); // eslint-disable-line react-hooks/exhaustive-deps
+  const remove = (a: KbAttachment) => {
+    if (!confirm(`Remover o anexo "${a.name}"?`)) return;
+    onChange(atts.filter((x) => x.id !== a.id));
+    fetch(`/api/kb/file?key=${encodeURIComponent(a.key)}`, { method: "DELETE" }).catch(() => {});
+  };
+  return (
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {atts.map((a) => (
+          <div key={a.id} className="group relative" title={`${a.name} · ${fmtKbSize(a.size)} · ${a.uploadedBy} em ${fmtDate(a.uploadedAt.slice(0, 10))}`}>
+            <a href={ticketFileUrl(a, true)} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-xl border border-slate-200 bg-slate-50 hover:border-sky-300">
+              {isImageName(a.name)
+                ? <img src={ticketFileUrl(a, true)} alt={a.name} loading="lazy" className="h-20 w-28 object-cover" />
+                : <span className="flex h-20 w-28 flex-col items-center justify-center gap-1 px-2 text-center"><FileText className="h-5 w-5 text-slate-400" /><span className="line-clamp-2 break-all text-[10px] leading-3 text-slate-500">{a.name}</span></span>}
+            </a>
+            {(canRemoveAll || a.uploadedBy === user.name) && <button onClick={() => remove(a)} title="Remover anexo" className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-white group-hover:flex"><X className="h-3 w-3" /></button>}
+          </div>
+        ))}
+        <button onClick={() => inputRef.current?.click()} disabled={!!busy} className="flex h-20 w-28 flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-200 text-[11px] font-semibold text-slate-400 transition hover:border-sky-300 hover:text-sky-600 disabled:opacity-50">
+          <Upload className="h-4 w-4" />{busy ? "Enviando…" : atts.length ? "Anexar mais" : "Anexar imagem"}
+        </button>
+        <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; if (fs.length) void send(fs); }} />
+      </div>
+      {!atts.length && !busy && <p className="mt-1 text-[11px] text-slate-400">Arraste imagens de referência para este cartão — elas seguem com o ticket para a próxima pessoa.</p>}
+      {busy && <p className="mt-1 text-[11px] text-sky-700">Enviando {busy}…</p>}
+      {err && <p className="mt-1 text-[11px] font-semibold text-rose-600">{err}</p>}
+    </div>
+  );
+}
+
 /** Compromisso da etapa no cartão do ticket: assumir data, replanejar com justificativa, histórico. */
 function StageCommitment({ ticket, user, onSave }: { ticket: ProductionTicket; user: SeedUser; onSave: (t: ProductionTicket) => void }) {
   const isAssignee = !!ticket.assignedTo && ticket.assignedTo === user.id;
@@ -4883,8 +4961,11 @@ type TicketDue = "all" | "late" | "week" | "month" | "later" | "stage_late" | "n
 const TICKETS_LIST_MEMORY: { sort: TicketSort; due: TicketDue; search: string } = { sort: "late", due: "all", search: "" };
 const PRIORITY_RANK: Record<Priority, number> = { urgent: 0, high: 1, normal: 2, low: 3 };
 
-function ProductionTicketsPage({ user }: { user: SeedUser }) {
-  const { blocks, setBlocks, tickets, setTickets, clients, users } = useContext(AppContext);
+function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
+  const { blocks, setBlocks, tickets, setTickets, clients, users, publications } = useContext(AppContext);
+  // Arrastar arquivos para um cartão: guarda de qual ticket e quais arquivos; o TicketAttachments do cartão envia.
+  const [drop, setDrop] = useState<{ ticketId: string; files: File[] } | null>(null);
+  const [dragOver, setDragOver] = useState("");
   const [filter, setFilter] = useState<TicketStatus | "all" | "archived">("all");
   // Ordenação e prazo: pedidos do Liles e do Victor (2026-09-21) — com muitas marcas
   // e blocos antigos misturados, a lista precisa mostrar primeiro o que importa.
@@ -5135,7 +5216,12 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
             const createdAt = ticketCreatedAt(ticket, block);
 
             return (
-              <Card key={ticket.id} className="p-5 md:p-6">
+              <Card key={ticket.id} className={`p-5 md:p-6 ${dragOver === ticket.id ? "ring-2 ring-sky-400" : ""}`}>
+                <div
+                  onDragOver={(e) => { if (isClient || !e.dataTransfer.types.includes("Files")) return; e.preventDefault(); setDragOver(ticket.id); }}
+                  onDragLeave={() => setDragOver("")}
+                  onDrop={(e) => { if (isClient) return; e.preventDefault(); setDragOver(""); const files = Array.from(e.dataTransfer.files); if (files.length) setDrop({ ticketId: ticket.id, files }); }}
+                >
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -5151,7 +5237,22 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                         {block.materialsAt && <span>· materiais em {fmtDate(block.materialsAt)}</span>}
                       </p>
                     )}
+                    {block && (() => {
+                      // Atalhos (Matheus, 2026-10-06): revisar sem ir em Blocos → Publicação → abrir o link.
+                      const pub = publications.filter((p) => p.blockId === block.id).sort((a, b) => b.v - a.v)[0];
+                      return (
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <button onClick={() => { setSelectedBlock(block.id); setPage("block_detail"); }} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900"><Package className="h-3.5 w-3.5" /> Abrir bloco</button>
+                          {pub
+                            ? <a href={pub.url} target="_blank" rel="noreferrer" title={pub.url} className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-sky-700"><ExternalLink className="h-3.5 w-3.5" /> Abrir customizador · v{pub.v}</a>
+                            : <span className="text-[11px] text-slate-400">sem link de customizador cadastrado</span>}
+                        </div>
+                      );
+                    })()}
                     {ticket.desc && <p className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{ticket.desc}</p>}
+                    {!isClient && <TicketAttachments ticket={ticket} user={user} canRemoveAll={canEdit}
+                      onChange={(atts) => setTickets((prev) => prev.map((x) => (x.id === ticket.id ? { ...x, attachments: atts.length ? atts : undefined } : x)))}
+                      dropFiles={drop?.ticketId === ticket.id ? drop.files : null} onDropHandled={() => setDrop(null)} />}
                     {!isClient && <StageCommitment ticket={ticket} user={user} onSave={(t) => setTickets(tickets.map((x) => (x.id === t.id ? t : x)))} />}
                     {ticket.archivedAt && <p className="mt-2 text-[11px] text-slate-400">Arquivado em {fmtDate(ticket.archivedAt.slice(0, 10))}{ticket.archivedBy ? ` por ${ticket.archivedBy}` : ""}</p>}
                   </div>
@@ -5196,6 +5297,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                       {assignedUser.name}
                     </div>
                   )}
+                </div>
                 </div>
               </Card>
             );
@@ -7966,7 +8068,7 @@ export default function Portal() {
       case "clients": return <ClientsPage />;
       case "approvals": return <ApprovalsPage user={currentUser} />;
       case "queue": return <QueuePage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
-      case "tickets": return <ProductionTicketsPage user={currentUser} />;
+      case "tickets": return <ProductionTicketsPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "publications": return <PublicationsPage user={currentUser} />;
       case "analytics": return <AnalyticsPage user={currentUser} />;
       case "activity": return <ActivityPage setPage={setPage} setSelectedBlock={setSelectedBlock} setSelectedContract={setSelectedContract} />;
