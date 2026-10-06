@@ -3560,7 +3560,9 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
   // "Itens de X" = tudo que está com a pessoa: blocos em que ela é a responsável E
   // blocos com ticket aberto atribuído a ela. Antes a fila só olhava o responsável do
   // bloco e o Desempenho só olhava o ticket — os dois não batiam (2026-10-06).
-  const myItems = blocks.filter((b) => openStatus(b) && (b.owner === who || openTicketsOf(b.id).some((t) => t.assignedTo === who)));
+  // Bloco em Conversão BIM não é trabalho do "responsável do bloco": está com o terceirizado
+  // ou em Pendências de BIM. Só entra na fila de alguém se o ticket for dessa pessoa.
+  const myItems = blocks.filter((b) => openStatus(b) && ((b.owner === who && b.status !== "bim_conversion") || openTicketsOf(b.id).some((t) => t.assignedTo === who)));
   const bimPending = bimPendingBlocks(blocks, tickets, bimDemands);
   const coordinator = isCoordinator(user);
   const views: Record<string, { label: string; data: SeedBlock[] }> = {
@@ -3724,6 +3726,12 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
               // Mostra quando bloco e ticket discordam sobre quem é o responsável.
               const ts = openTicketsOf(r.id);
               const tk = ts.find((t) => t.assignedTo === who) ?? ts[0];
+              // Em BIM é normal o bloco ter um responsável da equipe e o ticket estar com o
+              // terceirizado (ou esperando atribuição) — não é divergência.
+              if (r.status === "bim_conversion") {
+                const withFreelancer = ts.find((t) => isFreelancerId(t.assignedTo));
+                return <span className="text-[11px] font-semibold text-teal-700" title="BIM é feito pelo terceirizado; a coordenação atribui em Pendências de BIM">{withFreelancer ? `BIM com ${getUserName(withFreelancer.assignedTo!).split(" ")[0]}` : "BIM · aguardando atribuição"}</span>;
+              }
               const ownerName = r.owner ? getUserName(r.owner).split(" ")[0] : "ninguém";
               if (!tk) return <span className="text-[11px] text-amber-700" title="O bloco tem responsável mas nenhum ticket aberto — não entra nos KPIs de etapa">bloco: {ownerName} · sem ticket</span>;
               const tkName = tk.assignedTo ? getUserName(tk.assignedTo).split(" ")[0] : "sem responsável";
