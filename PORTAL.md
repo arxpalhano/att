@@ -336,6 +336,11 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
 - **Fila de Trabalho** = blocos em que a pessoa é responsável **ou** tem ticket aberto; coluna
   "Com quem" acusa em vermelho quando bloco e ticket discordam, e "sem ticket" quando o bloco tem
   dono mas nenhum ticket aberto. Coluna "Prazo da etapa".
+- **Aviso "Novo ticket para você"** no sino: sai do log do servidor (`ticket_assigned` /
+  `ticket_created · responsável X`, nome igual ao do usuário, feito por outra pessoa, últimos 7
+  dias), um por ticket, enquanto o ticket estiver aberto e com a pessoa. Vale para equipe e
+  terceirizados. O refresh traz também as atividades dos últimos 2 dias para o aviso chegar com o
+  portal aberto (até 60 s de atraso). Não há e-mail nem push — só o sino.
 - **Refresh do estado**: ao voltar o foco para a aba e a cada 60 s o portal relê as tabelas e troca
   as que não têm alteração local pendente (`refreshState`). Causa raiz do desalinhamento visto em
   06/10: aba aberta há dias gravava por cima (bloco com um responsável, ticket com outro; ticket já

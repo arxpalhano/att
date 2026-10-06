@@ -5948,6 +5948,23 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
   const items: Notif[] = [];
   const role = currentUser.role;
 
+  // "Caiu um ticket para você" (Matheus, 2026-10-06): sai do log do servidor — toda
+  // atribuição ou criação de ticket com responsável vira um aviso para a pessoa, enquanto
+  // o ticket continuar aberto e com ela. Vale 7 dias; quem atribuiu a si mesmo não é avisado.
+  const meName = currentUser.name.trim().toLowerCase();
+  const assignedToMe = activities
+    .filter((a) => (a.type === "ticket_assigned" || a.type === "ticket_created") && a.userId !== currentUser.id && now - new Date(a.at).getTime() < 7 * dayMs)
+    .filter((a) => { const m = /atribuído a (.+)$/.exec(a.desc) || /· responsável (.+)$/.exec(a.desc); return !!m && m[1].trim().toLowerCase() === meName; })
+    .sort((a, b) => b.at.localeCompare(a.at));
+  const newForMe = new Map<string, SeedActivity>(); // um aviso por ticket (o mais recente)
+  assignedToMe.forEach((a) => { const id = a.entityId || a.id; if (!newForMe.has(id)) newForMe.set(id, a); });
+  newForMe.forEach((a, ticketId) => {
+    const t = tickets.find((x) => x.id === ticketId);
+    if (!t || !isOpenTicket(t) || t.assignedTo !== currentUser.id) return;
+    const who = (a.userName || "").split(" ")[0] || "A coordenação";
+    items.push({ key: `tk-new:${ticketId}:${a.at}`, title: `Novo ticket para você: ${t.title}`, desc: `${who} atribuiu em ${fmtDate(a.at.slice(0, 10))} · entrega ao cliente ${fmtDate(t.slaDate)}${t.stageDue ? "" : " · defina a sua data"}`, tone: "info", go: () => setPage(role === "freelancer_bim" ? "bim_minhas" : "tickets") });
+  });
+
   if (role === "freelancer_bim") {
     const mine = bimDemands.filter((d) => d.freelancerId === currentUser.id && bimIsOpen(d));
     mine.filter((d) => bimDaysLeft(d) < 0).forEach((d) => items.push({ key: `bim-late:${d.id}:${d.dueAt}`, title: `Atrasada: ${d.title}`, desc: `Prazo era ${fmtDate(d.dueAt)}`, tone: "danger", go: () => setPage("bim_minhas") }));
@@ -7843,6 +7860,12 @@ export default function Portal() {
         persisted.current[key] = new Map(server.map((i) => [i.id, JSON.stringify(i)]));
         apply[key](server);
       }));
+      // Atividades dos últimos 2 dias: o sino usa o log para avisar "caiu um ticket para você".
+      const ra = await fetch("/api/activity?days=2");
+      if (ra.ok) {
+        const ja = await ra.json().catch(() => null);
+        if (ja && Array.isArray(ja.items) && ja.items.length) appendActivities(ja.items as SeedActivity[]);
+      }
     } catch (e) { console.error("Falha ao atualizar o estado:", e); } finally { refreshing.current = false; }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
