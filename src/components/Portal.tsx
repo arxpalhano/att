@@ -597,6 +597,9 @@ function retitle(title: string, b: SeedBlock): string {
 function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): ProductionTicket[] {
   return tickets.map((t) => {
     if (t.blockId !== b.id || !isOpenTicket(t)) return t;
+    // Bloco entrou em Conversão BIM: a etapa da pessoa da equipe acabou aqui. O ticket
+    // dela é entregue e o de BIM nasce separado, sem responsável (ver bimPendingBlocks).
+    if (b.status === "bim_conversion" && !/ – Conversão BIM$/.test(t.title) && !isFreelancerId(t.assignedTo)) return { ...t, status: "delivered" as TicketStatus };
     let status: TicketStatus = t.status;
     if (b.status === "published") status = "delivered";
     else if (b.status === "internal_review") status = "internal_review";
@@ -658,6 +661,26 @@ function BlockTimeline({ b, compact = false }: { b: SeedBlock; compact?: boolean
       <div className="absolute top-0 h-full w-0.5 bg-slate-700/60" style={{ left: `${Math.min(100, elapsed * 100)}%` }} />
     </div>
   );
+}
+
+/**
+ * BIM é feito pelos TERCEIRIZADOS (Danilo, Raquel), e quem distribui é a coordenação
+ * (Matheus, 2026-10-06). Por isso o ticket de "Conversão BIM" nasce SEM responsável e
+ * fica na fila "Pendências de BIM" até a coordenação atribuir a um terceirizado — só
+ * aí ele aparece para o terceirizado (como produto numa demanda BIM dele).
+ */
+const isFreelancerId = (id?: string) => !!id && USERS.find((u) => u.id === id)?.role === "freelancer_bim";
+/** Ticket aberto de um bloco que está em Conversão BIM. */
+const isBimTicket = (t: ProductionTicket, blocks: SeedBlock[]) => isOpenTicket(t) && blocks.find((b) => b.id === t.blockId)?.status === "bim_conversion";
+/**
+ * Blocos em Conversão BIM esperando a coordenação escolher o terceirizado: não estão
+ * em nenhuma demanda BIM aberta e não têm ticket aberto com um terceirizado. É por
+ * BLOCO (não por ticket) porque há dezenas de blocos antigos em BIM sem ticket.
+ */
+function bimPendingBlocks(blocks: SeedBlock[], tickets: ProductionTicket[], demands: BimDemand[]): SeedBlock[] {
+  const inDemand = new Set<string>();
+  demands.filter(bimIsOpen).forEach((d) => d.items.forEach((it) => { if (it.blockId) inDemand.add(it.blockId); }));
+  return blocks.filter((b) => b.status === "bim_conversion" && !inDemand.has(b.id) && !tickets.some((t) => t.blockId === b.id && isOpenTicket(t) && isFreelancerId(t.assignedTo)));
 }
 
 /** Etapa com compromisso vencido (ticket aberto e data assumida já passou). */
@@ -1826,12 +1849,12 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
       const synced = syncTicketsWithBlock(prev, nb);
       const phase = PRODUCTION_PHASE_LABELS[status];
       if (!phase || synced.some((t) => t.blockId === nb.id && isOpenTicket(t))) return synced;
-      return [...synced, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: nb.owner, status: "new" as TicketStatus, createdAt: new Date().toISOString() }];
+      return [...synced, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: status === "bim_conversion" ? undefined : nb.owner, status: "new" as TicketStatus, createdAt: new Date().toISOString() }];
     });
   };
   const changeOwner = (b: SeedBlock, owner: string | undefined) => {
     patchBlock(b.id, { owner });
-    setTickets((prev) => prev.map((t) => (t.blockId === b.id && isOpenTicket(t) ? { ...t, assignedTo: owner } : t)));
+    if (b.status !== "bim_conversion") setTickets((prev) => prev.map((t) => (t.blockId === b.id && isOpenTicket(t) ? { ...t, assignedTo: owner } : t)));
   };
   const toggleBim = (b: SeedBlock, k: "skp" | "rvt" | "gsm") => {
     const bim = { skp: false, rvt: false, gsm: false, ...(b.bim ?? {}), [k]: !b.bim?.[k] };
@@ -2822,7 +2845,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
       if (prev.some((t) => t.blockId === block.id && isOpenTicket(t))) return prev;
       return [...prev, {
         id: `tk_${Date.now()}`, clientId: block.clientId, blockId: block.id, title: `${block.title} – ${phase}`,
-        plan: block.svc, slaDate: due || block.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: block.pri, assignedTo: owner, status: "new" as TicketStatus,
+        plan: block.svc, slaDate: due || block.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: block.pri, assignedTo: status === "bim_conversion" ? undefined : owner, status: "new" as TicketStatus,
         createdAt: new Date().toISOString(),
       }];
     });
@@ -2924,7 +2947,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
                       onChange={(e) => {
                         const owner = e.target.value || undefined;
                         setBlocks(blocks.map((b) => (b.id === block.id ? { ...b, owner } : b)));
-                        setTickets(tickets.map((t) => (t.blockId === block.id && isOpenTicket(t) ? { ...t, assignedTo: owner } : t)));
+                        if (block.status !== "bim_conversion") setTickets((prev) => prev.map((t) => (t.blockId === block.id && isOpenTicket(t) ? { ...t, assignedTo: owner } : t)));
                         if (owner) ensureTicket(block.status, owner);
                       }}
                       className="mt-0.5 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-sm font-medium text-slate-700 outline-none focus:border-cyan-400"
@@ -3524,22 +3547,74 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
 }
 
 function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPage: (p: string) => void; setSelectedBlock: (id: string) => void }) {
-  const { blocks, users } = useContext(AppContext);
+  const { blocks, users, tickets, setTickets, bimDemands, setBimDemands } = useContext(AppContext);
   const [view, setView] = useState("my");
   // Ver a fila de outra pessoa (Matheus, 2026-09-28): "Meus Itens"/"Meu Backup" passam a ser de quem estiver escolhido.
   const team = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
+  const freelancers = users.filter((u) => u.role === "freelancer_bim" && u.active);
   const [who, setWho] = useState(user.id);
   const mine = who === user.id;
   const whoName = users.find((u) => u.id === who)?.name.split(" ")[0] ?? "";
   const openStatus = (b: SeedBlock) => !["archived", "published"].includes(b.status);
+  const openTicketsOf = (blockId: string) => tickets.filter((t) => t.blockId === blockId && isOpenTicket(t));
+  // "Itens de X" = tudo que está com a pessoa: blocos em que ela é a responsável E
+  // blocos com ticket aberto atribuído a ela. Antes a fila só olhava o responsável do
+  // bloco e o Desempenho só olhava o ticket — os dois não batiam (2026-10-06).
+  const myItems = blocks.filter((b) => openStatus(b) && (b.owner === who || openTicketsOf(b.id).some((t) => t.assignedTo === who)));
+  const bimPending = bimPendingBlocks(blocks, tickets, bimDemands);
+  const coordinator = isCoordinator(user);
   const views: Record<string, { label: string; data: SeedBlock[] }> = {
-    my: { label: mine ? "Meus Itens" : `Itens de ${whoName}`, data: blocks.filter((b) => b.owner === who && openStatus(b)) },
+    my: { label: mine ? "Meus Itens" : `Itens de ${whoName}`, data: myItems },
     backup: { label: mine ? "Meu Backup" : `Backup de ${whoName}`, data: blocks.filter((b) => b.backup === who && openStatus(b)) },
-    unassigned: { label: "Sem Responsável", data: blocks.filter((b) => !b.owner && !["draft", "archived", "published"].includes(b.status)) },
+    unassigned: { label: "Sem Responsável", data: blocks.filter((b) => !b.owner && !["draft", "archived", "published", "bim_conversion"].includes(b.status)) },
+    ...(coordinator ? { bim: { label: "Pendências de BIM", data: bimPending } } : {}),
     blocked: { label: "Bloqueados", data: blocks.filter((b) => b.status === "blocked") },
     awaiting: { label: "Aguardando Cliente", data: blocks.filter((b) => ["awaiting_client_files", "awaiting_client_material_validation", "awaiting_client_final_validation"].includes(b.status)) },
   };
-  const current = views[view];
+  const current = views[view] ?? views.my;
+
+  // ---- Pendências de BIM: a coordenação escolhe os produtos e o terceirizado
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [target, setTarget] = useState("");
+  const [msg, setMsg] = useState("");
+  const togglePick = (id: string) => setPicked((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const assignBim = () => {
+    const freelancer = freelancers.find((f) => f.id === target);
+    const chosenBlocks = bimPending.filter((b) => picked.has(b.id));
+    if (!freelancer || !chosenBlocks.length) return;
+    const now = new Date().toISOString(); const today = todayISO();
+    // 1) o ticket de BIM do bloco passa a ser do terceirizado (ou nasce agora, se o bloco não tinha)
+    const chosen: ProductionTicket[] = chosenBlocks.map((b, i) => {
+      const existing = tickets.find((t) => t.blockId === b.id && isOpenTicket(t));
+      return existing ? { ...existing, title: retitle(existing.title, b), assignedTo: freelancer.id }
+        : { id: `tk_${Date.now()}${i}`, clientId: b.clientId, blockId: b.id, title: `${b.title} – Conversão BIM`, plan: b.svc, slaDate: b.dueDate || addDaysISO(today, SLA_DAYS), priority: b.pri, assignedTo: freelancer.id, status: "new" as TicketStatus, createdAt: now };
+    });
+    const byId = new Map(chosen.map((t) => [t.id, t]));
+    setTickets((prev) => [...prev.map((t) => byId.get(t.id) ?? t), ...chosen.filter((t) => !prev.some((x) => x.id === t.id))]);
+    // 2) o produto entra numa demanda BIM dele (uma aberta da mesma marca, ou uma nova) — é o que ele enxerga em "Minhas demandas"
+    setBimDemands((prev) => {
+      let next = [...prev];
+      const byClient = new Map<string, ProductionTicket[]>();
+      chosen.forEach((t) => { const l = byClient.get(t.clientId) ?? []; l.push(t); byClient.set(t.clientId, l); });
+      byClient.forEach((list, clientId) => {
+        const mkItem = (t: ProductionTicket, i: number): BimDemandItem => { const b = blocks.find((x) => x.id === t.blockId); return { id: `bi_${Date.now()}_${i}_${t.id.slice(-4)}`, blockId: t.blockId, code: b?.sku ?? "", name: b?.title ?? t.title, formats: ["archicad", "revit"], done: [] }; };
+        const open = next.find((d) => d.freelancerId === freelancer.id && d.clientId === clientId && ["not_started", "waiting_info", "in_progress"].includes(d.status));
+        const due = list.map((t) => t.slaDate).sort().slice(-1)[0] || addDaysISO(today, SLA_DAYS);
+        if (open) {
+          const fresh = list.filter((t) => !open.items.some((it) => it.blockId === t.blockId)).map(mkItem);
+          const items = [...open.items, ...fresh];
+          next = next.map((d) => (d.id === open.id ? { ...d, items, productCount: Math.max(d.productCount, items.length), updatedAt: now } : d));
+        } else {
+          const items = list.map(mkItem);
+          next.push({ id: `bd_${Date.now()}_${clientId}`, freelancerId: freelancer.id, clientId, title: `${getClientName(clientId)} · BIM ${fmtDate(today)}`, productCount: items.length, items, status: "not_started", requestedAt: today, dueAt: due < today ? addDaysISO(today, SLA_DAYS) : due, createdBy: user.id, createdAt: now, updatedAt: now });
+        }
+      });
+      return next;
+    });
+    setMsg(`${chosen.length} produto(s) enviados para ${freelancer.name}. Já aparecem em "Minhas demandas" dele(a).`);
+    setPicked(new Set()); setTimeout(() => setMsg(""), 8000);
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3552,17 +3627,70 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
         </label>
       </div>
       <div className="flex gap-2 flex-wrap">{Object.entries(views).map(([k, v]) => <TabBtn key={k} active={view === k} label={v.label} count={v.data.length} onClick={() => setView(k)} />)}</div>
-      <Card>
-        <DataTable data={current.data} onRowClick={(row) => { setSelectedBlock(row.id); setPage("block_detail"); }} columns={[
-          { label: "SKU", render: (r: SeedBlock) => <span className="font-mono text-xs">{r.sku}</span> },
-          { label: "Título", render: (r: SeedBlock) => <p className="text-sm font-medium text-slate-800">{r.title}</p> },
-          { label: "Cliente", render: (r: SeedBlock) => <span className="text-xs">{getClientCode(r.clientId)}</span> },
-          { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
-          { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
-          { label: "Tipo", render: (r: SeedBlock) => <ServiceBadge type={r.svc} /> },
-          { label: "Entrega", render: (r: SeedBlock) => { if (!r.dueDate) return <span className="text-xs text-slate-300">—</span>; const late = r.dueDate < todayISO(); return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>; } },
-        ]} />
-      </Card>
+      {msg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{msg}</div>}
+
+      {view === "bim" ? (
+        <Card className="p-5">
+          <p className="text-sm font-semibold text-slate-800">Blocos em Conversão BIM aguardando terceirizado</p>
+          <p className="mt-1 text-xs text-slate-500">O ticket de BIM nasce sem responsável. Marque os produtos, escolha o terceirizado e envie — eles entram numa demanda BIM dele (por marca) e só então aparecem para ele.</p>
+          {bimPending.length === 0 ? <p className="mt-4 text-sm text-slate-400">Nenhum bloco esperando atribuição de BIM.</p> : (
+            <>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button onClick={() => setPicked(picked.size === bimPending.length ? new Set() : new Set(bimPending.map((b) => b.id)))} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300">{picked.size === bimPending.length ? "Desmarcar todos" : "Marcar todos"}</button>
+                <select value={target} onChange={(e) => setTarget(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white">
+                  <option value="">Enviar para…</option>
+                  {freelancers.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+                <button onClick={assignBim} disabled={!target || picked.size === 0} className="rounded-lg bg-slate-900 px-4 py-1.5 text-xs font-semibold text-white disabled:opacity-30">Atribuir {picked.size || ""} produto{picked.size === 1 ? "" : "s"}</button>
+              </div>
+              <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full border-collapse text-sm">
+                  <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500"><tr>{["", "Produto", "Marca", "Ticket de BIM", "Entrega ao cliente", "SKP · RVT · GSM"].map((h) => <th key={h} className="border-b border-slate-200 px-3 py-2.5">{h}</th>)}</tr></thead>
+                  <tbody>
+                    {bimPending.slice().sort((a, b) => getClientName(a.clientId).localeCompare(getClientName(b.clientId)) || naturalCompare(a.sku, b.sku)).map((b, i) => {
+                      const t = tickets.find((x) => x.blockId === b.id && isOpenTicket(x));
+                      const since = t ? ticketCreatedAt(t, b) : ""; const waiting = since ? Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 86400000)) : null;
+                      const due = b.dueDate || t?.slaDate;
+                      return (
+                        <tr key={b.id} className={`${i % 2 ? "bg-slate-50/70" : "bg-white"} cursor-pointer`} onClick={() => togglePick(b.id)}>
+                          <td className="border-b border-slate-200 px-3 py-2"><input type="checkbox" readOnly checked={picked.has(b.id)} className="h-4 w-4 rounded border-slate-300 accent-slate-900" /></td>
+                          <td className="border-b border-slate-200 px-3 py-2"><button onClick={(e) => { e.stopPropagation(); setSelectedBlock(b.id); setPage("block_detail"); }} className="text-left font-medium text-slate-800 hover:underline">{b.title}</button><p className="font-mono text-[11px] text-slate-400">{b.sku}</p></td>
+                          <td className="border-b border-slate-200 px-3 py-2 text-xs">{getClientName(b.clientId)}</td>
+                          <td className={`border-b border-slate-200 px-3 py-2 text-xs ${waiting !== null && waiting > 3 ? "font-semibold text-rose-600" : "text-slate-600"}`}>{!t ? <span className="text-slate-400">sem ticket (nasce ao atribuir)</span> : waiting === null ? "aberto" : `esperando há ${waiting} dia${waiting === 1 ? "" : "s"}`}</td>
+                          <td className={`border-b border-slate-200 px-3 py-2 text-xs ${due && due < todayISO() ? "font-semibold text-rose-600" : "text-slate-600"}`}>{due ? fmtDate(due) : "—"}</td>
+                          <td className="border-b border-slate-200 px-3 py-2"><span className="flex gap-1">{(["skp", "rvt", "gsm"] as const).map((k) => <span key={k} className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${b.bim?.[k] ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-300"}`}>{k.toUpperCase()}</span>)}</span></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Card>
+      ) : (
+        <Card>
+          <DataTable data={current.data} onRowClick={(row) => { setSelectedBlock(row.id); setPage("block_detail"); }} columns={[
+            { label: "SKU", render: (r: SeedBlock) => <span className="font-mono text-xs">{r.sku}</span> },
+            { label: "Título", render: (r: SeedBlock) => <p className="text-sm font-medium text-slate-800">{r.title}</p> },
+            { label: "Cliente", render: (r: SeedBlock) => <span className="text-xs">{getClientCode(r.clientId)}</span> },
+            { label: "Status", render: (r: SeedBlock) => <StatusBadge status={r.status} /> },
+            { label: "Com quem", render: (r: SeedBlock) => {
+              // Mostra quando bloco e ticket discordam sobre quem é o responsável.
+              const ts = openTicketsOf(r.id);
+              const tk = ts.find((t) => t.assignedTo === who) ?? ts[0];
+              const ownerName = r.owner ? getUserName(r.owner).split(" ")[0] : "ninguém";
+              if (!tk) return <span className="text-[11px] text-amber-700" title="O bloco tem responsável mas nenhum ticket aberto — não entra nos KPIs de etapa">bloco: {ownerName} · sem ticket</span>;
+              const tkName = tk.assignedTo ? getUserName(tk.assignedTo).split(" ")[0] : "sem responsável";
+              const same = (tk.assignedTo ?? "") === (r.owner ?? "");
+              return <span className={`text-[11px] ${same ? "text-slate-500" : "font-semibold text-rose-600"}`} title={same ? "Bloco e ticket com a mesma pessoa" : "Bloco e ticket estão com pessoas diferentes — alinhe o responsável"}>{same ? tkName : `bloco: ${ownerName} · ticket: ${tkName}`}</span>;
+            } },
+            { label: "Prazo da etapa", render: (r: SeedBlock) => { const tk = openTicketsOf(r.id).sort((a, b) => (a.stageDue || "9999").localeCompare(b.stageDue || "9999"))[0]; if (!tk) return <span className="text-xs text-slate-300">—</span>; if (!tk.stageDue) return <span className="text-[11px] text-amber-700">sem data</span>; return <span className={`text-xs whitespace-nowrap ${stageLate(tk) ? "font-semibold text-rose-600" : "text-slate-600"}`}>{fmtDate(tk.stageDue)}</span>; } },
+            { label: "Prioridade", render: (r: SeedBlock) => <PriorityDot priority={r.pri} /> },
+            { label: "Entrega", render: (r: SeedBlock) => { if (!r.dueDate) return <span className="text-xs text-slate-300">—</span>; const late = r.dueDate < todayISO(); return <span className={`text-xs whitespace-nowrap ${late ? "font-semibold text-rose-600" : "text-slate-500"}`}>{fmtDate(r.dueDate)}</span>; } },
+          ]} />
+        </Card>
+      )}
     </div>
   );
 }
@@ -4808,7 +4936,7 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
       updated = syncTicketsWithBlock(updated, nb);
       const phase = PRODUCTION_PHASE_LABELS[nextStatus];
       if (phase && !updated.some((t) => t.blockId === nb.id && isOpenTicket(t))) {
-        updated = [...updated, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: nb.owner, status: "new", createdAt: new Date().toISOString() }];
+        updated = [...updated, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: nextStatus === "bim_conversion" ? undefined : nb.owner, status: "new", createdAt: new Date().toISOString() }];
       }
       setAutoMsg(`Bloco "${nb.title}" avançou para ${STATUS_LABELS[nextStatus]}${phase ? ` · ticket de ${phase} criado` : ""}.`);
       setTimeout(() => setAutoMsg(""), 7000);
@@ -4968,7 +5096,12 @@ function ProductionTicketsPage({ user }: { user: SeedUser }) {
                 <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
                   {!isClient && (
                     <>
-                      <select value={ticket.assignedTo || ""} onChange={(e) => assignTicket(ticket.id, e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
+                      {isBimTicket(ticket, blocks) ? (
+                        <span className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800" title="BIM é feito por terceirizado; a coordenação atribui em Fila de Trabalho → Pendências de BIM">
+                          {isFreelancerId(ticket.assignedTo) ? `BIM com ${getUserName(ticket.assignedTo!)}` : "BIM · aguardando atribuição (Fila → Pendências de BIM)"}
+                        </span>
+                      ) : null}
+                      <select hidden={isBimTicket(ticket, blocks)} value={ticket.assignedTo || ""} onChange={(e) => assignTicket(ticket.id, e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
                         <option value="">Sem responsável</option>
                         {internalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                       </select>
@@ -5306,7 +5439,7 @@ function BimDemandFormModal({ initial, onClose, onSave, freelancers, clients, bl
 
 /** Tela da equipe interna: todas as demandas, filtros, criação/edição, aprovação. */
 function BimPage({ user }: { user: SeedUser }) {
-  const { bimDemands, setBimDemands, users, clients, blocks } = useContext(AppContext);
+  const { bimDemands, setBimDemands, users, clients, blocks, setBlocks, setTickets } = useContext(AppContext);
   const [filterFreelancer, setFilterFreelancer] = useState("");
   const [filterClient, setFilterClient] = useState("");
   const [filterStatus, setFilterStatus] = useState<"open" | "all" | BimDemandStatus>("open");
@@ -5340,6 +5473,21 @@ function BimPage({ user }: { user: SeedUser }) {
       deliveredAt: status === "delivered" || status === "approved" ? (d.deliveredAt || today) : d.deliveredAt,
       approvedAt: status === "approved" ? (d.approvedAt || today) : undefined,
       updatedAt: new Date().toISOString() });
+    // Entrega BIM aprovada fecha o ciclo no pipeline: marca os arquivos no bloco, entrega o
+    // ticket de BIM do terceirizado e o bloco sai de Conversão BIM para Publicado.
+    if (status === "approved" && d.status !== "approved") {
+      const byBlock = new Map(d.items.filter((it) => it.blockId).map((it) => [it.blockId!, it]));
+      if (!byBlock.size) return;
+      const moved: SeedBlock[] = [];
+      setBlocks((prev) => prev.map((b) => {
+        const it = byBlock.get(b.id); if (!it) return b;
+        const bim = { skp: !!b.bim?.skp || it.done.includes("sketchup"), rvt: !!b.bim?.rvt || it.done.includes("revit"), gsm: !!b.bim?.gsm || it.done.includes("archicad") };
+        const nb = b.status === "bim_conversion" ? withStatus({ ...b, bim }, "published") : { ...b, bim };
+        if (nb.status !== b.status) moved.push(nb);
+        return nb;
+      }));
+      setTickets((prev) => prev.map((t) => (byBlock.has(t.blockId) && isOpenTicket(t) && t.assignedTo === d.freelancerId ? { ...t, status: "delivered" as TicketStatus } : t)));
+    }
   };
   const toggle = (d: BimDemand, itemId: string, fmt: BimFormat) => {
     upsert({ ...d, items: d.items.map((i) => (i.id === itemId ? { ...i, done: i.done.includes(fmt) ? i.done.filter((f) => f !== fmt) : [...i.done, fmt] } : i)), updatedAt: new Date().toISOString() });
@@ -5756,7 +5904,11 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
       const beyond = tickets.filter((t) => isOpenTicket(t) && t.stageDue && t.stageDue > t.slaDate);
       if (beyond.length) items.push({ key: `stage-beyond:${beyond.map((t) => `${t.id}${t.stageDue}`).join(",")}`, title: `${beyond.length} compromisso${beyond.length === 1 ? "" : "s"} passa${beyond.length === 1 ? "" : "m"} da entrega ao cliente`, desc: beyond.slice(0, 2).map((t) => t.title).join(" · "), tone: "warn", go: () => setPage("tickets") });
     }
-    const unassigned = tickets.filter((t) => isOpenTicket(t) && !t.assignedTo);
+    if (isCoordinator(currentUser)) {
+      const bimWait = bimPendingBlocks(blocks, tickets, bimDemands);
+      if (bimWait.length) items.push({ key: `bim-pending:${bimWait.length}`, title: `${bimWait.length} bloco${bimWait.length === 1 ? "" : "s"} em BIM aguardando você atribuir`, desc: "Fila de Trabalho → Pendências de BIM: escolha Danilo ou Raquel", tone: "warn", go: () => setPage("queue") });
+    }
+    const unassigned = tickets.filter((t) => isOpenTicket(t) && !t.assignedTo && !isBimTicket(t, blocks));
     if (unassigned.length) items.push({ key: `unassigned:${unassigned.length}`, title: `${unassigned.length} ticket${unassigned.length === 1 ? "" : "s"} sem responsável`, tone: "warn", go: () => setPage("tickets") });
     const delivered = bimDemands.filter((d) => d.status === "delivered");
     if (delivered.length) items.push({ key: `bim-deliv:${delivered.map((d) => d.id).join(",")}`, title: `${delivered.length} entrega${delivered.length === 1 ? "" : "s"} BIM aguardando aprovação`, desc: delivered.slice(0, 2).map((d) => d.title).join(" · "), tone: "ok", go: () => setPage("bim") });
@@ -7294,6 +7446,13 @@ function PortalHeaderActions({
  * otimista e tenta de novo em 5s. `pending[key]` guarda um envio imediato com
  * keepalive para o `pagehide` (fechar a aba não perde a gravação).
  */
+/** JSON com chaves ordenadas em todos os níveis — o DynamoDB devolve os atributos em ordem arbitrária. */
+function stableJson(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stableJson).join(",")}]`;
+  if (v && typeof v === "object") return `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stableJson((v as Record<string, unknown>)[k])}`).join(",")}}`;
+  return JSON.stringify(v) ?? "null";
+}
+
 function useDeltaPersist<T extends { id: string }>(opts: {
   key: string; path: string; items: T[]; hydrated: boolean;
   snapshots: React.MutableRefObject<Record<string, Map<string, string>>>;
@@ -7363,6 +7522,30 @@ export default function Portal() {
   const [collapsed, setCollapsed] = useState(false);
   const [selectedBlock, setSelectedBlock] = useState("");
   const [selectedContract, setSelectedContract] = useState("");
+  // Botão Voltar do navegador (Matheus, 2026-10-06): o portal é uma página só, então
+  // "voltar" saía para a landing. Cada tela aberta vira uma entrada no histórico e o
+  // Voltar/Avançar passam a navegar entre as telas do portal.
+  const fromHistory = useRef(false);
+  const historyReady = useRef(false);
+  useEffect(() => {
+    if (!currentUser) return;
+    const entry = { att: true, page, selectedBlock, selectedContract };
+    if (fromHistory.current) { fromHistory.current = false; return; }
+    const cur = window.history.state as typeof entry | null;
+    if (cur?.att && cur.page === page && cur.selectedBlock === selectedBlock && cur.selectedContract === selectedContract) return;
+    if (!historyReady.current) { window.history.replaceState(entry, ""); historyReady.current = true; }
+    else window.history.pushState(entry, "");
+  }, [page, selectedBlock, selectedContract, currentUser]);
+  useEffect(() => {
+    const onPop = (e: PopStateEvent) => {
+      const st = e.state as { att?: boolean; page?: string; selectedBlock?: string; selectedContract?: string } | null;
+      if (!st?.att || !st.page) return; // entrada de fora do portal: deixa o navegador seguir
+      fromHistory.current = true;
+      setSelectedBlock(st.selectedBlock ?? ""); setSelectedContract(st.selectedContract ?? ""); setPage(st.page);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   // Filtro de status pré-aplicado ao abrir "Blocos" a partir de um card do dashboard.
   const [blocksPreset, setBlocksPreset] = useState<string>("all");
   const openBlocks = (status: BlockStatus | "all") => { setBlocksPreset(status); setPage("blocks"); };
@@ -7552,6 +7735,50 @@ export default function Portal() {
   useDeltaPersist({ ...persistOpts, key: "users", path: "/api/state/users", items: users });
   useDeltaPersist({ ...persistOpts, key: "assets", path: "/api/state/assets", items: assets });
   useDeltaPersist({ ...persistOpts, key: "profiles", path: "/api/state/profiles", items: profiles });
+  // Recarrega do banco quando a aba volta ao foco e a cada 60 s (2026-10-06).
+  // Sem isso, uma aba aberta há dias gravava por cima do que os outros fizeram:
+  // foi assim que tickets de BIM criados por um ficaram com responsável diferente
+  // do bloco, e um ticket já entregue foi reaberto. Só troca a tabela que NÃO tem
+  // alteração local pendente (estado == retrato); a que tem espera a próxima rodada.
+  const live = useRef<Record<string, { id: string }[]>>({});
+  live.current = { blocks, tickets, clients, contracts, publications, bimDemands, finishes, users };
+  const hydratedRef = useRef(false); hydratedRef.current = hydrated;
+  const refreshing = useRef(false);
+  const refreshState = useCallback(async () => {
+    if (!hydratedRef.current || refreshing.current || document.visibilityState !== "visible") return;
+    refreshing.current = true;
+    const apply: Record<string, (items: any[]) => void> = { // eslint-disable-line @typescript-eslint/no-explicit-any
+      blocks: setBlocks, tickets: setTickets, clients: setClients, contracts: setContracts,
+      publications: setPublications, bimDemands: setBimDemands, finishes: setFinishes, users: setUsers,
+    };
+    const paths: Record<string, string> = { blocks: "blocks", tickets: "tickets", clients: "clients", contracts: "contracts", publications: "publications", bimDemands: "bim-demands", finishes: "finishes", users: "users" };
+    const clean = (key: string) => { const snap = persisted.current[key]; const local = live.current[key]; return !!snap && local.length === snap.size && local.every((it) => snap.get(it.id) === JSON.stringify(it)); };
+    try {
+      await Promise.all(Object.keys(paths).map(async (key) => {
+        if (!clean(key)) return;
+        const before = live.current[key];
+        const r = await fetch(`/api/state/${paths[key]}`);
+        if (!r.ok) return;
+        const j = await r.json().catch(() => null);
+        if (!j || !Array.isArray(j.items) || !j.items.length) return; // lista vazia/erro: nunca apaga a tela
+        if (live.current[key] !== before || !clean(key)) return;       // alguém editou enquanto buscava
+        const server = j.items as { id: string }[];
+        const snap = persisted.current[key];
+        const sameAsLocal = server.length === snap.size && server.every((it) => { const cur = snap.get(it.id); return cur !== undefined && stableJson(JSON.parse(cur)) === stableJson(it); });
+        if (sameAsLocal) return;
+        persisted.current[key] = new Map(server.map((i) => [i.id, JSON.stringify(i)]));
+        apply[key](server);
+      }));
+    } catch (e) { console.error("Falha ao atualizar o estado:", e); } finally { refreshing.current = false; }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const onFocus = () => { void refreshState(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+    const timer = setInterval(onFocus, 60000);
+    return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); clearInterval(timer); };
+  }, [refreshState]);
+
   // Fechou a aba dentro dos 800ms? Manda o que estiver pendente com keepalive.
   useEffect(() => {
     const flush = () => Object.values(pendingFlush.current).forEach((fn) => fn?.());

@@ -18,7 +18,7 @@ import { ActivityRecord, BLOCK_STATUS_LABELS, isNavigation } from "@/lib/activit
 
 interface PUser { id: string; name: string; role: string; active?: boolean }
 interface PBlock { id: string; clientId: string; title: string; status: string; owner?: string; materialsAt?: string; published?: string; dueDate?: string }
-interface PTicket { id: string; blockId: string; clientId: string; status: string; slaDate: string; assignedTo?: string; archivedAt?: string; stageDue?: string; stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }> }
+interface PTicket { id: string; title?: string; blockId: string; clientId: string; status: string; slaDate: string; assignedTo?: string; archivedAt?: string; stageDue?: string; stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }> }
 interface PClient { id: string; name: string }
 
 interface Props { users: PUser[]; blocks: PBlock[]; tickets: PTicket[]; clients: PClient[] }
@@ -79,8 +79,11 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
     const userByName = new Map(users.map((u) => [u.name.toLowerCase(), u.id]));
     const byTicket = new Map<string, ActivityRecord[]>();
     items.forEach((a) => { if (a.entity === "tickets" && a.entityId) { const l = byTicket.get(a.entityId) ?? []; l.push(a); byTicket.set(a.entityId, l); } });
-    const blockMoves = new Map<string, string[]>(); // blockId → datas de status_changed
-    items.forEach((a) => { if (a.type === "status_changed" && a.blockId) { const l = blockMoves.get(a.blockId) ?? []; l.push(a.at); blockMoves.set(a.blockId, l); } });
+    // blockId → mudanças de etapa (quando e POR QUEM). O ciclo só fecha quando a
+    // própria pessoa manda adiante — a coordenação mexendo no status no mesmo minuto
+    // da atribuição fechava o ciclo em 0 dia e distorcia média e mediana.
+    const blockMoves = new Map<string, Array<{ at: string; by: string }>>();
+    items.forEach((a) => { if (a.type === "status_changed" && a.blockId) { const l = blockMoves.get(a.blockId) ?? []; l.push({ at: a.at, by: a.userId }); blockMoves.set(a.blockId, l); } });
     const out: Cycle[] = [];
     const now = new Date().toISOString();
     tickets.forEach((t) => {
@@ -96,15 +99,25 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
       if (t.assignedTo && !assigns.some((x) => x.at >= startIso) && (t.status !== "delivered" || ev.some((a) => a.type === "ticket_status" && / → Entregue$/.test(a.desc) && a.at >= startIso))) {
         assigns.unshift({ at: startIso, userId: t.assignedTo, note: "já estava com a pessoa no início do mapeamento" });
       }
-      const label = ev[0]?.entityLabel ?? t.id;
+      const label = t.title || ev[ev.length - 1]?.entityLabel || t.id;
+      // Uma etapa pode emendar na outra com a mesma pessoa (o ticket acompanha o bloco):
+      // quando ela manda adiante e o ticket continua com ela, começa um ciclo novo ali.
+      const starts: Array<{ at: string; userId: string; note?: string; until: string | null }> = [];
       assigns.forEach((as, i) => {
         if (as.at < startIso) return;
         const nextAssign = assigns[i + 1]?.at ?? null;
+        starts.push({ ...as, until: nextAssign });
+        (blockMoves.get(t.blockId) ?? []).filter((m) => m.by === as.userId && m.at > as.at && (!nextAssign || m.at <= nextAssign)).sort((a, b) => a.at.localeCompare(b.at))
+          .forEach((m) => starts.push({ at: m.at, userId: as.userId, until: nextAssign }));
+      });
+      starts.forEach((as) => {
+        const nextAssign = as.until;
         const delivered = ev.find((a) => a.type === "ticket_status" && / → Entregue$/.test(a.desc) && a.at > as.at && (!nextAssign || a.at <= nextAssign))?.at ?? null;
-        const moved = (blockMoves.get(t.blockId) ?? []).filter((d) => d > as.at && (!nextAssign || d <= nextAssign)).sort()[0] ?? null;
-        const end = [delivered, moved, nextAssign].filter(Boolean).sort()[0] ?? null;
-        const endedByReassign = end !== null && end === nextAssign && end !== delivered && end !== moved;
-        if (endedByReassign) return; // passou para outra pessoa sem concluir: não é ciclo dela
+        const moved = (blockMoves.get(t.blockId) ?? []).filter((m) => m.by === as.userId && m.at > as.at && (!nextAssign || m.at <= nextAssign)).map((m) => m.at).sort()[0] ?? null;
+        const end = [delivered, moved].filter(Boolean).sort()[0] ?? null;
+        if (!end && nextAssign) return; // passou para outra pessoa sem concluir: não é ciclo dela
+        // Ticket já fechado (entregue/arquivado por outra pessoa) sem ela ter mandado adiante: também não conta.
+        if (!end && (t.status === "delivered" || t.archivedAt || t.assignedTo !== as.userId)) return;
         const finish = end ?? now;
         const daysN = Math.max(0, (new Date(finish).getTime() - new Date(as.at).getTime()) / 86400000);
         // Compromisso da etapa: só o que ESSA pessoa assumiu (histórico do ticket feito por ela).
@@ -120,7 +133,8 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
           commitLateDays: lateDays != null && lateDays > 0 ? lateDays : lateDays != null ? 0 : null });
       });
     });
-    return out;
+    // Emendas instantâneas (mandou adiante e a etapa seguinte nasceu no mesmo instante) não são ciclo.
+    return out.filter((c) => !(c.end && c.days === 0 && new Date(c.end).getTime() - new Date(c.start).getTime() < 60000));
   }, [items, tickets, users]);
 
   // ---- por pessoa
@@ -180,19 +194,22 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
 
   // ---- equipe
   const totals = useMemo(() => {
-    const delivered = rows.reduce((n, r) => n + r.delivered, 0);
-    const onTime = rows.reduce((n, r) => n + r.onTime, 0);
-    const published = rows.reduce((n, r) => n + r.published, 0);
-    const moves = rows.reduce((n, r) => n + r.moves, 0);
-    const openLoad = tickets.filter((t) => t.status !== "delivered" && !t.archivedAt).length;
-    const late = tickets.filter((t) => t.status !== "delivered" && !t.archivedAt && t.slaDate < today).length;
-    const unassigned = tickets.filter((t) => t.status !== "delivered" && !t.archivedAt && !t.assignedTo).length;
+    // Com uma pessoa selecionada, TODOS os cartões passam a ser dela (antes só as tabelas filtravam).
+    const scope = person === "all" ? rows : rows.filter((r) => r.id === person);
+    const mineT = (t: PTicket) => person === "all" || t.assignedTo === person;
+    const delivered = scope.reduce((n, r) => n + r.delivered, 0);
+    const onTime = scope.reduce((n, r) => n + r.onTime, 0);
+    const published = scope.reduce((n, r) => n + r.published, 0);
+    const moves = scope.reduce((n, r) => n + r.moves, 0);
+    const openLoad = tickets.filter((t) => t.status !== "delivered" && !t.archivedAt && mineT(t)).length;
+    const late = tickets.filter((t) => t.status !== "delivered" && !t.archivedAt && t.slaDate < today && mineT(t)).length;
+    const unassigned = person === "all" ? tickets.filter((t) => t.status !== "delivered" && !t.archivedAt && !t.assignedTo).length : 0;
     const weeks = Math.max(1, (Date.now() - new Date(since).getTime()) / (7 * 86400000));
     // Lead time materiais → publicado, nos blocos publicados no período
     const lt = blocks.filter((b) => b.materialsAt && b.published && b.published >= since.slice(0, 10)).map((b) => (new Date(`${b.published}T12:00:00`).getTime() - new Date(`${b.materialsAt}T12:00:00`).getTime()) / 86400000).filter((d) => d >= 0);
     const leadTime = lt.length ? lt.reduce((a, b) => a + b, 0) / lt.length : NaN;
     return { delivered, onTime, published, moves, openLoad, late, unassigned, perWeek: delivered / weeks, publishedPerWeek: published / weeks, leadTime, leadN: lt.length, active: rows.filter((r) => r.actions > 0).length };
-  }, [rows, tickets, blocks, days, since, today]);
+  }, [rows, tickets, blocks, days, since, today, person]);
 
   // ---- semanas: entregas por pessoa
   const weekly = useMemo(() => {
@@ -273,7 +290,7 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
       {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">Não foi possível ler o log de atividades: {error}</div>}
       <p className="text-xs text-amber-700">Mapeamento a partir de <b>segunda, 21/09/2026</b>. Nada anterior entra nas contas.</p>
 
-      {(() => { const closed = cycles.filter((c) => c.end && c.end >= since); const avg = closed.length ? closed.reduce((a, c) => a + c.days, 0) / closed.length : NaN; const onTime = closed.filter((c) => c.onTime).length; const open = cycles.filter((c) => !c.end); return (
+      {(() => { const mineC = cycles.filter((c) => person === "all" || c.userId === person); const closed = mineC.filter((c) => c.end && c.end >= since); const avg = closed.length ? closed.reduce((a, c) => a + c.days, 0) / closed.length : NaN; const onTime = closed.filter((c) => c.onTime).length; const open = mineC.filter((c) => !c.end); return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <Kpi icon={Clock} label="Ciclo médio por etapa" value={Number.isFinite(avg) ? `${fmt1(avg)} d` : "—"} hint={`do dia em que o ticket caiu para a pessoa até ela mandar adiante · ${closed.length} etapa(s) concluída(s)`} />
         <Kpi icon={CheckCircle} label="Etapas concluídas no prazo" value={pct(onTime, closed.length)} hint={`${onTime} de ${closed.length} concluídas até o prazo do ticket`} />
@@ -284,13 +301,13 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
         <Kpi icon={CheckCircle} label="Tickets entregues" value={totals.delivered} hint={`${fmt1(totals.perWeek)} por semana · ${pct(totals.onTime, totals.delivered)} no prazo`} />
         <Kpi icon={Package} label="Blocos publicados" value={totals.published} hint={`${fmt1(totals.publishedPerWeek)} por semana`} />
         <Kpi icon={Clock} label="Materiais → publicado" value={Number.isFinite(totals.leadTime) ? `${fmt1(totals.leadTime)} d` : "—"} hint={totals.leadN ? `média em ${totals.leadN} bloco(s) publicado(s) no período` : "sem bloco com data de materiais publicado no período"} />
-        <Kpi icon={AlertTriangle} label="Atrasados agora" value={totals.late} tone={totals.late ? "text-rose-600" : "text-slate-900"} hint={`${totals.openLoad} tickets em aberto · ${totals.unassigned} sem responsável`} />
+        <Kpi icon={AlertTriangle} label="Atrasados agora" value={totals.late} tone={totals.late ? "text-rose-600" : "text-slate-900"} hint={person === "all" ? `${totals.openLoad} tickets em aberto · ${totals.unassigned} sem responsável` : `${totals.openLoad} tickets em aberto com ${nameOf(person).split(" ")[0]}`} />
       </div>
 
       <div className={card}>
         <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">Capacidade</p><Gauge className="h-4 w-4 text-slate-400" /></div>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          No ritmo dos últimos {days} dias a equipe entrega <b>{fmt1(totals.perWeek)} tickets por semana</b> e publica <b>{fmt1(totals.publishedPerWeek)} blocos por semana</b> — cerca de <b>{Math.round(totals.publishedPerWeek * 4.3)} blocos por mês</b>.
+          No ritmo do período {person === "all" ? "a equipe" : nameOf(person).split(" ")[0]} entrega <b>{fmt1(totals.perWeek)} tickets por semana</b> e publica <b>{fmt1(totals.publishedPerWeek)} blocos por semana</b> — cerca de <b>{Math.round(totals.publishedPerWeek * 4.3)} blocos por mês</b>.
           {totals.openLoad > 0 && totals.perWeek > 0 && <> Com {totals.openLoad} tickets em aberto, a fila atual leva <b>{fmt1(totals.openLoad / totals.perWeek)} semanas</b> para esvaziar sem entrada nova.</>}
           {Number.isFinite(totals.leadTime) && <> Um bloco novo, com materiais completos, tem levado <b>{fmt1(totals.leadTime)} dias</b> até publicar.</>}
         </p>

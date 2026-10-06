@@ -317,6 +317,31 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### BIM pelos terceirizados, fila alinhada, refresh e Voltar do navegador (desde 2026-10-06)
+
+- **Ticket de BIM nasce sem responsável.** Quando o bloco entra em *Conversão BIM*, o ticket da
+  pessoa da equipe é dado como entregue (`syncTicketsWithBlock`) e nasce um ticket "– Conversão BIM"
+  sem dono. `bimPendingBlocks()` = blocos em BIM que não estão em demanda BIM aberta nem têm ticket
+  com terceirizado (por bloco, porque há dezenas de blocos antigos em BIM sem ticket nenhum).
+- **Pendências de BIM** (aba na Fila de Trabalho, só coordenação — `isCoordinator`): marca os
+  produtos, escolhe Danilo/Raquel e atribui. O ticket passa para o terceirizado e o produto entra
+  numa **demanda BIM** dele da mesma marca (aberta, ou uma nova) — é isso que ele vê em "Minhas
+  demandas"; antes da atribuição ele não vê nada. Sino avisa a coordenação. Na tela Tickets o ticket
+  de BIM mostra "aguardando atribuição" / "BIM com Fulano" no lugar do seletor de responsável.
+- **Aprovar a entrega BIM** (BIM · Terceirizados) marca SKP/RVT/GSM no bloco conforme os formatos
+  entregues, entrega o ticket de BIM e move o bloco para Publicado.
+- **Fila de Trabalho** = blocos em que a pessoa é responsável **ou** tem ticket aberto; coluna
+  "Com quem" acusa em vermelho quando bloco e ticket discordam, e "sem ticket" quando o bloco tem
+  dono mas nenhum ticket aberto. Coluna "Prazo da etapa".
+- **Refresh do estado**: ao voltar o foco para a aba e a cada 60 s o portal relê as tabelas e troca
+  as que não têm alteração local pendente (`refreshState`). Causa raiz do desalinhamento visto em
+  06/10: aba aberta há dias gravava por cima (bloco com um responsável, ticket com outro; ticket já
+  entregue reaberto).
+- **Voltar/Avançar do navegador** navegam entre as telas do portal (`history.pushState` por tela).
+- **Desempenho**: os cartões do topo seguem a pessoa selecionada; o ciclo só fecha quando a própria
+  pessoa manda adiante ou entrega (antes qualquer mudança de status fechava — média/mediana de 0 d),
+  etapas emendadas com a mesma pessoa viram ciclos seguidos; a tabela mostra o nome do ticket.
+
 ### Conferências da entrega e cliente sem marca (desde 2026-10-01)
 
 - **`checks` no bloco** (Jéssica): três selos como os de BIM — **Embed** (embed no site do cliente),
