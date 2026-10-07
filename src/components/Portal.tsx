@@ -8115,6 +8115,18 @@ export default function Portal() {
   live.current = { blocks, tickets, clients, contracts, publications, bimDemands, finishes, users };
   const hydratedRef = useRef(false); hydratedRef.current = hydrated;
   const refreshing = useRef(false);
+  // Deploy novo enquanto a aba está aberta: a aba continua com o código antigo (foi
+  // assim que o teste do retorno de etapa "passou direto" em 07/10). Compara a versão
+  // embutida no bundle com a do servidor e pede para recarregar.
+  const [newVersion, setNewVersion] = useState(false);
+  const checkVersion = useCallback(async () => {
+    try {
+      const r = await fetch(`/api/version?t=${Date.now()}`, { cache: "no-store" });
+      const j = await r.json().catch(() => null);
+      const mine = process.env.APP_VERSION || "";
+      if (j?.version && mine && j.version !== "unknown" && j.version !== mine) setNewVersion(true);
+    } catch { /* offline: tenta na próxima */ }
+  }, []);
   const refreshState = useCallback(async () => {
     if (!hydratedRef.current || refreshing.current || document.visibilityState !== "visible") return;
     refreshing.current = true;
@@ -8149,12 +8161,12 @@ export default function Portal() {
     } catch (e) { console.error("Falha ao atualizar o estado:", e); } finally { refreshing.current = false; }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    const onFocus = () => { void refreshState(); };
+    const onFocus = () => { void refreshState(); void checkVersion(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     const timer = setInterval(onFocus, 60000);
     return () => { window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onFocus); clearInterval(timer); };
-  }, [refreshState]);
+  }, [refreshState, checkVersion]);
 
   // Fechou a aba dentro dos 800ms? Manda o que estiver pendente com keepalive.
   useEffect(() => {
@@ -8259,6 +8271,15 @@ export default function Portal() {
               <PortalHeaderActions currentUser={currentUser} setCurrentUser={setCurrentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />
             </div>
           </header>
+          {newVersion && (
+            <div className="mx-auto w-full max-w-[1400px] px-6 pt-4 lg:px-8">
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                <RefreshCw className="h-4 w-4 flex-shrink-0" />
+                <span className="flex-1"><b>Saiu uma versão nova do portal.</b> Esta aba ainda está com a versão antiga — recarregue para pegar as novidades e evitar gravar por cima do que mudou.</span>
+                <button onClick={() => window.location.reload()} className="rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">Recarregar agora</button>
+              </div>
+            </div>
+          )}
           {loadError && (
             <div className="mx-auto w-full max-w-[1400px] px-6 pt-4 lg:px-8">
               <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">

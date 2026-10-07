@@ -13,6 +13,9 @@ const nextConfig = {
     ATHENA_WORKGROUP: process.env.ATHENA_WORKGROUP,
     ATHENA_OUTPUT: process.env.ATHENA_OUTPUT,
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    // Versão do build (sha do commit no Amplify). O portal compara a sua com /api/version
+    // e pede para recarregar quando sai deploy — aba antiga rodava código velho por dias.
+    APP_VERSION: process.env.AWS_COMMIT_ID || process.env.APP_VERSION || `dev-${Date.now()}`,
   },
 };
 module.exports = nextConfig;
