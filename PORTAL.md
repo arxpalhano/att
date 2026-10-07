@@ -353,9 +353,11 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   customizador · vN" (publicação mais recente do bloco) — revisar sem passar por Blocos → Publicação.
   **Anexos** (`ticket.attachments`, mesmo tipo `KbAttachment`): arrastar imagens/arquivos para o
   cartão ou "Anexar imagem"; miniatura para imagem, ícone para o resto; seguem com o ticket quando ele
-  muda de pessoa. Ficam em `s3://archtechtour-assets/kb/tickets/<ticketId>/` pelas rotas
-  `/api/kb/upload` (baseId `tickets`) e `/api/kb/file` — sem infra nova. Remove quem enviou ou quem
-  edita tickets.
+  muda de pessoa. **O bloco é a raiz de tudo** (Matheus, 2026-10-07): o arquivo vai para a pasta
+  do bloco no S3 (`clientes/<cliente>/blocos/<bloco>/extra_reference/…`, via `/api/upload`) e entra
+  também na aba **Arquivos** do bloco como "Ref. Extra" com selo "do ticket" (`SeedAsset.fromTicket`).
+  Remover do ticket não apaga do bloco. Ticket sem bloco cai em `kb/tickets/<id>/` (`/api/kb/upload`).
+  Download pela rota do prefixo da chave (`/api/assets/file` ou `/api/kb/file`).
 - **Refresh do estado**: ao voltar o foco para a aba e a cada 60 s o portal relê as tabelas e troca
   as que não têm alteração local pendente (`refreshState`). Causa raiz do desalinhamento visto em
   06/10: aba aberta há dias gravava por cima (bloco com um responsável, ticket com outro; ticket já

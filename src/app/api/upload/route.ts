@@ -37,7 +37,8 @@ const ALLOWED_EXTENSIONS: Record<string, string[]> = {
   videos: [".mp4", ".mov", ".avi", ".mkv", ".webm"],
   technical_drawing: [".pdf", ".dwg", ".dxf", ".png", ".jpg", ".jpeg"],
   "3d_block": [".glb", ".gltf", ".obj", ".fbx", ".skp", ".stl", ".3ds"],
-  extra_reference: [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".zip", ".docx", ".xlsx"],
+  // Também recebe os anexos de ticket (referências do Victor/Liles): imagens, prints, docs, vídeos curtos.
+  extra_reference: [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".tiff", ".heic", ".zip", ".rar", ".7z", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".txt", ".md", ".mp4", ".mov", ".psd", ".ai"],
 };
 
 export async function POST(req: NextRequest) {

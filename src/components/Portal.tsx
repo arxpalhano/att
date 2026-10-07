@@ -150,6 +150,8 @@ interface SeedAsset {
   key?: string;
   analysis?: { score: number; approved: boolean; summary: string; issues: string[]; suggestions: string[]; notes?: string[]; };
   uploadedAt?: string;
+  /** Veio de um anexo de ticket (o bloco é a raiz de tudo: o arquivo fica aqui mesmo que o ticket suma). */
+  fromTicket?: string;
 }
 /** Registro do log de atividades — gravado pelo servidor (src/lib/activity.ts). */
 type SeedActivity = ActivityRecord;
@@ -2649,6 +2651,7 @@ function AssetRow({ asset }: { asset: SeedAsset }) {
           <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
           <span className="text-sm text-slate-700 truncate">{asset.name}</span>
           <Badge className="bg-slate-100 text-slate-500 border-slate-200 flex-shrink-0">v{asset.v}</Badge>
+          {asset.fromTicket && <span title="Anexado num ticket de produção"><Badge className="bg-sky-50 text-sky-700 border-sky-200 flex-shrink-0">do ticket</Badge></span>}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs text-slate-400">{fmtSize(asset.size)}</span>
@@ -4817,15 +4820,21 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
   );
 }
 
-const ticketFileUrl = (a: KbAttachment, inline = false) => `/api/kb/file?key=${encodeURIComponent(a.key)}&name=${encodeURIComponent(a.name)}${inline ? "&inline=1" : ""}`;
+const ticketFileUrl = (a: KbAttachment, inline = false) => `${a.key.startsWith("clientes/") ? "/api/assets/file" : "/api/kb/file"}?key=${encodeURIComponent(a.key)}&name=${encodeURIComponent(a.name)}${inline ? "&inline=1" : ""}`;
 const isImageName = (name: string) => [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"].includes(kbExt(name));
-/** Sobe um arquivo para kb/tickets/<ticketId>/ com URL pré-assinada (direto do browser para o S3). */
-async function uploadTicketFile(file: File, ticketId: string): Promise<string> {
-  const r = await fetch("/api/kb/upload", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fileName: file.name, fileType: file.type || "application/octet-stream", size: file.size, baseId: "tickets", articleId: ticketId }) });
+/**
+ * Sobe um anexo de ticket. O BLOCO é a raiz de tudo (Matheus, 2026-10-07): o arquivo vai
+ * para a pasta do bloco no S3 (clientes/<cliente>/blocos/<bloco>/extra_reference/…) e
+ * aparece também na aba Arquivos do bloco. Ticket sem bloco cai em kb/tickets/<id>/.
+ */
+async function uploadTicketFile(file: File, ticketId: string, block?: SeedBlock): Promise<string> {
+  const type = file.type || "application/octet-stream";
+  const r = block
+    ? await fetch("/api/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileType: type, category: "extra_reference", blockId: block.id, clientId: block.clientId }) })
+    : await fetch("/api/kb/upload", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ fileName: file.name, fileType: type, size: file.size, baseId: "tickets", articleId: ticketId }) });
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "Erro ao preparar o upload");
   const { uploadUrl, key, contentType } = await r.json();
-  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": contentType }, body: file });
+  const put = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": contentType || type }, body: file });
   if (!put.ok) throw new Error(`S3 respondeu ${put.status}`);
   return key as string;
 }
@@ -4835,10 +4844,11 @@ async function uploadTicketFile(file: File, ticketId: string): Promise<string> {
  * referência para o cartão e, quando o ticket passa para o Liles, ela já está lá.
  * `dropFiles` chega do cartão inteiro (arrastar em qualquer ponto dele).
  */
-function TicketAttachments({ ticket, user, canRemoveAll, onChange, dropFiles, onDropHandled }: {
-  ticket: ProductionTicket; user: SeedUser; canRemoveAll: boolean;
+function TicketAttachments({ ticket, block, user, canRemoveAll, onChange, dropFiles, onDropHandled }: {
+  ticket: ProductionTicket; block?: SeedBlock; user: SeedUser; canRemoveAll: boolean;
   onChange: (atts: KbAttachment[]) => void; dropFiles: File[] | null; onDropHandled: () => void;
 }) {
+  const { setAssets } = useContext(AppContext);
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState("");
   const [err, setErr] = useState("");
@@ -4851,18 +4861,21 @@ function TicketAttachments({ ticket, user, canRemoveAll, onChange, dropFiles, on
       if (f.size > KB_MAX_FILE_MB * 1024 * 1024) { setErr(`"${f.name}": acima de ${KB_MAX_FILE_MB} MB.`); continue; }
       try {
         setBusy(f.name);
-        const key = await uploadTicketFile(f, ticket.id);
-        cur = [...cur, { id: `tf_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, key, name: f.name, size: f.size, type: f.type || "application/octet-stream", uploadedAt: new Date().toISOString(), uploadedBy: user.name }];
+        const key = await uploadTicketFile(f, ticket.id, block);
+        const att: KbAttachment = { id: `tf_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, key, name: f.name, size: f.size, type: f.type || "application/octet-stream", uploadedAt: new Date().toISOString(), uploadedBy: user.name };
+        cur = [...cur, att];
         onChange(cur);
+        // Mesmo arquivo entra na aba Arquivos do bloco (categoria "Ref. Extra").
+        if (block) setAssets((prev) => [...prev, { id: `as_${att.id}`, blockId: block.id, cat: "extra_reference", name: f.name, size: f.size, v: 1, by: user.name, key, uploadedAt: att.uploadedAt, fromTicket: ticket.id }]);
       } catch (e) { setErr(`"${f.name}": ${(e as Error).message}`); }
     }
     setBusy("");
   };
   useEffect(() => { if (dropFiles && dropFiles.length) { void send(dropFiles); onDropHandled(); } }, [dropFiles]); // eslint-disable-line react-hooks/exhaustive-deps
   const remove = (a: KbAttachment) => {
-    if (!confirm(`Remover o anexo "${a.name}"?`)) return;
+    if (!confirm(`Remover o anexo "${a.name}" deste ticket?${block ? "\n\nO arquivo continua na aba Arquivos do bloco." : ""}`)) return;
     onChange(atts.filter((x) => x.id !== a.id));
-    fetch(`/api/kb/file?key=${encodeURIComponent(a.key)}`, { method: "DELETE" }).catch(() => {});
+    if (!block) fetch(`/api/kb/file?key=${encodeURIComponent(a.key)}`, { method: "DELETE" }).catch(() => {}); // sem bloco não há outra cópia
   };
   return (
     <div className="mt-3">
@@ -4882,7 +4895,7 @@ function TicketAttachments({ ticket, user, canRemoveAll, onChange, dropFiles, on
         </button>
         <input ref={inputRef} type="file" multiple className="hidden" onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; if (fs.length) void send(fs); }} />
       </div>
-      {!atts.length && !busy && <p className="mt-1 text-[11px] text-slate-400">Arraste imagens de referência para este cartão — elas seguem com o ticket para a próxima pessoa.</p>}
+      {!atts.length && !busy && <p className="mt-1 text-[11px] text-slate-400">Arraste imagens de referência para este cartão — elas seguem com o ticket para a próxima pessoa{block ? " e ficam também em Arquivos do bloco" : ""}.</p>}
       {busy && <p className="mt-1 text-[11px] text-sky-700">Enviando {busy}…</p>}
       {err && <p className="mt-1 text-[11px] font-semibold text-rose-600">{err}</p>}
     </div>
@@ -5250,7 +5263,7 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
                       );
                     })()}
                     {ticket.desc && <p className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{ticket.desc}</p>}
-                    {!isClient && <TicketAttachments ticket={ticket} user={user} canRemoveAll={canEdit}
+                    {!isClient && <TicketAttachments ticket={ticket} block={block} user={user} canRemoveAll={canEdit}
                       onChange={(atts) => setTickets((prev) => prev.map((x) => (x.id === ticket.id ? { ...x, attachments: atts.length ? atts : undefined } : x)))}
                       dropFiles={drop?.ticketId === ticket.id ? drop.files : null} onDropHandled={() => setDrop(null)} />}
                     {!isClient && <StageCommitment ticket={ticket} user={user} onSave={(t) => setTickets(tickets.map((x) => (x.id === t.id ? t : x)))} />}
