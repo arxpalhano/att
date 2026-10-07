@@ -18,7 +18,7 @@ import { ActivityRecord, BLOCK_STATUS_LABELS, isNavigation } from "@/lib/activit
 
 interface PUser { id: string; name: string; role: string; active?: boolean }
 interface PBlock { id: string; clientId: string; title: string; status: string; owner?: string; materialsAt?: string; published?: string; dueDate?: string }
-interface PTicket { id: string; title?: string; blockId: string; clientId: string; status: string; slaDate: string; assignedTo?: string; archivedAt?: string; stageDue?: string; stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }> }
+interface PTicket { id: string; title?: string; blockId: string; clientId: string; status: string; slaDate: string; assignedTo?: string; archivedAt?: string; stageDue?: string; stageDueHistory?: Array<{ from?: string; to: string; reason?: string; by: string; at: string }>; returns?: Array<{ id: string; at: string; byId: string; by: string; fromStatus: string; toStatus: string; kind: string; reason: string; fixerId?: string; returnedFromUser?: string; resolvedAt?: string }> }
 interface PClient { id: string; name: string }
 
 interface Props { users: PUser[]; blocks: PBlock[]; tickets: PTicket[]; clients: PClient[] }
@@ -192,6 +192,22 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
 
   const visibleRows = person === "all" ? rows : rows.filter((r) => r.id === person);
 
+  // ---- retornos de etapa (correções) no período
+  const KIND_PT: Record<string, string> = { cliente: "Cliente", modelagem: "Modelagem", texturizacao: "Texturização", programacao: "Programação", outro: "Outro" };
+  const returns = useMemo(() => tickets.flatMap((t) => (t.returns ?? []).map((r) => ({ ...r, ticket: t }))).filter((r) => r.at >= since), [tickets, since]);
+  const returnStats = useMemo(() => {
+    const byKind = new Map<string, number>(); returns.forEach((r) => byKind.set(r.kind, (byKind.get(r.kind) ?? 0) + 1));
+    const resolved = returns.filter((r) => r.resolvedAt);
+    const fixDays = resolved.map((r) => (new Date(r.resolvedAt!).getTime() - new Date(r.at).getTime()) / 86400000);
+    const perPerson = new Map<string, { fixes: number; caused: number; open: number }>();
+    returns.forEach((r) => {
+      if (r.fixerId) { const p = perPerson.get(r.fixerId) ?? { fixes: 0, caused: 0, open: 0 }; if (r.kind !== "cliente") p.fixes++; if (!r.resolvedAt) p.open++; perPerson.set(r.fixerId, p); }
+      // "causou" = pessoa que estava com a etapa que precisou voltar (quem corrige, quando não é o cliente)
+      if (r.kind !== "cliente" && r.fixerId) { const p = perPerson.get(r.fixerId)!; p.caused++; }
+    });
+    return { total: returns.length, byKind: Array.from(byKind.entries()).sort((a, b) => b[1] - a[1]), open: returns.filter((r) => !r.resolvedAt).length, avgFix: fixDays.length ? fixDays.reduce((a, b) => a + b, 0) / fixDays.length : NaN, perPerson };
+  }, [returns]);
+
   // ---- equipe
   const totals = useMemo(() => {
     // Com uma pessoa selecionada, TODOS os cartões passam a ser dela (antes só as tabelas filtravam).
@@ -314,12 +330,41 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
       </div>
 
       <div className={card}>
+        <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">Retornos de etapa (correções)</p><AlertTriangle className="h-4 w-4 text-slate-400" /></div>
+        <p className="mt-1 text-xs text-slate-500">Toda vez que um bloco volta uma etapa alguém registra o motivo. Retorno por <b>cliente</b> (material, informação, aprovação) não conta contra a equipe; os demais contam para quem corrige. Como ler no ciclo: o ticket passa para quem corrige (ciclo novo dele) e volta para quem estava quando a correção termina.</p>
+        <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+          <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Retornos</p><p className="text-xl font-semibold text-slate-900">{returnStats.total}</p></div>
+          <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Em correção agora</p><p className={`text-xl font-semibold ${returnStats.open ? "text-rose-600" : "text-slate-900"}`}>{returnStats.open}</p></div>
+          <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Dias para corrigir</p><p className="text-xl font-semibold text-slate-900">{Number.isFinite(returnStats.avgFix) ? `${fmt1(returnStats.avgFix)} d` : "—"}</p></div>
+          <div className="rounded-2xl bg-slate-50 p-3"><p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Por motivo</p><p className="text-xs leading-5 text-slate-700">{returnStats.byKind.length ? returnStats.byKind.map(([k, n]) => `${KIND_PT[k] ?? k}: ${n}`).join(" · ") : "nenhum no período"}</p></div>
+        </div>
+        {returns.length > 0 && (
+          <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200">
+            <table className="w-full border-collapse text-xs">
+              <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500"><tr>{["Quando", "Ticket", "De → para", "Motivo", "Quem corrige", "Pedido por", "Situação"].map((h) => <th key={h} className="border-b border-r border-slate-200 px-3 py-2 last:border-r-0 whitespace-nowrap">{h}</th>)}</tr></thead>
+              <tbody>{returns.filter((r) => person === "all" || r.fixerId === person || r.byId === person || r.returnedFromUser === person).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 100).map((r, i) => (
+                <tr key={r.id + r.ticket.id} className={i % 2 ? "bg-slate-50/70" : "bg-white"}>
+                  <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{new Date(r.at).toLocaleDateString("pt-BR")}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-1.5"><span className="block max-w-[300px] truncate" title={r.ticket.title}>{r.ticket.title}</span></td>
+                  <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{BLOCK_STATUS_LABELS[r.fromStatus] ?? r.fromStatus} → {BLOCK_STATUS_LABELS[r.toStatus] ?? r.toStatus}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-1.5"><b>{KIND_PT[r.kind] ?? r.kind}</b>: {r.reason}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.fixerId ? nameOf(r.fixerId) : "—"}</td>
+                  <td className="border-b border-r border-slate-200 px-3 py-1.5 whitespace-nowrap">{r.by}</td>
+                  <td className={`border-b border-slate-200 px-3 py-1.5 whitespace-nowrap ${r.resolvedAt ? "text-emerald-700" : "font-semibold text-rose-600"}`}>{r.resolvedAt ? `corrigido em ${new Date(r.resolvedAt).toLocaleDateString("pt-BR")}` : "em correção"}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className={card}>
         <div className="flex items-center justify-between"><p className="text-sm font-semibold text-slate-800">Por pessoa</p><Users className="h-4 w-4 text-slate-400" /></div>
         <p className="mt-1 text-xs text-slate-500">Concluídas = etapas que a pessoa recebeu (ticket caiu para ela) e mandou adiante. Ciclo = dias entre receber e mandar adiante. Em andamento = tickets que estão com ela agora e há quantos dias. Etapas = mudanças de status de bloco feitas por ela.</p>
         <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200">
           <table className="w-full border-collapse text-sm">
             <thead className="bg-slate-50 text-left text-[11px] uppercase tracking-[0.14em] text-slate-500">
-              <tr>{["Pessoa", "Concluídas", "Ciclo médio", "Mediana", "No prazo", "Em andamento", "Há (média)", "Publicou", "Etapas", "Ações", "Dias ativos", "Atrasados", "Última atividade"].map((h) => <th key={h} className="border-b border-r border-slate-200 px-3 py-2.5 last:border-r-0 whitespace-nowrap">{h}</th>)}</tr>
+              <tr>{["Pessoa", "Concluídas", "Ciclo médio", "Mediana", "No prazo", "Em andamento", "Há (média)", "Correções", "Publicou", "Etapas", "Ações", "Dias ativos", "Atrasados", "Última atividade"].map((h) => <th key={h} className="border-b border-r border-slate-200 px-3 py-2.5 last:border-r-0 whitespace-nowrap">{h}</th>)}</tr>
             </thead>
             <tbody>
               {visibleRows.map((r, i) => (
@@ -331,6 +376,7 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
                   <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{pct(r.doneOnTime, r.done)}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{r.openCycles}</td>
                   <td className={`border-b border-r border-slate-200 px-3 py-2 text-center ${r.openAvgAge > 14 ? "font-semibold text-rose-600" : ""}`}>{Number.isFinite(r.openAvgAge) ? `${fmt1(r.openAvgAge)} d` : "—"}</td>
+                  <td className={`border-b border-r border-slate-200 px-3 py-2 text-center ${(returnStats.perPerson.get(r.id)?.fixes ?? 0) > 0 ? "font-semibold text-amber-700" : ""}`} title="Retornos de etapa que caíram para esta pessoa corrigir (sem contar os causados pelo cliente)">{returnStats.perPerson.get(r.id)?.fixes ?? 0}{returnStats.perPerson.get(r.id)?.open ? <span className="text-[10px] text-rose-600"> ({returnStats.perPerson.get(r.id)!.open} aberta)</span> : null}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{r.published}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{r.moves}</td>
                   <td className="border-b border-r border-slate-200 px-3 py-2 text-center">{r.actions}</td>

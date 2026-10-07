@@ -193,6 +193,18 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
           ? `Compromisso da etapa replanejado: ${label} · ${before.stageDue} → ${after.stageDue ?? "(sem data)"}${reason ? ` · motivo: ${reason}` : ""}`
           : `Compromisso da etapa assumido: ${label} · entrega em ${after.stageDue}` }));
       }
+      // Retorno de etapa (correção) e sua conclusão — ficam no log do bloco com motivo, quem e quando.
+      const rb = (before.returns as Array<Record<string, string>> | undefined) ?? [];
+      const ra = (after.returns as Array<Record<string, string>> | undefined) ?? [];
+      if (ra.length > rb.length) {
+        const r = ra[ra.length - 1];
+        out.push(base({ ...ctx, type: "ticket_returned", desc: `Retornou de ${BLOCK_STATUS_LABELS[r.fromStatus] ?? r.fromStatus} para ${BLOCK_STATUS_LABELS[r.toStatus] ?? r.toStatus} · ${label} · motivo (${r.kind}): ${r.reason}${r.fixerId ? ` · corrige: ${names.user(r.fixerId)}` : ""}` }));
+      }
+      const resolvedNow = ra.filter((r) => r.resolvedAt).length - rb.filter((r) => r.resolvedAt).length;
+      if (resolvedNow > 0) {
+        const r = [...ra].reverse().find((x) => x.resolvedAt)!;
+        out.push(base({ ...ctx, type: "ticket_return_resolved", desc: `Correção concluída (${r.kind}): ${label} · devolvido para ${BLOCK_STATUS_LABELS[r.fromStatus] ?? r.fromStatus}${r.returnedFromUser ? ` com ${names.user(r.returnedFromUser)}` : ""}` }));
+      }
       if (!before.archivedAt && after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket arquivado: ${label}` }));
       if (before.archivedAt && !after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket desarquivado: ${label}` }));
       const fields = changedFields(before, after, { title: "título", desc: "descrição", attachments: "anexos", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente" });
@@ -317,6 +329,7 @@ export const TYPE_LABELS: Record<string, string> = {
   publication_created: "Publicação criada", publication_updated: "Publicação editada", publication_deleted: "Publicação removida",
   user_created: "Usuário criado", user_edited: "Usuário editado", user_deleted: "Usuário excluído",
   ticket_archived: "Ticket arquivado", ticket_commitment: "Compromisso da etapa",
+  ticket_returned: "Retorno de etapa", ticket_return_resolved: "Correção concluída",
   profile_created: "Perfil criado", profile_edited: "Perfil editado", profile_deleted: "Perfil excluído",
   bim_created: "BIM · demanda criada", bim_status: "BIM · status", bim_files: "BIM · arquivos", bim_edited: "BIM · editada", bim_deleted: "BIM · excluída",
   finishes_catalog_created: "Catálogo criado", finishes_catalog_updated: "Catálogo atualizado", finishes_block_created: "Acabamentos cadastrados", finishes_block_updated: "Acabamentos atualizados", finishes_deleted: "Acabamentos excluídos",

@@ -81,6 +81,23 @@ export interface ProductionTicket {
    * anexo da Base de Conhecimento (/api/kb/upload e /api/kb/file).
    */
   attachments?: KbAttachment[];
+  /**
+   * Retornos de etapa (Matheus, 2026-10-07): toda vez que o bloco volta uma etapa
+   * (ex.: Em Programação → Em Modelagem) alguém precisa dizer o motivo. O ticket
+   * vira urgente, vai para quem corrige e guarda de onde veio; "Correção concluída"
+   * devolve o bloco à etapa de origem e o ticket a quem estava com ele.
+   */
+  returns?: TicketReturn[];
+}
+type ReturnKind = "cliente" | "modelagem" | "texturizacao" | "programacao" | "outro";
+const RETURN_KIND_LABELS: Record<ReturnKind, string> = { cliente: "Cliente (material / informação / aprovação)", modelagem: "Modelagem", texturizacao: "Texturização / material", programacao: "Programação", outro: "Outro" };
+interface TicketReturn {
+  id: string; at: string; by: string; byId: string;
+  fromStatus: BlockStatus; toStatus: BlockStatus;
+  kind: ReturnKind; reason: string;
+  /** Quem corrige (ticket vai para ele) e quem estava com o ticket antes (volta para ele ao concluir). */
+  fixerId?: string; returnedFromUser?: string; priorityBefore?: Priority;
+  resolvedAt?: string; resolvedBy?: string;
 }
 
 interface SeedUser {
@@ -646,6 +663,63 @@ function blockStatusForTicket(ticketStatus: TicketStatus, b: SeedBlock): BlockSt
 /** Ordem do pipeline para a barra de progresso do produto (0 → 1). */
 const PIPELINE_ORDER: BlockStatus[] = ["draft", "awaiting_client_files", "client_files_under_review", "ready_to_start", "in_modeling", "in_texturing", "awaiting_client_material_validation", "approved_for_programming", "in_programming", "internal_review", "awaiting_client_final_validation", "approved", "sketchup_conversion", "bim_conversion", "published"];
 const blockProgress = (b: SeedBlock) => { const i = PIPELINE_ORDER.indexOf(b.status); return i < 0 ? 0 : i / (PIPELINE_ORDER.length - 1); };
+/** Mudança de etapa "para trás" no pipeline = retorno para correção (bloqueado/em espera/arquivado não contam). */
+const isBackwardMove = (from: BlockStatus, to: BlockStatus) => { const a = PIPELINE_ORDER.indexOf(from), b = PIPELINE_ORDER.indexOf(to); return a >= 0 && b >= 0 && b < a; };
+const openReturnOf = (t: ProductionTicket): TicketReturn | undefined => { const r = t.returns ?? []; const last = r[r.length - 1]; return last && !last.resolvedAt ? last : undefined; };
+interface ReturnInfo { kind: ReturnKind; reason: string; fixerId?: string }
+/**
+ * Aplica o retorno aos tickets do bloco: o ticket aberto grava o motivo, vira urgente e
+ * vai para quem corrige; guarda de onde veio para a devolução. Bloco sem ticket aberto
+ * ganha um ticket de correção.
+ */
+function returnTickets(tickets: ProductionTicket[], before: SeedBlock, after: SeedBlock, info: ReturnInfo, user: SeedUser): ProductionTicket[] {
+  const at = new Date().toISOString();
+  const mk = (t: ProductionTicket): TicketReturn => ({ id: `rt_${Date.now()}`, at, by: user.name, byId: user.id, fromStatus: before.status, toStatus: after.status, kind: info.kind, reason: info.reason, fixerId: info.fixerId, returnedFromUser: t.assignedTo, priorityBefore: t.priority });
+  const open = tickets.filter((t) => t.blockId === before.id && isOpenTicket(t));
+  if (!open.length) {
+    const t: ProductionTicket = { id: `tk_${Date.now()}`, clientId: after.clientId, blockId: after.id, title: `${after.title} – ${stageLabel(after.status)}`, plan: after.svc, slaDate: after.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: "urgent", assignedTo: info.fixerId, status: "in_production", createdAt: at };
+    return [...tickets, { ...t, returns: [mk({ ...t, assignedTo: undefined, priority: after.pri })] }];
+  }
+  return tickets.map((t) => (open.some((o) => o.id === t.id)
+    ? { ...t, title: retitle(t.title, after), returns: [...(t.returns ?? []), mk(t)], priority: "urgent" as Priority, assignedTo: info.fixerId ?? t.assignedTo, status: "in_production" as TicketStatus, slaDate: after.dueDate || t.slaDate }
+    : t));
+}
+/** "Correção concluída": ticket volta para quem estava com ele, prioridade de antes; o bloco volta à etapa de origem (feito pelo chamador). */
+function resolveReturn(t: ProductionTicket, user: SeedUser): ProductionTicket {
+  const r = openReturnOf(t); if (!r) return t;
+  const returns = (t.returns ?? []).map((x) => (x.id === r.id ? { ...x, resolvedAt: new Date().toISOString(), resolvedBy: user.name } : x));
+  return { ...t, returns, assignedTo: r.returnedFromUser ?? t.assignedTo, priority: r.priorityBefore ?? t.priority, status: "in_production" as TicketStatus };
+}
+
+/** Modal: por que o bloco está voltando de etapa, e quem corrige. */
+function ReturnReasonModal({ block, toStatus, users, defaultFixer, onClose, onConfirm }: { block: SeedBlock; toStatus: BlockStatus; users: SeedUser[]; defaultFixer?: string; onClose: () => void; onConfirm: (info: ReturnInfo) => void }) {
+  const [kind, setKind] = useState<ReturnKind>("modelagem");
+  const [reason, setReason] = useState("");
+  const [fixerId, setFixerId] = useState(defaultFixer ?? "");
+  const team = users.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
+  const ok = reason.trim().length >= 10;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <p className="text-lg font-semibold text-slate-900">Retorno de etapa</p>
+        <p className="mt-1 text-sm text-slate-500"><b>{block.title}</b> vai voltar de <b>{STATUS_LABELS[block.status]}</b> para <b>{STATUS_LABELS[toStatus]}</b>. Diga o motivo — fica no histórico do bloco e do ticket, e o ticket vira <b>urgente</b> para quem corrige.</p>
+        <div className="mt-4 space-y-3">
+          <div><label className="text-xs font-medium text-slate-500">O que faltou / de quem é a correção</label>
+            <select value={kind} onChange={(e) => setKind(e.target.value as ReturnKind)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">{(Object.keys(RETURN_KIND_LABELS) as ReturnKind[]).map((k) => <option key={k} value={k}>{RETURN_KIND_LABELS[k]}</option>)}</select></div>
+          <div><label className="text-xs font-medium text-slate-500">Motivo (obrigatório, mín. 10 caracteres)</label>
+            <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} autoFocus placeholder="Ex.: faltou a textura do tecido azul; cliente não enviou as medidas da base…" className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm" /></div>
+          <div><label className="text-xs font-medium text-slate-500">Quem corrige (o ticket vai para essa pessoa)</label>
+            <select value={fixerId} onChange={(e) => setFixerId(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"><option value="">Manter com quem está</option>{team.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={onClose} className="rounded-xl px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
+          <button onClick={() => ok && onConfirm({ kind, reason: reason.trim(), fixerId: fixerId || undefined })} disabled={!ok} className="rounded-xl bg-rose-600 px-5 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-30">Confirmar retorno</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /**
  * Timeline do produto (Matheus, 2026-09-29): a barra enche conforme a ETAPA avança
  * e muda de cor conforme o TEMPO se aproxima da entrega ao cliente — verde com
@@ -1850,9 +1924,12 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
   const [grid, setGrid] = useState(BLOCKS_LIST_MEMORY.grid);
   useEffect(() => { BLOCKS_LIST_MEMORY.grid = grid; }, [grid]);
   const patchBlock = (id: string, patch: Partial<SeedBlock>) => setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, ...patch } : b)));
-  const changeStatus = (b: SeedBlock, status: BlockStatus) => {
+  const [gridReturn, setGridReturn] = useState<{ block: SeedBlock; to: BlockStatus } | null>(null);
+  const changeStatus = (b: SeedBlock, status: BlockStatus, ret?: ReturnInfo) => {
+    if (!ret && isBackwardMove(b.status, status)) { setGridReturn({ block: b, to: status }); return; }
     const nb = withStatus(b, status);
     setBlocks((prev) => prev.map((x) => (x.id === nb.id ? nb : x)));
+    if (ret) { setTickets((prev) => returnTickets(prev, b, nb, ret, user)); setGridReturn(null); return; }
     setTickets((prev) => {
       const synced = syncTicketsWithBlock(prev, nb);
       const phase = PRODUCTION_PHASE_LABELS[status];
@@ -2088,6 +2165,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
         <p className="px-5 py-3 text-[11px] text-slate-400">{grid ? "Modo grade: etapa, responsável e entrega viram campos na linha; as mudanças gravam na hora e entram no log de atividades. Clique no nome do produto para abrir o bloco." : "SKP · RVT · GSM e Embed · Site ATT · Rastreabilidade: clique no selo para marcar. Para mudar etapa, responsável e entrega na própria lista, use \"Editar em grade\"."}</p>
       </Card>
 
+      {gridReturn && <ReturnReasonModal block={gridReturn.block} toStatus={gridReturn.to} users={users} defaultFixer={gridReturn.block.owner} onClose={() => setGridReturn(null)} onConfirm={(info) => changeStatus(gridReturn.block, gridReturn.to, info)} />}
       {/* Modal Criar Bloco */}
       {showCreateModal && <CreateBlockModal user={user} onClose={() => setShowCreateModal(false)} onCreate={handleCreateBlock} />}
     </div>
@@ -2859,22 +2937,30 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
       }];
     });
   };
-  const handleTransition = (newStatus: BlockStatus) => {
+  const [returnTo, setReturnTo] = useState<BlockStatus | null>(null);
+  const applyTransition = (newStatus: BlockStatus, ret?: ReturnInfo) => {
     const next = withStatus(block, newStatus);
     setBlocks(blocks.map((b) => (b.id === block.id ? next : b))); // o servidor descreve "Status: A → B" ao gravar
-    setTickets((prev) => syncTicketsWithBlock(prev, next)); // ticket aberto acompanha a etapa, a situação e o prazo
-    ensureTicket(newStatus, block.owner, next.dueDate);
-    setConfirmTransition(null);
+    setTickets((prev) => (ret ? returnTickets(prev, block, next, ret, user) : syncTicketsWithBlock(prev, next)));
+    if (!ret) ensureTicket(newStatus, block.owner, next.dueDate);
+    setConfirmTransition(null); setReturnTo(null);
+  };
+  // Voltar etapa exige motivo (Matheus, 2026-10-07): abre o modal em vez de mudar direto.
+  const handleTransition = (newStatus: BlockStatus) => {
+    if (isBackwardMove(block.status, newStatus)) { setReturnTo(newStatus); setConfirmTransition(null); return; }
+    applyTransition(newStatus);
   };
 
   // Rejeição do cliente = 1 revisão consumida
   const handleClientDecision = (action: "approve" | "reject") => {
     if (!approvalRule) return;
     if (action === "reject" && revisionLimitReached) return; // bloqueado — revisão paga
+    let reason = "";
+    if (action === "reject") { reason = (window.prompt("O que precisa ser revisado? (obrigatório — vai para a equipe junto com o pedido)") || "").trim(); if (reason.length < 5) return; }
     const next = action === "approve" ? approvalRule.approve : approvalRule.reject;
     const updated = withStatus(block, next, action === "reject" ? { clientRevisions: revisions + 1 } : {});
     setBlocks(blocks.map((b) => (b.id === block.id ? updated : b))); // o servidor registra aprovação/revisão do cliente ao gravar
-    setTickets((prev) => syncTicketsWithBlock(prev, updated));
+    setTickets((prev) => (action === "reject" ? returnTickets(prev, block, updated, { kind: "cliente", reason, fixerId: block.owner }, user) : syncTicketsWithBlock(prev, updated)));
   };
 
   const copyEmbed = () => {
@@ -3121,6 +3207,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
       )}
 
       {showEdit && <BlockEditModal initial={block} onClose={() => setShowEdit(false)} onSave={handleEditSave} />}
+      {returnTo && <ReturnReasonModal block={block} toStatus={returnTo} users={users} defaultFixer={block.owner} onClose={() => setReturnTo(null)} onConfirm={(info) => applyTransition(returnTo, info)} />}
       {showUpload && (
         <UploadModal
           blockId={block.id}
@@ -3477,10 +3564,12 @@ function ApprovalsPage({ user }: { user: SeedUser }) {
     if (!rule) return;
     const revisions = block.clientRevisions ?? 0;
     if (action === "reject" && revisions >= MAX_CLIENT_REVISIONS) return;
+    let reason = "";
+    if (action === "reject") { reason = (window.prompt("O que precisa ser revisado? (obrigatório — vai para a equipe junto com o pedido)") || "").trim(); if (reason.length < 5) return; }
     const next = action === "approve" ? rule.approve : rule.reject;
     const updated = withStatus(block, next, action === "reject" ? { clientRevisions: revisions + 1 } : {});
     setBlocks(blocks.map((b) => (b.id === block.id ? updated : b))); // o servidor registra aprovação/revisão do cliente ao gravar
-    setTickets((prev) => syncTicketsWithBlock(prev, updated));
+    setTickets((prev) => (action === "reject" ? returnTickets(prev, block, updated, { kind: "cliente", reason, fixerId: block.owner }, user) : syncTicketsWithBlock(prev, updated)));
   };
 
   return (
@@ -5081,9 +5170,34 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
   };
 
   const [autoMsg, setAutoMsg] = useState("");
+  const [ticketReturn, setTicketReturn] = useState<{ ticket: ProductionTicket; block: SeedBlock; to: BlockStatus } | null>(null);
+  const applyTicketReturn = (info: ReturnInfo) => {
+    if (!ticketReturn) return;
+    const { block, to } = ticketReturn;
+    const nb = withStatus(block, to);
+    setBlocks(blocks.map((b) => (b.id === nb.id ? nb : b)));
+    setTickets((prev) => returnTickets(prev, block, nb, info, user));
+    setTicketReturn(null);
+  };
+  /** "Correção concluída": bloco volta à etapa de origem e o ticket a quem estava com ele. */
+  const finishReturn = (t: ProductionTicket) => {
+    const r = openReturnOf(t); const block = blocks.find((b) => b.id === t.blockId);
+    if (!r) return;
+    if (!confirm(`Marcar a correção como concluída e devolver "${t.title}" para ${STATUS_LABELS[r.fromStatus]}${r.returnedFromUser ? ` com ${getUserName(r.returnedFromUser)}` : ""}?`)) return;
+    const resolved = resolveReturn(t, user);
+    if (block && block.status !== r.fromStatus) {
+      const nb = withStatus(block, r.fromStatus);
+      setBlocks(blocks.map((b) => (b.id === nb.id ? nb : b)));
+      setTickets((prev) => syncTicketsWithBlock(prev.map((x) => (x.id === t.id ? { ...resolved, title: retitle(resolved.title, nb) } : x)), nb));
+    } else setTickets((prev) => prev.map((x) => (x.id === t.id ? resolved : x)));
+    setAutoMsg(`Correção concluída: "${t.title}" voltou para ${STATUS_LABELS[r.fromStatus]}${r.returnedFromUser ? ` com ${getUserName(r.returnedFromUser)}` : ""}.`);
+    setTimeout(() => setAutoMsg(""), 7000);
+  };
   const updateStatus = (id: string, status: TicketStatus) => {
     const ticket = tickets.find((t) => t.id === id);
     const block = blocks.find((b) => b.id === ticket?.blockId);
+    // Ticket voltando a "Em Produção" a partir de uma etapa adiante do bloco = retorno: pede motivo.
+    if (ticket && block && status === "in_production") { const to = blockStatusForTicket(status, block); if (to && isBackwardMove(block.status, to)) { setTicketReturn({ ticket, block, to }); return; } }
     let updated = tickets.map((t) => (t.id === id ? { ...t, status } : t));
     // Situação do ticket move a etapa do bloco (blockStatusForTicket) — e o bloco
     // novo, por sua vez, ajusta título/prazo dos tickets abertos e abre o ticket da
@@ -5125,6 +5239,7 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
     <div className="space-y-6">
       {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onSave={createTicket} />}
       {editingTicket && <NewTicketModal initial={editingTicket} onClose={() => setEditingTicket(null)} onSave={saveTicket} />}
+      {ticketReturn && <ReturnReasonModal block={ticketReturn.block} toStatus={ticketReturn.to} users={users} defaultFixer={ticketReturn.block.owner} onClose={() => setTicketReturn(null)} onConfirm={applyTicketReturn} />}
       {autoMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{autoMsg}</div>}
       {focusId && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
@@ -5263,6 +5378,28 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
                       );
                     })()}
                     {ticket.desc && <p className="mt-2 whitespace-pre-wrap rounded-xl bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{ticket.desc}</p>}
+                    {(() => {
+                      const r = openReturnOf(ticket); const past = (ticket.returns ?? []).filter((x) => x.resolvedAt);
+                      if (!r && !past.length) return null;
+                      const canFinish = !isClient && (ticket.assignedTo === user.id || isCoordinator(user) || canEdit);
+                      return (
+                        <div className={`mt-2 rounded-xl border px-3 py-2 text-xs ${r ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-slate-50"}`}>
+                          {r ? (
+                            <>
+                              <p className="font-semibold text-rose-700">⟲ Retornou para correção · {RETURN_KIND_LABELS[r.kind]}</p>
+                              <p className="mt-0.5 text-slate-700">{r.reason}</p>
+                              <p className="mt-0.5 text-[11px] text-slate-500">Voltou de <b>{STATUS_LABELS[r.fromStatus]}</b> em {fmtDate(r.at.slice(0, 10))} por {r.by}{r.returnedFromUser ? ` · estava com ${getUserName(r.returnedFromUser)}` : ""}{r.fixerId ? ` · corrige: ${getUserName(r.fixerId)}` : ""}</p>
+                              {canFinish && isOpenTicket(ticket) && <button onClick={() => finishReturn(ticket)} className="mt-2 rounded-lg bg-emerald-600 px-3 py-1.5 font-semibold text-white hover:bg-emerald-700">✓ Correção concluída → devolver para {STATUS_LABELS[r.fromStatus]}{r.returnedFromUser ? ` (${getUserName(r.returnedFromUser).split(" ")[0]})` : ""}</button>}
+                            </>
+                          ) : <p className="font-semibold text-slate-600">{past.length} retorno{past.length === 1 ? "" : "s"} de etapa já corrigido{past.length === 1 ? "" : "s"}</p>}
+                          {past.length > 0 && (
+                            <ul className="mt-1 space-y-0.5 text-[11px] text-slate-500">
+                              {past.map((x) => <li key={x.id}>{fmtDate(x.at.slice(0, 10))} · {STATUS_LABELS[x.fromStatus]} → {STATUS_LABELS[x.toStatus]} · {RETURN_KIND_LABELS[x.kind]}: “{x.reason}” · corrigido em {fmtDate(x.resolvedAt!.slice(0, 10))} por {x.resolvedBy}</li>)}
+                            </ul>
+                          )}
+                        </div>
+                      );
+                    })()}
                     {!isClient && <TicketAttachments ticket={ticket} block={block} user={user} canRemoveAll={canEdit}
                       onChange={(atts) => setTickets((prev) => prev.map((x) => (x.id === ticket.id ? { ...x, attachments: atts.length ? atts : undefined } : x)))}
                       dropFiles={drop?.ticketId === ticket.id ? drop.files : null} onDropHandled={() => setDrop(null)} />}

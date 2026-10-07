@@ -317,6 +317,30 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### Retorno de etapa com motivo obrigatório (desde 2026-10-07)
+
+Voltar uma etapa no pipeline (`isBackwardMove`: índice menor em `PIPELINE_ORDER`; bloqueado/em
+espera/arquivado não contam) **exige motivo**, em qualquer caminho: botões de transição e seletor de
+override no bloco, grade, ticket voltando a "Em Produção" a partir de etapa adiante, e "Solicitar
+revisão" do cliente (prompt com o que revisar → retorno do tipo *cliente*).
+
+- `ReturnReasonModal`: tipo (cliente / modelagem / texturização / programação / outro), motivo
+  (≥ 10 caracteres) e quem corrige (padrão: responsável do bloco).
+- `returnTickets()`: o ticket aberto grava `returns[]` (`fromStatus`, `toStatus`, `kind`, `reason`,
+  `by`, `fixerId`, `returnedFromUser`, `priorityBefore`), vira **urgente**, vai para quem corrige e
+  volta a "Em Produção". Bloco sem ticket aberto ganha um ticket de correção.
+- Cartão do ticket: banner vermelho "Retornou para correção" com motivo/origem e botão **"Correção
+  concluída → devolver"** (quem está com o ticket, coordenação ou quem edita tickets): `resolveReturn()`
+  marca `resolvedAt`, o bloco volta à etapa de origem (`withStatus`) e o ticket volta para quem estava
+  com ele, com a prioridade anterior. Retornos passados ficam listados no cartão.
+- Log: `ticket_returned` e `ticket_return_resolved` com `blockId` — aparecem na aba Atividade do bloco
+  (quando, quem, motivo) e na tela Atividade.
+- **Desempenho**: cartão "Retornos de etapa" (total, em correção, dias para corrigir, por motivo,
+  tabela) e coluna **Correções** por pessoa (retornos que caíram para ela corrigir, sem os de
+  cliente). Leitura do ciclo: o retorno reatribui o ticket, então nasce um ciclo para quem corrige e,
+  ao concluir, outro para quem retoma; o ciclo de quem estava com o ticket é encerrado por
+  reatribuição (não conta).
+
 ### BIM pelos terceirizados, fila alinhada, refresh e Voltar do navegador (desde 2026-10-06)
 
 - **Ticket de BIM nasce sem responsável.** Quando o bloco entra em *Conversão BIM*, o ticket da
