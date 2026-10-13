@@ -10,8 +10,8 @@ set -euo pipefail
 ENV_NAME="${1:-sandbox}"
 APP_URL="${2:-https://app.archtechtour.com}"
 if [[ -z "${ASAAS_API_KEY:-}" || -z "${ASAAS_WEBHOOK_TOKEN:-}" ]]; then
-  # shellcheck disable=SC1091
-  set -a; source <(grep -E '^(ASAAS_API_KEY|ASAAS_WEBHOOK_TOKEN)=' .env.local | sed 's/\\\$/$/'); set +a
+  ASAAS_API_KEY=$(grep -E '^ASAAS_API_KEY=' .env.local | cut -d= -f2- | sed 's/^\\//')
+  ASAAS_WEBHOOK_TOKEN=$(grep -E '^ASAAS_WEBHOOK_TOKEN=' .env.local | cut -d= -f2-)
 fi
 if [[ "$ENV_NAME" == "production" ]]; then BASE="https://api.asaas.com/v3"; else BASE="https://api-sandbox.asaas.com/v3"; fi
 NAME="Portal ATT ($ENV_NAME)"

@@ -230,6 +230,9 @@ Asaas→espelho), `src/lib/finance-server.ts` (sync, webhook, vínculo), `src/co
    botão "Sincronizar com o Asaas" (quem tem *editar* em Financeiro) e pelo **cron diário**
    (EventBridge `finance-sync-daily`, 03h São Paulo → API destination com header
    `x-finance-secret` = `FINANCE_SYNC_SECRET`). Cobre evento perdido.
+   ⚠️ 2026-10-13: a regra ainda **não foi criada** (passo 3 de `scripts/finance-infra.sh` cria
+   connection + API destination + role IAM; rodar `FINANCE_SYNC_SECRET=<valor do Amplify> bash
+   scripts/finance-infra.sh`). Até lá, o botão "Sincronizar" e o webhook mantêm o espelho.
 
 A tela **nunca** chama o Asaas (limites: 25.000 req/12h, rate limit por endpoint, polling é
 motivo de bloqueio) — lê `GET /api/finance`, que lê o DynamoDB.
