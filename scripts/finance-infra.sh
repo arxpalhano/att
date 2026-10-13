@@ -59,8 +59,8 @@ else
   fi
   DEST_ARN=$(aws events describe-api-destination --name finance-sync --region $REGION --profile "$PROFILE" --query ApiDestinationArn --output text 2>/dev/null || true)
   if [[ -z "$DEST_ARN" || "$DEST_ARN" == "None" ]]; then
-    DEST_ARN=$(aws events create-api-destination --name finance-sync --connection-arn "$CONN_ARN" \
-      --invocation-endpoint "$APP_URL/api/finance/sync" --http-method POST --invocation-rate-limit-per-second 1 \
+    # --cli-input-json: o AWS CLI tenta BAIXAR parâmetros que começam com https:// (cli_follow_urlparam)
+    DEST_ARN=$(aws events create-api-destination --cli-input-json "{\"Name\":\"finance-sync\",\"ConnectionArn\":\"$CONN_ARN\",\"InvocationEndpoint\":\"$APP_URL/api/finance/sync\",\"HttpMethod\":\"POST\",\"InvocationRateLimitPerSecond\":1}" \
       --region $REGION --profile "$PROFILE" --query ApiDestinationArn --output text)
   fi
   # Role que o EventBridge assume para invocar o API destination
