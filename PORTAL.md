@@ -83,7 +83,7 @@ rota do `matcher` do middleware.
 
 ## 5. Modelo de dados (DynamoDB)
 
-13 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
+14 tabelas, todas com chave `id` (string), PAY_PER_REQUEST, us-east-1:
 
 | Tabela | Conteúdo |
 |--------|----------|
@@ -100,6 +100,7 @@ rota do `matcher` do middleware.
 | `att-profiles` | Perfis de acesso: matriz módulo × ação + permissões especiais (padrões no código; só o que o admin muda é gravado) |
 | `att-kb` | Base de Conhecimento: bases (acesso por perfil/usuário) e artigos (Markdown + anexos no S3 `kb/`) |
 | `att-assets` | Metadados dos arquivos enviados por bloco (S3 `clientes/<clientId>/blocos/<blockId>/…`). Até 2026-09-15 viviam só na memória do navegador |
+| `att-finance` | **Espelho do Asaas** (Financeiro, desde 2026-10-13): `id = "<kind>#<id Asaas>"`, `kind` ∈ customer/payment/subscription/invoice/meta/event. Alimentado só pelo servidor (sync + webhook), nunca pelo browser. TTL em `expiresAt` (eventos de webhook, 30 dias). Ver §6 "Financeiro" |
 
 **Hidratação/persistência:** no mount, o Portal lê todas as tabelas via `/api/state/*`
 (atividades: só os últimos 90 dias, `?days=90`). Se vazias, faz seed inicial (de
@@ -188,7 +189,9 @@ Regra-mãe: **nunca rebaixar bloco `published`** — 43 divergências ficaram re
 **Cliente:** Dashboard, Onboarding, Meus Blocos, Aprovações, Publicações, Analytics, Contratos.
 
 **Admin/interno:** Dashboard, Tickets, Fila de Trabalho, Todos os Blocos, Aprovações,
-Publicações, Analytics, Clientes, Contratos, Atividade, Usuários, **Base de Conhecimento**, **Agentes AI**.
+Publicações, Analytics, Clientes, Contratos, **Financeiro**, Atividade, Usuários, **Base de Conhecimento**, **Agentes AI**.
+
+**Cliente (liberável):** Financeiro — cobranças, 2ª via, notas fiscais da própria marca.
 
 **CRUD admin (tudo gerenciável pela UI, persiste em DynamoDB):**
 - Clientes — criar/editar/desativar
@@ -201,6 +204,69 @@ Publicações, Analytics, Clientes, Contratos, Atividade, Usuários, **Base de C
 **Fluxo de produção:** Cliente cadastra produto → ticket auto-criado (status `new`,
 SLA +14d, sem responsável) → Jessica (PM) atribui → modelador/dev trabalha →
 status atualizado → cliente vê em tempo real.
+
+### Financeiro — espelho do Asaas (desde 2026-10-13)
+
+O **Asaas** (asaas.com) é e continua sendo a fonte de verdade financeira da ATT: cobranças,
+assinaturas (mensalidades), notas fiscais NFS-e, saldo. O portal **não substitui** o Asaas;
+mantém um **espelho somente leitura** na tabela `att-finance` e cruza com o que só o portal
+sabe (marca, contratos, blocos). Nada de valor fictício: tudo vem do Asaas (regra 2 do CLAUDE.md).
+
+**Arquivos:** `src/lib/finance.ts` (tipos, labels PT, regras pago/aberto/vencido, receita
+recorrente), `src/lib/asaas.ts` (HTTP com retry em 429/5xx, paginação de 100, mapeamento
+Asaas→espelho), `src/lib/finance-server.ts` (sync, webhook, vínculo), `src/components/FinanceView.tsx`
+(tela), `src/app/api/finance/*` (rotas), `scripts/finance-infra.sh` (tabela + IAM + cron),
+`scripts/finance-webhook.sh` (cadastra o webhook no Asaas).
+
+**Como o espelho é alimentado (duas vias, ambas no servidor):**
+1. **Webhook** — o Asaas chama `POST /api/finance/webhook` a cada evento (cobrança criada /
+   recebida / vencida / estornada, assinatura, nota). Valida o header `asaas-access-token`
+   (= `ASAAS_WEBHOOK_TOKEN`), grava o `id` do evento (`event#…`, TTL 30d) para ignorar
+   duplicata (o Asaas entrega "pelo menos uma vez") e responde 200 sempre — erro nosso vai
+   para o log, nunca 5xx, porque 15 falhas seguidas pausam a fila lá. Campos desconhecidos
+   são ignorados. Cobrança de cliente que ainda não está no espelho busca só esse cliente.
+2. **Sync completo** — `POST /api/finance/sync` pagina clientes, cobranças, assinaturas, notas
+   e saldo; grava tudo e apaga do espelho o que sumiu do Asaas. Idempotente. Chamado pelo
+   botão "Sincronizar com o Asaas" (quem tem *editar* em Financeiro) e pelo **cron diário**
+   (EventBridge `finance-sync-daily`, 03h São Paulo → API destination com header
+   `x-finance-secret` = `FINANCE_SYNC_SECRET`). Cobre evento perdido.
+
+A tela **nunca** chama o Asaas (limites: 25.000 req/12h, rate limit por endpoint, polling é
+motivo de bloqueio) — lê `GET /api/finance`, que lê o DynamoDB.
+
+**Vínculo cliente Asaas ↔ marca do portal** (`FinCustomer.clientId`): é o que decide o que
+cada marca enxerga. Automático no sync, nesta ordem: `externalReference` do Asaas igual ao
+`id` (`c6`) ou ao `code` (alias) da marca → nome normalizado igual → e-mail igual ao
+`contactEmail`. Manual na aba "Clientes Asaas" (`POST /api/finance/link`); vínculo manual
+**nunca** é sobrescrito pelo sync. Dica operacional: ao cadastrar cliente no Asaas, preencher
+*Referência externa* com o id da marca no portal (ex.: `c6`) e o vínculo sai sozinho.
+
+**Tela (módulo `finance` em `src/lib/access.ts`, ações ver/editar, público interno+cliente):**
+- *Interno:* Visão geral (recebido no mês, a receber no prazo, vencido, receita recorrente/mês
+  calculada das assinaturas ativas, saldo Asaas), gráfico 12 meses (recebido por mês de
+  pagamento; aberto/vencido por mês de vencimento), inadimplência por cliente; abas Cobranças
+  (filtros situação/marca/período/busca, CSV), Assinaturas, Notas fiscais (PDF/XML), Clientes
+  Asaas (vínculo). Por padrão só o perfil **Admin** vê (não está no `INTERNAL_BASE`) —
+  liberar para Jéssica/financeiro em Perfis de acesso.
+- *Cliente:* só as próprias cobranças/assinaturas/notas (o servidor filtra pelo `clientId` do
+  `x-att-actor`; sem saldo). Botões "Pagar / 2ª via" (link `invoiceUrl` do Asaas: Pix, boleto
+  ou cartão), "Boleto", "Recibo", PDF/XML da nota. Não vem no perfil padrão de cliente —
+  liberar por usuário (Telas liberadas) ou perfil próprio.
+
+**Env vars (Amplify + `next.config.js`):** `ASAAS_API_KEY` (sandbox `$aact_hmlg_…`, produção
+`$aact_prod_…`), `ASAAS_ENV` (`sandbox`|`production`; sem ela deduz pela chave), `ASAAS_WEBHOOK_TOKEN`,
+`FINANCE_SYNC_SECRET`. ⚠️ No `.env.local` a chave tem que ser escrita como `\$aact…` — o Next
+expande `$VAR` em arquivos .env e a chave vira vazia. No console do Amplify vai sem escape.
+A tela mostra o selo **SANDBOX** enquanto a chave for de homologação.
+
+**Log de atividades:** `finance_sync` (quem/quando/quantos), `finance_link`, `finance_export` (CSV).
+
+**Status 2026-10-13:** fase 1 (somente leitura) em produção com a conta **sandbox** do Asaas
+(dados de teste criados pela API: 4 clientes, 11 cobranças, 2 assinaturas). Para virar
+produção: trocar `ASAAS_API_KEY` no Amplify, rodar `scripts/finance-webhook.sh production`,
+clicar "Sincronizar" (o sync apaga os registros do sandbox, pois não existem na conta de
+produção). Fase 2 (gerar cobrança/assinatura a partir do contrato) e fase 3 (insights de
+caixa por IA, KPI financeiro no Desempenho da equipe) ficam para depois.
 
 ### Permissão de telas por cliente (modo validação — desde 2026-08-12)
 
@@ -870,7 +936,7 @@ cabeçalho `x-att-actor` (JSON `{id,name,role,email,clientId}` de quem está log
 
 **Log de atividades:** `GET /api/state/activities?days=90` (leitura; POST é ignorado — nada do browser
 escreve direto no log). `POST /api/activity` grava eventos que não passam por tabela de estado
-(`login`, `logout`, `page_view`, `asset_uploaded`, `agent_run`, `agent_config`, `analytics_refresh`;
+(`login`, `logout`, `page_view`, `asset_uploaded`, `agent_run`, `agent_config`, `analytics_refresh`, `finance_export`;
 tipos fora dessa lista são recusados) e `GET /api/activity?days=30&user=&entity=&client=` lista.
 
 **Manutenção (admin, server-side):**
@@ -890,6 +956,10 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 `POST /api/agents/argus-watchtower` (verifica agora; body `{sendEmail?: boolean}`),
 `GET/PUT /api/agents/argus-watchtower/routine` (rotina editável).
 
+**Financeiro (Asaas):** `GET /api/finance` (espelho filtrado pelo ator), `POST /api/finance/sync`
+(equipe interna logada ou cron com `x-finance-secret`), `POST /api/finance/webhook` (Asaas →
+portal, header `asaas-access-token`), `POST /api/finance/link { asaasId, clientId|null }`. §6 "Financeiro".
+
 **Auth:** `/api/auth/[...nextauth]`. **Outros:** `/api/upload`, `/api/analyze`.
 
 **Base de Conhecimento:** `DELETE /api/state/kb?id=`, `POST /api/kb/upload` (URL pré-assinada), `GET/DELETE /api/kb/file?key=` (anexos em `archtechtour-assets/kb/`), `POST /api/kb/unlock` (senha da base).
@@ -904,6 +974,8 @@ async para todos os clientes; body opcional `{inicio,fim}`. O refresh do dia-a-d
 | `analytics-compute` | dia 1º, 04h UTC | Chama `/api/analytics/{alias}/refresh` de cada cliente (janela móvel 30d, ou período do payload) |
 | `auditoria-compute` | domingo, 03h UTC | Valida todos os customizadores publicados (12 checks/produto) → `s3://.../\_auditoria/` |
 | `site-watchdog` | **de hora em hora** (`cron(0 * * * ? *)`, rule `site-watchdog-hourly`) | Agente Argus Watchtower. Acorda toda hora, lê a rotina em `att-agent-routines` e só age se a hora atual (America/Sao_Paulo) estiver na lista — é isso que deixa os horários editáveis pelo portal sem redeploy. Testa as URLs, manda e-mail via SES e grava o histórico. Role própria: `lambda-site-watchdog-role`. Timeout 120s / 256MB |
+
+| *(sem Lambda)* `finance-sync-daily` | **diário, 06h UTC** (03h São Paulo) | EventBridge **API destination** (connection `finance-sync`, header `x-finance-secret`) → `POST https://app.archtechtour.com/api/finance/sync`. Reconcilia o espelho do Asaas. Criado por `scripts/finance-infra.sh` |
 
 Código em `lambda/`. Deploy via AWS CLI (profile `att-admin`) ou `deploy.sh`.
 
@@ -945,6 +1017,8 @@ import-orphans, refresh) são disparadas via endpoint após o deploy.
   só contar sessão com interação (melhora qualidade da métrica na origem)
 - 🟡 Planos/preços do portal ainda NÃO estão em prática comercial (são placeholder)
 - 🟢 Migração Notion/Planner → portal: concluída (blocos/tickets/publicações migrados)
+- 🟡 Financeiro: trocar a chave do Asaas de sandbox para produção quando o dono aprovar a tela
+  (ver §6 "Financeiro" → Status). Fase 2: gerar cobrança/assinatura a partir do contrato.
 
 ### Reportado pela Jessica (PM) em 2026-08-11 — correção por etapas
 

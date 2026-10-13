@@ -80,6 +80,7 @@ export const MODULES: ModuleDef[] = [
   { id: "analytics", label: "Analytics", actions: ["view", "edit"], audiences: ["internal", "client"], hint: "Editar = gerenciar os clientes do analytics (dim) e gerar dashboards." },
   { id: "clients", label: "Clientes", actions: ["view", "create", "edit", "delete"], audiences: ["internal"], hint: "Excluir = desativar/reativar a marca (cliente não é apagado)." },
   { id: "contracts", label: "Contratos", actions: ["view", "create", "edit"], audiences: ["internal", "client"] },
+  { id: "finance", label: "Financeiro", actions: ["view", "edit"], audiences: ["internal", "client"], hint: "Espelho do Asaas (cobranças, assinaturas, notas). Editar = sincronizar e vincular clientes do Asaas às marcas. Cliente vê só as próprias cobranças e notas." },
   { id: "users", label: "Usuários", actions: ["view", "create", "edit", "delete"], audiences: ["internal"], hint: "Quem vê esta tela enxerga e-mails e senhas de todos." },
   { id: "profiles", label: "Perfis de acesso", actions: ["view", "create", "edit", "delete"], audiences: ["internal"], hint: "Quem edita perfis consegue dar a si mesmo qualquer permissão." },
   { id: "agents", label: "Agentes AI", actions: ["view"], audiences: ["internal"] },

@@ -16,7 +16,7 @@ import { ActivityEntity, ENTITY_LABELS } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
 
-const ALLOWED_TYPES = new Set(["login", "logout", "page_view", "asset_uploaded", "agent_run", "agent_config", "analytics_refresh"]);
+const ALLOWED_TYPES = new Set(["login", "logout", "page_view", "asset_uploaded", "agent_run", "agent_config", "analytics_refresh", "finance_export"]);
 
 export async function POST(req: NextRequest) {
   try {

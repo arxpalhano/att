@@ -40,6 +40,7 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
    (PORTAL.md §7).
 3. **Env vars do Amplify SSR** precisam estar em `next.config.js` (`env: {...}`) —
    o Amplify SSR Lambda NÃO injeta env vars em runtime; só o que estiver ali chega.
+   No `.env.local`, valor que começa com `$` (chave do Asaas) precisa de `\$` — o Next expande.
 
 ---
 
@@ -109,6 +110,12 @@ Portal em produção, funcional. Resumo do que foi construído (ordem cronológi
 - ✅ Perfis de acesso (`profiles`, 2026-09-18): matriz módulo × ver/criar/editar/excluir +
   permissões especiais; `can()`/`special()` em Portal.tsx, tipos em `src/lib/access.ts`. Nunca
   voltar a checar `role === "admin"` para permissão — `role` é só escopo de dados. PORTAL.md §6
+
+- ✅ Financeiro (2026-10-13): espelho somente leitura do **Asaas** (cobranças, assinaturas, notas,
+  saldo) em `att-finance`, alimentado por webhook + sync diário; tela interna (KPIs, inadimplência,
+  vínculo cliente Asaas ↔ marca) e tela do cliente (2ª via, notas). Hoje na conta **sandbox**.
+  `src/lib/{finance,asaas,finance-server}.ts`, `src/components/FinanceView.tsx`,
+  `src/app/api/finance/*`. Nunca chamar o Asaas da tela. PORTAL.md §6 "Financeiro"
 
 - ✅ Super admin (`superAdmin` no usuário, 2026-09-24): acima de qualquer perfil; tela **Desempenho
   da equipe** (`src/components/TeamPerformance.tsx`) só para ele. PORTAL.md §6

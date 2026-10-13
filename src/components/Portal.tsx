@@ -9,6 +9,7 @@ import KnowledgeBase from "./KnowledgeBase";
 import AccessProfilesPage from "./AccessProfiles";
 import LinkImportModal, { LinkImportRow } from "./LinkImportModal";
 import TeamPerformance from "./TeamPerformance";
+import FinanceView from "./FinanceView";
 import { AccessProfile, AccessAction, SpecialPerm, DEFAULT_PROFILES, MODULES as ACCESS_MODULES, BASE_LABELS, mergeProfiles, profileOf, canDo, hasSpecial, defaultProfileId, summarizeProfile } from "@/lib/access";
 import { KbRecord, KbBase, KbAttachment, canViewBase, isKbBase, KB_ALLOWED_EXTENSIONS, KB_MAX_FILE_MB, kbExt, fmtKbSize } from "@/lib/kb";
 import { KB_SEED } from "@/data/kb-seed";
@@ -21,7 +22,8 @@ import {
   AlertTriangle, Eye, ChevronDown, ArrowLeft, Copy, Check, Layers,
   Settings, UserCheck, Clipboard, Box, FileUp, ExternalLink, Zap,
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
-  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw, BookOpen, Download
+  BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw, BookOpen, Download,
+  Wallet,
 } from "lucide-react";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
@@ -1293,6 +1295,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "finishes", icon: Filter, label: "Acabamentos" },
         { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "contracts", icon: FileText, label: "Contratos" },
+        { id: "finance", icon: Wallet, label: "Financeiro" },
         ...itemKb,
       ]
     : [
@@ -1307,6 +1310,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
         { id: "analytics", icon: BarChart3, label: "Analytics" },
         { id: "clients", icon: Users, label: "Clientes" },
         { id: "contracts", icon: FileText, label: "Contratos" },
+        { id: "finance", icon: Wallet, label: "Financeiro" },
         { id: "activity", icon: Activity, label: "Atividade" },
         { id: "users", icon: Settings, label: "Usuários" },
         { id: "profiles", icon: Lock, label: "Perfis de acesso" },
@@ -8228,6 +8232,7 @@ export default function Portal() {
       case "contracts": return <ContractsPage user={currentUser} setPage={setPage} setSelectedContract={setSelectedContract} />;
       case "contract_detail": return <ContractDetailPage contractId={selectedContract} user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "clients": return <ClientsPage />;
+      case "finance": return <FinanceView user={currentUser} clients={clients} canEdit={can(currentUser, "finance", "edit")} />;
       case "approvals": return <ApprovalsPage user={currentUser} />;
       case "queue": return <QueuePage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "tickets": return <ProductionTicketsPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;

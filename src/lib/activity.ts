@@ -19,7 +19,7 @@
 
 export type ActivityEntity =
   | "blocks" | "tickets" | "clients" | "contracts" | "publications" | "users"
-  | "bim-demands" | "finishes" | "kb" | "assets" | "agents" | "analytics" | "session" | "profiles";
+  | "bim-demands" | "finishes" | "kb" | "assets" | "agents" | "analytics" | "session" | "profiles" | "finance";
 
 export interface ActivityActor {
   id: string;
@@ -75,6 +75,7 @@ export const ENTITY_LABELS: Record<ActivityEntity, string> = {
   agents: "Agentes AI",
   analytics: "Analytics",
   session: "Acesso e navegação",
+  finance: "Financeiro",
 };
 
 export const PAGE_LABELS: Record<string, string> = {
@@ -82,7 +83,7 @@ export const PAGE_LABELS: Record<string, string> = {
   contracts: "Contratos", contract_detail: "Detalhe do contrato", clients: "Clientes", approvals: "Aprovações",
   queue: "Fila de Trabalho", tickets: "Tickets", publications: "Publicações", analytics: "Analytics",
   activity: "Atividade", users: "Usuários", profiles: "Perfis de acesso", performance: "Desempenho da equipe", finishes: "Acabamentos", bim: "BIM · Terceirizados",
-  bim_minhas: "Minhas demandas", kb: "Base de Conhecimento", agents: "Agentes AI",
+  bim_minhas: "Minhas demandas", kb: "Base de Conhecimento", agents: "Agentes AI", finance: "Financeiro",
   agent_sherlock_codes: "Agente Sherlock Codes", agent_monk_lighthouse: "Agente Monk Lighthouse",
   agent_yoda_kanban: "Agente Yoda Kanban", agent_harvey_closer: "Agente Harvey Closer",
   agent_argus_watchtower: "Agente Argus Watchtower",
@@ -320,6 +321,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
 /** Rótulo curto por tipo (badge na tela de Atividade). Tipos fora daqui mostram a entidade. */
 export const TYPE_LABELS: Record<string, string> = {
   login: "Login", logout: "Saiu", page_view: "Abriu tela",
+  finance_sync: "Financeiro sincronizado", finance_link: "Cliente Asaas vinculado", finance_export: "Exportou cobranças",
   block_created: "Bloco criado", block_edited: "Bloco editado", block_deleted: "Bloco excluído",
   status_changed: "Status", approval_approved: "Aprovação", approval_rejected: "Revisão pedida",
   asset_uploaded: "Arquivo enviado", import: "Importação",

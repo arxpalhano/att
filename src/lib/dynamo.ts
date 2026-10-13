@@ -75,4 +75,5 @@ export const TABLES = {
   KB: "att-kb",
   ASSETS: "att-assets",
   PROFILES: "att-profiles",
+  FINANCE: "att-finance", // espelho do Asaas (src/lib/finance.ts)
 } as const;

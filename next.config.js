@@ -17,6 +17,11 @@ const nextConfig = {
     // e pede para recarregar quando sai deploy — aba antiga rodava código velho por dias.
     // Chave do link de prévia das páginas públicas em rascunho (src/middleware.ts).
     LANDING_PREVIEW_KEY: process.env.LANDING_PREVIEW_KEY,
+    // Módulo Financeiro (espelho do Asaas) — src/lib/asaas.ts
+    ASAAS_API_KEY: process.env.ASAAS_API_KEY,
+    ASAAS_ENV: process.env.ASAAS_ENV,
+    ASAAS_WEBHOOK_TOKEN: process.env.ASAAS_WEBHOOK_TOKEN,
+    FINANCE_SYNC_SECRET: process.env.FINANCE_SYNC_SECRET,
     APP_VERSION: process.env.AWS_COMMIT_ID || process.env.APP_VERSION || `dev-${Date.now()}`,
   },
 };
