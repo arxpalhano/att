@@ -15,6 +15,8 @@ const nextConfig = {
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     // Versão do build (sha do commit no Amplify). O portal compara a sua com /api/version
     // e pede para recarregar quando sai deploy — aba antiga rodava código velho por dias.
+    // Chave do link de prévia das páginas públicas em rascunho (src/middleware.ts).
+    LANDING_PREVIEW_KEY: process.env.LANDING_PREVIEW_KEY,
     APP_VERSION: process.env.AWS_COMMIT_ID || process.env.APP_VERSION || `dev-${Date.now()}`,
   },
 };

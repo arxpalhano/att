@@ -60,6 +60,17 @@ Portal web de gestão e relacionamento da ArchTechTour, servindo **dois público
 - **Login local** (seed users em Portal.tsx + DynamoDB `att-users`): email+senha,
   para clientes e equipe. Clientes: `contato@{marca} / {alias}@2025`.
 
+### Páginas públicas em rascunho escondidas (desde 2026-10-13)
+
+Só o `/portal` está em produção. A home (`/`), `/planos`, `/contrato` e `/experimentar`
+(ATT Instant) ainda estão sendo decididas e **não podem aparecer para cliente**:
+`src/middleware.ts` redireciona essas rotas para `/portal` (307). A equipe vê o rascunho
+abrindo uma vez `https://app.archtechtour.com/?preview=att-rascunho-2026` (grava o cookie
+`att_preview` por 30 dias; `?preview=off` apaga). Em prévia as páginas saem com
+`X-Robots-Tag: noindex`. A chave pode ser trocada pela env `LANDING_PREVIEW_KEY` no Amplify
+(precisa estar no `env` do `next.config.js`, e está). Para liberar uma página de vez, tirar a
+rota do `matcher` do middleware.
+
 ---
 
 ## 4. Internacionalização (i18n)
