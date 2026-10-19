@@ -932,6 +932,7 @@ const PAGINAS_CLIENTE: Array<{ id: string; label: string }> = [
   { id: "publications", label: "Publicações" },
   { id: "analytics", label: "Analytics" },
   { id: "contracts", label: "Contratos" },
+  { id: "finance", label: "Financeiro" }, // cobranças, 2ª via e notas da própria marca (espelho do Asaas)
 ];
 
 /** Telas de detalhe herdam a permissão da listagem que as abre. */

@@ -259,7 +259,9 @@ cada marca enxerga. Automático no sync, nesta ordem: `externalReference` do Asa
 - *Cliente:* só as próprias cobranças/assinaturas/notas (o servidor filtra pelo `clientId` do
   `x-att-actor`; sem saldo). Botões "Pagar / 2ª via" (link `invoiceUrl` do Asaas: Pix, boleto
   ou cartão), "Boleto", "Recibo", PDF/XML da nota. Não vem no perfil padrão de cliente —
-  liberar por usuário (Telas liberadas) ou perfil próprio.
+  liberar por usuário: Usuários → Editar → **Telas liberadas → Financeiro** (checkbox, desde
+  2026-10-19), ou num perfil próprio. Só mostra algo se a marca estiver vinculada a um cliente
+  Asaas (aba "Clientes Asaas").
 
 **Env vars (Amplify + `next.config.js`):** `ASAAS_API_KEY` (sandbox `$aact_hmlg_…`, produção
 `$aact_prod_…`), `ASAAS_ENV` (`sandbox`|`production`; sem ela deduz pela chave), `ASAAS_WEBHOOK_TOKEN`,
@@ -269,11 +271,11 @@ A tela mostra o selo **SANDBOX** enquanto a chave for de homologação.
 
 **Log de atividades:** `finance_sync` (quem/quando/quantos), `finance_link`, `finance_export` (CSV).
 
-**Status 2026-10-13:** fase 1 (somente leitura) em produção com a conta **sandbox** do Asaas
-(dados de teste criados pela API: 4 clientes, 11 cobranças, 2 assinaturas). Para virar
-produção: trocar `ASAAS_API_KEY` no Amplify, rodar `scripts/finance-webhook.sh production`,
-clicar "Sincronizar" (o sync apaga os registros do sandbox, pois não existem na conta de
-produção). Fase 2 (gerar cobrança/assinatura a partir do contrato) e fase 3 (insights de
+**Status 2026-10-19:** fase 1 (somente leitura) em produção com a conta de **PRODUÇÃO** do Asaas
+(chave `$aact_prod_…` no Amplify; webhook de produção cadastrado; 16 clientes, 128 cobranças,
+13 assinaturas, 154 notas). O sandbox foi usado em 2026-10-13 para desenvolver. O casamento
+automático vinculou 10 dos 16 clientes; os demais (razão social sem a marca no nome, ex.:
+"NAUTICA INDUSTRIA…" = Tidelli) se vinculam na aba "Clientes Asaas". Fase 2 (gerar cobrança/assinatura a partir do contrato) e fase 3 (insights de
 caixa por IA, KPI financeiro no Desempenho da equipe) ficam para depois.
 
 ### Permissão de telas por cliente (modo validação — desde 2026-08-12)
