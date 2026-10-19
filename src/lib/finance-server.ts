@@ -72,7 +72,12 @@ export function autoLink(c: FinCustomer, prev: FinCustomer | null, clients: Port
   if (prev?.linkSource === "manual") return { ...c, clientId: prev.clientId, linkSource: "manual" };
   const ref = (c.externalReference || "").trim().toLowerCase();
   const byRef = ref && clients.find((p) => p.id.toLowerCase() === ref || (p.code || "").toLowerCase() === ref);
-  const byName = !byRef && clients.find((p) => normName(p.name) && normName(p.name) === normName(c.name));
+  // Nome: igual, ou a marca "cabe" na razão social do Asaas ("Riccó" em "MOVEIS RICCO LTDA",
+  // "WJ Luminárias" em "Luminarias WJ" — todas as palavras da marca presentes). Marca com uma
+  // palavra só precisa ter 4+ letras para não casar "Rosa" com qualquer coisa.
+  const asaasTokens = new Set(normName(c.name).split(" ").filter(Boolean));
+  const byName = !byRef && (clients.find((p) => normName(p.name) && normName(p.name) === normName(c.name))
+    ?? clients.find((p) => { const t = normName(p.name).split(" ").filter(Boolean); return t.length > 0 && (t.length > 1 || t[0].length >= 4) && t.every((w) => asaasTokens.has(w)); }));
   const email = (c.email || "").trim().toLowerCase();
   const byEmail = !byRef && !byName && email && clients.find((p) => (p.contactEmail || "").trim().toLowerCase() === email);
   const hit = byRef || byName || byEmail;
