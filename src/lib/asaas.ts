@@ -41,6 +41,12 @@ export async function asaasFetch<T>(path: string, opts: { method?: "GET" | "POST
   const url = new URL(baseUrl() + path);
   Object.entries(opts.params ?? {}).forEach(([k, v]) => { if (v !== undefined && v !== "") url.searchParams.set(k, String(v)); });
   const method = opts.method ?? "GET";
+  // Trava de SOMENTE LEITURA (pedido do dono, 2026-10-19): nada feito no portal pode
+  // interferir no Asaas. Qualquer escrita só sai daqui com ASAAS_ALLOW_WRITES=1, que
+  // não existe no Amplify. Quando a fase 2 (gerar cobrança) for aprovada, remover a trava.
+  if (method !== "GET" && process.env.ASAAS_ALLOW_WRITES !== "1") {
+    throw new AsaasError(`Portal em modo somente leitura: ${method} ${path} bloqueado (ASAAS_ALLOW_WRITES)`, 403);
+  }
   let lastErr: AsaasError | null = null;
   for (let attempt = 0; attempt < 4; attempt++) {
     const r = await fetch(url.toString(), {

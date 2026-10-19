@@ -234,6 +234,11 @@ Asaas→espelho), `src/lib/finance-server.ts` (sync, webhook, vínculo), `src/co
    connection + API destination + role IAM; rodar `FINANCE_SYNC_SECRET=<valor do Amplify> bash
    scripts/finance-infra.sh`). Até lá, o botão "Sincronizar" e o webhook mantêm o espelho.
 
+**Somente leitura, por decisão do dono (2026-10-19):** nada feito no portal interfere no Asaas.
+`asaasFetch` recusa qualquer método que não seja GET a menos que exista `ASAAS_ALLOW_WRITES=1`
+(não existe no Amplify). O único "write" é o cadastro do webhook, feito fora do portal por
+`scripts/finance-webhook.sh` (configuração, não dado financeiro).
+
 A tela **nunca** chama o Asaas (limites: 25.000 req/12h, rate limit por endpoint, polling é
 motivo de bloqueio) — lê `GET /api/finance`, que lê o DynamoDB.
 
