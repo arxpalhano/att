@@ -208,7 +208,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       }
       if (!before.archivedAt && after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket arquivado: ${label}` }));
       if (before.archivedAt && !after.archivedAt) out.push(base({ ...ctx, type: "ticket_archived", desc: `Ticket desarquivado: ${label}` }));
-      const fields = changedFields(before, after, { title: "título", desc: "descrição", attachments: "anexos", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente" });
+      const fields = changedFields(before, after, { title: "título", desc: "descrição", attachments: "anexos", plan: "plano", slaDate: "prazo", priority: "prioridade", blockId: "bloco", clientId: "cliente", track: "trilha (produção/BIM)" });
       if (fields.length) out.push(base({ ...ctx, type: "ticket_edited", desc: `Ticket editado: ${label}${listOf(fields)}` }));
       return out;
     }
@@ -249,7 +249,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       if (!before) return [base({ ...ctx, type: "user_created", desc: `Usuário criado: ${label} · ${cur.email ?? ""}` })];
       if (!after) return [base({ ...ctx, type: "user_deleted", desc: `Usuário excluído: ${label}` })];
       // A senha nunca aparece na descrição — só o fato de ter mudado.
-      const fields = changedFields(before, after, { name: "nome", email: "e-mail", role: "tipo de conta", profileId: "perfil de acesso", superAdmin: "super admin", clientId: "cliente", active: "ativo", allowedPages: "telas liberadas", password: "senha" });
+      const fields = changedFields(before, after, { name: "nome", email: "e-mail", role: "tipo de conta", profileId: "perfil de acesso", superAdmin: "super admin", reviewer: "revisor(a) de programação", clientId: "cliente", active: "ativo", allowedPages: "telas liberadas", password: "senha" });
       return fields.length ? [base({ ...ctx, type: "user_edited", desc: `Usuário editado: ${label}${listOf(fields)}` })] : [];
     }
 

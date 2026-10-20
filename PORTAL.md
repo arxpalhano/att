@@ -404,6 +404,37 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### Trilhas em paralelo (produção × BIM) e Revisão Interna com a revisora (desde 2026-10-20)
+
+**Relato da Jéssica (2026-10-19):** "quando o Liles marca Revisão Interna, o ticket vai direto
+pro BIM e não pra mim; o seletor de responsável some, só consigo marcar pelo Editar".
+Causa: o pipeline do bloco é linear (… → Aprovado → SketchUp → BIM → Publicado), mas na
+prática o BIM (Igor/Danilo/Raquel) roda **em paralelo** com a programação (Lucas). Quando o
+bloco entrava em SketchUp/BIM, o ticket do programador era renomeado para "– Conversão
+SketchUp", entregue na entrada do BIM, e qualquer ticket aberto de bloco em BIM era tratado
+como "BIM · aguardando atribuição" (sem seletor de responsável).
+
+Como ficou (`Portal.tsx`):
+- **Trilha do ticket** (`track: "producao" | "bim"`, `ticketTrack()`): gravada nos tickets
+  novos (campo "Trilha" no formulário; automático nos tickets de fase). Ticket antigo sem o
+  campo: "– Conversão SketchUp/BIM", "Sketchup - …" ou responsável terceirizado = BIM; o
+  resto é produção.
+- **Ticket só acompanha o bloco dentro da própria trilha** (`syncTicketsWithBlock`,
+  `blockStatusForTicket`, `ticketForPhase`, `returnTickets`, `ticketDisplayTitle`): bloco
+  andando em SketchUp/BIM não renomeia, não entrega nem move o ticket de produção, e o
+  ticket de produção não move um bloco que está contando o BIM. "Publicado" encerra as duas.
+- **BIM termina antes da produção** (ticket BIM entregue ou demanda aprovada com ticket de
+  produção ainda aberto): o bloco **volta a contar a etapa desse ticket** (`productionStageOf`:
+  Revisão Interna / Em Programação / …) em vez de publicar. Depois, Aprovado → Publicado direto.
+- **Revisor(a) de programação** (`reviewer` no usuário, checkbox em Usuários; hoje a Jéssica):
+  ticket de produção que vai para "Revisão Interna" é **atribuído automaticamente** a ela e
+  guarda quem mandou (`reviewFrom`, mostrado no cartão como "enviado por …"). Revisão
+  pedindo ajuste (→ Em Produção) devolve a quem mandou; se o bloco estiver em Revisão Interna
+  passa pelo modal de retorno com a pessoa já sugerida (`withReviewHandoff`).
+- `isBimTicket(t)` olha o ticket, não o status do bloco → o seletor de responsável volta a
+  aparecer nos tickets de produção de blocos em BIM. Fila "Com quem": "revisão com Jéssica ·
+  de Lucas" e "ticket: X" em bloco em BIM, sem marcar divergência.
+
 ### Retorno de etapa com motivo obrigatório (desde 2026-10-07)
 
 Voltar uma etapa no pipeline (`isBackwardMove`: índice menor em `PIPELINE_ORDER`; bloqueado/em

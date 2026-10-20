@@ -42,6 +42,8 @@ type BlockStatus =
   | "blocked" | "on_hold" | "archived";
 type AssetCategory = "cad" | "finishing" | "photos" | "videos" | "technical_drawing" | "3d_block" | "extra_reference";
 type TicketStatus = "new" | "in_production" | "internal_review" | "delivered";
+/** Trilha do ticket (2026-10-19): produção (modelagem → programação → revisão) ou BIM (SketchUp/ArchiCAD/Revit), que correm em paralelo. */
+type TicketTrack = "producao" | "bim";
 type ProductCategory = "moveis" | "luminarias" | "revestimentos" | "metais" | "outros";
 
 interface Brand {
@@ -59,6 +61,15 @@ export interface ProductionTicket {
   id: string; clientId: string; blockId: string; title: string;
   plan: ServiceType; slaDate: string; priority: Priority;
   assignedTo?: string; status: TicketStatus;
+  /**
+   * Trilha (2026-10-19): "bim" = Conversão SketchUp/BIM, feita pelos terceirizados em
+   * PARALELO com a programação; "producao" = modelagem/texturização/programação/revisão.
+   * Um ticket só acompanha o bloco dentro da própria trilha. Ticket antigo sem o campo é
+   * classificado pelo título/responsável (`ticketTrack`).
+   */
+  track?: TicketTrack;
+  /** Quem mandou para Revisão Interna — se a revisão pedir ajuste, o ticket volta para essa pessoa. */
+  reviewFrom?: string;
   /** Texto livre: o que precisa ser feito, observações, link de referência. */
   desc?: string;
   /** Quando o ticket nasceu (ISO). Tickets antigos não têm — ver `ticketCreatedAt`. */
@@ -119,6 +130,11 @@ interface SeedUser {
    * concede/retira, no cadastro do usuário.
    */
   superAdmin?: boolean;
+  /**
+   * Revisor(a) de programação (desde 2026-10-19): recebe automaticamente os tickets de
+   * produção marcados como "Revisão Interna" (hoje a Jéssica). Marcado em Usuários.
+   */
+  reviewer?: boolean;
 }
 interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
 export interface SeedContract {
@@ -622,18 +638,23 @@ function retitle(title: string, b: SeedBlock): string {
  * Validação de Material (Jéssica, 2026-09-18).
  */
 function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): ProductionTicket[] {
+  const blockTrack = trackOfStatus(b.status);
   return tickets.map((t) => {
     if (t.blockId !== b.id || !isOpenTicket(t)) return t;
-    // Bloco entrou em Conversão BIM: a etapa da pessoa da equipe acabou aqui. O ticket
-    // dela é entregue e o de BIM nasce separado, sem responsável (ver bimPendingBlocks).
+    // Trilhas em paralelo (Jéssica, 2026-10-19): bloco andando em SketchUp/BIM não mexe no
+    // ticket de produção (programação em revisão, R1…) e vice-versa. Antes o ticket do
+    // programador virava "– Conversão SketchUp" e era entregue quando o BIM começava.
+    if (b.status !== "published" && ticketTrack(t) !== blockTrack) return t;
+    // Bloco entrou em Conversão BIM: o SketchUp acabou aqui. O ticket dele é entregue e o
+    // de BIM nasce separado, sem responsável (ver bimPendingBlocks).
     if (b.status === "bim_conversion" && !/ – Conversão BIM$/.test(t.title) && !isFreelancerId(t.assignedTo)) return { ...t, status: "delivered" as TicketStatus };
     let status: TicketStatus = t.status;
     if (b.status === "published") status = "delivered";
     else if (b.status === "internal_review") status = "internal_review";
     else if (PRODUCTION_PHASE_LABELS[b.status] && b.status !== "ready_to_start" && b.status !== "approved_for_programming" && t.status === "new") status = "in_production";
     else if (t.status === "internal_review") status = "in_production"; // bloco saiu da revisão interna
-    const next = { ...t, title: retitle(t.title, b), status, slaDate: b.dueDate || t.slaDate };
-    return next.title === t.title && next.status === t.status && next.slaDate === t.slaDate ? t : next;
+    const next = withReviewHandoff({ ...t, title: retitle(t.title, b), status, slaDate: b.dueDate || t.slaDate }, t.status);
+    return next.title === t.title && next.status === t.status && next.slaDate === t.slaDate && next.assignedTo === t.assignedTo ? t : next;
   });
 }
 /**
@@ -645,8 +666,11 @@ function syncTicketsWithBlock(tickets: ProductionTicket[], b: SeedBlock): Produc
  *    programação/revisão → Validação Final; SketchUp → Conversão BIM; BIM → Publicado.
  * Devolve null quando o bloco não precisa mudar (ex.: já está adiante).
  */
-function blockStatusForTicket(ticketStatus: TicketStatus, b: SeedBlock): BlockStatus | null {
+function blockStatusForTicket(ticketStatus: TicketStatus, b: SeedBlock, t?: ProductionTicket): BlockStatus | null {
   const s = b.status;
+  // Trilhas em paralelo: ticket de produção (programação/revisão) não move um bloco que está
+  // contando o BIM, nem o de BIM move um bloco em produção.
+  if (t && s !== "published" && ticketTrack(t) !== trackOfStatus(s)) return null;
   if (ticketStatus === "in_production") {
     if (s === "ready_to_start") return "in_modeling";
     if (s === "approved_for_programming") return "in_programming";
@@ -677,7 +701,8 @@ interface ReturnInfo { kind: ReturnKind; reason: string; fixerId?: string }
 function returnTickets(tickets: ProductionTicket[], before: SeedBlock, after: SeedBlock, info: ReturnInfo, user: SeedUser): ProductionTicket[] {
   const at = new Date().toISOString();
   const mk = (t: ProductionTicket): TicketReturn => ({ id: `rt_${Date.now()}`, at, by: user.name, byId: user.id, fromStatus: before.status, toStatus: after.status, kind: info.kind, reason: info.reason, fixerId: info.fixerId, returnedFromUser: t.assignedTo, priorityBefore: t.priority });
-  const open = tickets.filter((t) => t.blockId === before.id && isOpenTicket(t));
+  const sameTrack = tickets.filter((t) => t.blockId === before.id && isOpenTicket(t) && ticketTrack(t) === trackOfStatus(after.status));
+  const open = sameTrack.length ? sameTrack : tickets.filter((t) => t.blockId === before.id && isOpenTicket(t));
   if (!open.length) {
     const t: ProductionTicket = { id: `tk_${Date.now()}`, clientId: after.clientId, blockId: after.id, title: `${after.title} – ${stageLabel(after.status)}`, plan: after.svc, slaDate: after.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: "urgent", assignedTo: info.fixerId, status: "in_production", createdAt: at };
     return [...tickets, { ...t, returns: [mk({ ...t, assignedTo: undefined, priority: after.pri })] }];
@@ -754,8 +779,43 @@ function BlockTimeline({ b, compact = false }: { b: SeedBlock; compact?: boolean
  * aí ele aparece para o terceirizado (como produto numa demanda BIM dele).
  */
 const isFreelancerId = (id?: string) => !!id && USERS.find((u) => u.id === id)?.role === "freelancer_bim";
-/** Ticket aberto de um bloco que está em Conversão BIM. */
-const isBimTicket = (t: ProductionTicket, blocks: SeedBlock[]) => isOpenTicket(t) && blocks.find((b) => b.id === t.blockId)?.status === "bim_conversion";
+const BIM_STATUSES: BlockStatus[] = ["sketchup_conversion", "bim_conversion"];
+const isBimStatus = (s: BlockStatus) => BIM_STATUSES.includes(s);
+/** Trilha que o status do bloco está contando. "Publicado" encerra as duas. */
+const trackOfStatus = (s: BlockStatus): TicketTrack => (isBimStatus(s) ? "bim" : "producao");
+/**
+ * Trilha do ticket: o campo gravado; ticket antigo pelo título ("– Conversão SketchUp/BIM",
+ * "Sketchup - …" do Igor) ou por estar com um terceirizado. O resto é produção.
+ */
+const ticketTrack = (t: ProductionTicket): TicketTrack =>
+  t.track ?? (/ – Conversão (SketchUp|BIM)$/.test(t.title) || /^(sketchup|skp)\b/i.test(t.title) || isFreelancerId(t.assignedTo) ? "bim" : "producao");
+/**
+ * Ticket aberto da trilha BIM. Antes era "qualquer ticket aberto de bloco em Conversão BIM" —
+ * e o ticket de programação em revisão virava "BIM · aguardando atribuição", sem seletor de
+ * responsável: o Lucas não conseguia marcar a Jéssica (2026-10-19).
+ */
+const isBimTicket = (t: ProductionTicket) => isOpenTicket(t) && ticketTrack(t) === "bim";
+/** Quem recebe os tickets de produção em "Revisão Interna" (marcado em Usuários). */
+const reviewerFor = (users: SeedUser[]) => users.find((u) => u.active && u.reviewer);
+/**
+ * Revisão Interna é da revisora: ao entrar, o ticket de produção vai para ela guardando quem
+ * mandou; ao voltar para "Em Produção" (ajuste pedido), volta para quem mandou.
+ */
+function withReviewHandoff(t: ProductionTicket, prev: TicketStatus): ProductionTicket {
+  if (t.status === prev || ticketTrack(t) !== "producao") return t;
+  if (t.status === "internal_review") { const rv = reviewerFor(USERS); return rv && t.assignedTo !== rv.id ? { ...t, assignedTo: rv.id, reviewFrom: t.assignedTo } : t; }
+  if (prev === "internal_review" && t.status === "in_production" && t.reviewFrom) return { ...t, assignedTo: t.reviewFrom, reviewFrom: undefined };
+  return t;
+}
+/** Etapa de produção que um ticket representa — para o bloco voltar a contá-la quando o BIM termina antes. */
+function productionStageOf(t: ProductionTicket): BlockStatus {
+  if (t.status === "internal_review") return "internal_review";
+  const suffix = t.title.slice(t.title.lastIndexOf(" – ") + 3).trim();
+  if (suffix === "Modelagem") return "in_modeling";
+  if (suffix === "Texturização") return "in_texturing";
+  if (suffix === "Programação") return "in_programming";
+  return USERS.find((u) => u.id === t.assignedTo)?.role === "internal_modeling" ? "in_modeling" : "in_programming";
+}
 /**
  * Blocos em Conversão BIM esperando a coordenação escolher o terceirizado: não estão
  * em nenhuma demanda BIM aberta e não têm ticket aberto com um terceirizado. É por
@@ -786,7 +846,22 @@ function ticketCreatedAt(t: ProductionTicket, b?: SeedBlock): string {
   return b?.created ?? "";
 }
 /** Para a tela: ticket antigo com título congelado já aparece com a etapa de hoje. */
-const ticketDisplayTitle = (t: ProductionTicket, b?: SeedBlock) => (b && isOpenTicket(t) ? retitle(t.title, b) : t.title);
+const ticketDisplayTitle = (t: ProductionTicket, b?: SeedBlock) => (b && isOpenTicket(t) && ticketTrack(t) === trackOfStatus(b.status) ? retitle(t.title, b) : t.title);
+/**
+ * Bloco que entra numa fase de produção sem ticket aberto NA MESMA TRILHA ganha um ticket
+ * automático (bloco em BIM com a programação em revisão não ganha outro de programação).
+ */
+function ticketForPhase(tickets: ProductionTicket[], b: SeedBlock, status: BlockStatus, due?: string): ProductionTicket[] {
+  const phase = PRODUCTION_PHASE_LABELS[status];
+  if (!phase) return tickets;
+  const track = trackOfStatus(status);
+  if (tickets.some((t) => t.blockId === b.id && isOpenTicket(t) && ticketTrack(t) === track)) return tickets;
+  return [...tickets, {
+    id: `tk_${Date.now()}`, clientId: b.clientId, blockId: b.id, title: `${b.title} – ${phase}`, plan: b.svc,
+    slaDate: due || b.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: b.pri, assignedTo: status === "bim_conversion" ? undefined : b.owner,
+    status: "new" as TicketStatus, track, createdAt: new Date().toISOString(),
+  }];
+}
 
 function checkReadiness(blockId: string, serviceType: ServiceType, assets: SeedAsset[], finishesFilled = false) {
   const required = READINESS_RULES[serviceType] || [];
@@ -1935,12 +2010,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
     const nb = withStatus(b, status);
     setBlocks((prev) => prev.map((x) => (x.id === nb.id ? nb : x)));
     if (ret) { setTickets((prev) => returnTickets(prev, b, nb, ret, user)); setGridReturn(null); return; }
-    setTickets((prev) => {
-      const synced = syncTicketsWithBlock(prev, nb);
-      const phase = PRODUCTION_PHASE_LABELS[status];
-      if (!phase || synced.some((t) => t.blockId === nb.id && isOpenTicket(t))) return synced;
-      return [...synced, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: status === "bim_conversion" ? undefined : nb.owner, status: "new" as TicketStatus, createdAt: new Date().toISOString() }];
-    });
+    setTickets((prev) => ticketForPhase(syncTicketsWithBlock(prev, nb), nb, status));
   };
   const changeOwner = (b: SeedBlock, owner: string | undefined) => {
     patchBlock(b.id, { owner });
@@ -2931,16 +3001,7 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
   // automático (antes só o "Criar bloco" fazia isso — bloco antigo mudando para
   // "Em Modelagem" ficava sem ticket na fila).
   const ensureTicket = (status: BlockStatus, owner: string | undefined, due?: string) => {
-    const phase = PRODUCTION_PHASE_LABELS[status];
-    if (!phase) return;
-    setTickets((prev) => {
-      if (prev.some((t) => t.blockId === block.id && isOpenTicket(t))) return prev;
-      return [...prev, {
-        id: `tk_${Date.now()}`, clientId: block.clientId, blockId: block.id, title: `${block.title} – ${phase}`,
-        plan: block.svc, slaDate: due || block.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: block.pri, assignedTo: status === "bim_conversion" ? undefined : owner, status: "new" as TicketStatus,
-        createdAt: new Date().toISOString(),
-      }];
-    });
+    setTickets((prev) => ticketForPhase(prev, { ...block, owner }, status, due));
   };
   const [returnTo, setReturnTo] = useState<BlockStatus | null>(null);
   const applyTransition = (newStatus: BlockStatus, ret?: ReturnInfo) => {
@@ -3831,13 +3892,17 @@ function QueuePage({ user, setPage, setSelectedBlock }: { user: SeedUser; setPag
               const tk = ts.find((t) => t.assignedTo === who) ?? ts[0];
               // Em BIM é normal o bloco ter um responsável da equipe e o ticket estar com o
               // terceirizado (ou esperando atribuição) — não é divergência.
-              if (r.status === "bim_conversion") {
+              // Ticket de produção num bloco em BIM (programação em revisão, R1…) mostra o dele.
+              if (r.status === "bim_conversion" && (!tk || ticketTrack(tk) === "bim")) {
                 const withFreelancer = ts.find((t) => isFreelancerId(t.assignedTo));
                 return <span className="text-[11px] font-semibold text-teal-700" title="BIM é feito pelo terceirizado; a coordenação atribui em Pendências de BIM">{withFreelancer ? `BIM com ${getUserName(withFreelancer.assignedTo!).split(" ")[0]}` : "BIM · aguardando atribuição"}</span>;
               }
               const ownerName = r.owner ? getUserName(r.owner).split(" ")[0] : "ninguém";
               if (!tk) return <span className="text-[11px] text-amber-700" title="O bloco tem responsável mas nenhum ticket aberto — não entra nos KPIs de etapa">bloco: {ownerName} · sem ticket</span>;
               const tkName = tk.assignedTo ? getUserName(tk.assignedTo).split(" ")[0] : "sem responsável";
+              if (tk.status === "internal_review") return <span className="text-[11px] font-semibold text-violet-700" title="Ticket em Revisão Interna com a revisora">revisão com {tkName}{tk.reviewFrom ? ` · de ${getUserName(tk.reviewFrom).split(" ")[0]}` : ""}</span>;
+              // Bloco contando o BIM: o responsável do bloco não é quem está com este ticket de produção — não é divergência.
+              if (isBimStatus(r.status)) return <span className="text-[11px] text-slate-500">ticket: {tkName}</span>;
               const same = (tk.assignedTo ?? "") === (r.owner ?? "");
               return <span className={`text-[11px] ${same ? "text-slate-500" : "font-semibold text-rose-600"}`} title={same ? "Bloco e ticket com a mesma pessoa" : "Bloco e ticket estão com pessoas diferentes — alinhe o responsável"}>{same ? tkName : `bloco: ${ownerName} · ticket: ${tkName}`}</span>;
             } },
@@ -4091,7 +4156,7 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
   );
 }
 
-type UserFormData = { name: string; email: string; role: UserRole; profileId?: string; superAdmin?: boolean; clientId: string; password: string; allowedPages?: string[] };
+type UserFormData = { name: string; email: string; role: UserRole; profileId?: string; superAdmin?: boolean; reviewer?: boolean; clientId: string; password: string; allowedPages?: string[] };
 
 function UserFormModal({
   title, onClose, onSave, initial,
@@ -4115,6 +4180,7 @@ function UserFormModal({
   const [showPw, setShowPw] = useState(false);
   const { currentUser: editor } = useContext(AppContext);
   const [superAdmin, setSuperAdmin] = useState(!!initial?.superAdmin);
+  const [reviewer, setReviewer] = useState(!!initial?.reviewer);
   const [acessoTotal, setAcessoTotal] = useState(initial?.allowedPages?.includes("all") ?? false);
   const [paginas, setPaginas] = useState<string[]>(
     initial?.allowedPages?.filter((p) => p !== "all") ?? PAGINAS_PADRAO_CLIENTE
@@ -4183,6 +4249,12 @@ function UserFormModal({
               <span><span className="font-semibold">Super admin</span><span className="block text-[11px] leading-4 text-slate-500">Acesso a absolutamente tudo, acima do perfil: Desempenho da equipe, Atividade, perfis, usuários. Só outro super admin concede.</span></span>
             </label>
           )}
+          {role !== "client" && role !== "freelancer_bim" && (
+            <label className="flex cursor-pointer items-start gap-2 rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-slate-700">
+              <input type="checkbox" checked={reviewer} onChange={(e) => setReviewer(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 accent-violet-600" />
+              <span><span className="font-semibold">Revisor(a) de programação</span><span className="block text-[11px] leading-4 text-slate-500">Recebe automaticamente os tickets de produção marcados como "Revisão Interna" (quem mandou fica guardado e recebe de volta se houver ajuste). Marque uma pessoa só.</span></span>
+            </label>
+          )}
           {role === "client" && (
             <>
               <div>
@@ -4234,6 +4306,7 @@ function UserFormModal({
             // Perfil padrão do tipo de conta não precisa ficar gravado no usuário.
             profileId: profileId === defaultProfileId(role) ? undefined : profileId,
             superAdmin: isSuperAdmin(editor) ? (superAdmin || undefined) : initial?.superAdmin,
+            reviewer: role !== "client" && role !== "freelancer_bim" ? (reviewer || undefined) : undefined,
             allowedPages: role === "client" && !usarPerfil ? (acessoTotal ? ["all"] : paginas) : undefined,
           })}
             disabled={!canSave}
@@ -4286,7 +4359,7 @@ function UsersPage() {
   const handleAdd = (data: UserFormData) => {
     const u: SeedUser = {
       id: `u_${Date.now()}`, name: data.name, email: data.email, password: data.password,
-      role: data.role, active: true, ...(data.profileId ? { profileId: data.profileId } : {}), ...(data.superAdmin ? { superAdmin: true } : {}), ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
+      role: data.role, active: true, ...(data.profileId ? { profileId: data.profileId } : {}), ...(data.superAdmin ? { superAdmin: true } : {}), ...(data.reviewer ? { reviewer: true } : {}), ...(data.role === "client" && data.clientId ? { clientId: data.clientId } : {}),
       ...(data.allowedPages?.length ? { allowedPages: data.allowedPages } : {}),
     };
     setUsers([...users, u]);
@@ -4298,7 +4371,7 @@ function UsersPage() {
     setUsers(users.map((u) =>
       u.id === editingUser.id
         ? {
-            ...u, name: data.name, email: data.email, role: data.role, password: data.password, profileId: data.profileId, superAdmin: data.superAdmin || undefined,
+            ...u, name: data.name, email: data.email, role: data.role, password: data.password, profileId: data.profileId, superAdmin: data.superAdmin || undefined, reviewer: data.reviewer || undefined,
             clientId: data.role === "client" && data.clientId ? data.clientId : undefined,
             // Vazio = volta ao padrão (PAGINAS_PADRAO_CLIENTE); undefined em não-cliente.
             allowedPages: data.allowedPages?.length ? data.allowedPages : undefined,
@@ -4358,6 +4431,7 @@ function UsersPage() {
                 <Badge className={pf.base === "admin" ? "bg-purple-50 text-purple-700 border-purple-200" : pf.base === "client" ? "bg-blue-50 text-blue-600 border-blue-200" : pf.system ? "bg-slate-100 text-slate-600 border-slate-200" : "bg-cyan-50 text-cyan-700 border-cyan-200"}>{pf.name}</Badge>
                 {!pf.system && <p className="mt-1 text-[11px] text-slate-400">tipo {ROLE_LABELS[r.role]}</p>}
                 {r.superAdmin && <p className="mt-1 text-[11px] font-semibold text-amber-700">★ Super admin</p>}
+                {r.reviewer && <p className="mt-1 text-[11px] font-semibold text-violet-700">✓ Revisor(a) de programação</p>}
               </div>
             );
           } },
@@ -4781,6 +4855,7 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
   const [priority, setPriority] = useState<Priority>(initial?.priority ?? "normal");
   const [plan, setPlan] = useState<ServiceType>(initial?.plan ?? "standard");
   const [desc, setDesc] = useState(initial?.desc ?? "");
+  const [track, setTrack] = useState<TicketTrack>(initial ? ticketTrack(initial) : "producao");
 
   const internalUsers = USERS.filter((u) => u.role !== "client" && u.role !== "freelancer_bim" && u.active);
   const clientBlocks = blocks.filter((b) => b.clientId === clientId);
@@ -4808,6 +4883,8 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
       priority,
       assignedTo: assignedTo || undefined,
       status: initial?.status ?? "new",
+      track,
+      ...(initial?.reviewFrom ? { reviewFrom: initial.reviewFrom } : {}),
       ...(desc.trim() ? { desc: desc.trim() } : {}),
       createdAt: initial ? initial.createdAt : new Date().toISOString(),
       ...(initial?.archivedAt ? { archivedAt: initial.archivedAt, archivedBy: initial.archivedBy } : {}),
@@ -4864,6 +4941,14 @@ function NewTicketModal({ onClose, onSave, initial }: { onClose: () => void; onS
                 ) : null;
               })()}
             </div>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Trilha</label>
+            <select value={track} onChange={(e) => setTrack(e.target.value as TicketTrack)} className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-cyan-400 transition">
+              <option value="producao">Produção — modelagem, texturização, programação, revisão</option>
+              <option value="bim">BIM — SketchUp · ArchiCAD · Revit (corre em paralelo)</option>
+            </select>
+            <p className="mt-1 text-[11px] leading-4 text-slate-400">O ticket só acompanha a etapa do bloco dentro da própria trilha. Em Revisão Interna, o de produção vai para a revisora.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -5202,23 +5287,30 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
     const ticket = tickets.find((t) => t.id === id);
     const block = blocks.find((b) => b.id === ticket?.blockId);
     // Ticket voltando a "Em Produção" a partir de uma etapa adiante do bloco = retorno: pede motivo.
-    if (ticket && block && status === "in_production") { const to = blockStatusForTicket(status, block); if (to && isBackwardMove(block.status, to)) { setTicketReturn({ ticket, block, to }); return; } }
-    let updated = tickets.map((t) => (t.id === id ? { ...t, status } : t));
+    if (ticket && block && status === "in_production") { const to = blockStatusForTicket(status, block, ticket); if (to && isBackwardMove(block.status, to)) { setTicketReturn({ ticket, block, to }); return; } }
+    // "Revisão Interna" vai para a revisora e "Em Produção" (ajuste) volta para quem mandou — withReviewHandoff.
+    let updated = tickets.map((t) => (t.id === id ? withReviewHandoff({ ...t, status }, t.status) : t));
+    const me = updated.find((t) => t.id === id);
+    let note = ticket && me && me.assignedTo !== ticket.assignedTo && me.assignedTo ? ` · ${status === "internal_review" ? "revisão com" : "devolvido para"} ${getUserName(me.assignedTo)}` : "";
     // Situação do ticket move a etapa do bloco (blockStatusForTicket) — e o bloco
     // novo, por sua vez, ajusta título/prazo dos tickets abertos e abre o ticket da
     // próxima fase de produção (ex.: SketchUp entregue → nasce o ticket de BIM).
-    const nextStatus = block && ticket ? blockStatusForTicket(status, block) : null;
+    let nextStatus = block && ticket ? blockStatusForTicket(status, block, ticket) : null;
+    if (block && nextStatus === "published") {
+      // BIM terminou antes da produção (trilhas em paralelo): em vez de publicar, o bloco
+      // volta a contar a etapa do ticket de produção que ainda está aberto.
+      const pending = updated.find((t) => t.blockId === block.id && t.id !== id && isOpenTicket(t) && ticketTrack(t) === "producao");
+      if (pending) { nextStatus = productionStageOf(pending); note += ` · BIM concluído, mas "${pending.title}" ainda está aberto`; }
+    }
     if (block && nextStatus) {
       const nb = withStatus(block, nextStatus);
       setBlocks(blocks.map((b) => (b.id === nb.id ? nb : b)));
-      updated = syncTicketsWithBlock(updated, nb);
+      const before = updated.length;
+      updated = ticketForPhase(syncTicketsWithBlock(updated, nb), nb, nextStatus);
       const phase = PRODUCTION_PHASE_LABELS[nextStatus];
-      if (phase && !updated.some((t) => t.blockId === nb.id && isOpenTicket(t))) {
-        updated = [...updated, { id: `tk_${Date.now()}`, clientId: nb.clientId, blockId: nb.id, title: `${nb.title} – ${phase}`, plan: nb.svc, slaDate: nb.dueDate || addDaysISO(todayISO(), SLA_DAYS), priority: nb.pri, assignedTo: nextStatus === "bim_conversion" ? undefined : nb.owner, status: "new", createdAt: new Date().toISOString() }];
-      }
-      setAutoMsg(`Bloco "${nb.title}" avançou para ${STATUS_LABELS[nextStatus]}${phase ? ` · ticket de ${phase} criado` : ""}.`);
+      setAutoMsg(`Bloco "${nb.title}" ${isBackwardMove(block.status, nextStatus) ? "voltou" : "avançou"} para ${STATUS_LABELS[nextStatus]}${phase && updated.length > before ? ` · ticket de ${phase} criado` : ""}${note}.`);
       setTimeout(() => setAutoMsg(""), 7000);
-    }
+    } else if (note) { setAutoMsg(`Ticket "${ticket?.title}"${note}.`); setTimeout(() => setAutoMsg(""), 7000); }
     setTickets(updated);
   };
 
@@ -5244,7 +5336,7 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
     <div className="space-y-6">
       {showNewTicket && <NewTicketModal onClose={() => setShowNewTicket(false)} onSave={createTicket} />}
       {editingTicket && <NewTicketModal initial={editingTicket} onClose={() => setEditingTicket(null)} onSave={saveTicket} />}
-      {ticketReturn && <ReturnReasonModal block={ticketReturn.block} toStatus={ticketReturn.to} users={users} defaultFixer={ticketReturn.block.owner} onClose={() => setTicketReturn(null)} onConfirm={applyTicketReturn} />}
+      {ticketReturn && <ReturnReasonModal block={ticketReturn.block} toStatus={ticketReturn.to} users={users} defaultFixer={ticketReturn.ticket.reviewFrom ?? ticketReturn.block.owner} onClose={() => setTicketReturn(null)} onConfirm={applyTicketReturn} />}
       {autoMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{autoMsg}</div>}
       {focusId && (
         <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
@@ -5423,18 +5515,19 @@ function ProductionTicketsPage({ user, setPage, setSelectedBlock }: { user: Seed
                 <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
                   {!isClient && (
                     <>
-                      {isBimTicket(ticket, blocks) ? (
+                      {isBimTicket(ticket) ? (
                         <span className="rounded-xl border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800" title="BIM é feito por terceirizado; a coordenação atribui em Fila de Trabalho → Pendências de BIM">
                           {isFreelancerId(ticket.assignedTo) ? `BIM com ${getUserName(ticket.assignedTo!)}` : "BIM · aguardando atribuição (Fila → Pendências de BIM)"}
                         </span>
                       ) : null}
-                      <select hidden={isBimTicket(ticket, blocks)} value={ticket.assignedTo || ""} onChange={(e) => assignTicket(ticket.id, e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
+                      <select hidden={isBimTicket(ticket)} value={ticket.assignedTo || ""} onChange={(e) => assignTicket(ticket.id, e.target.value)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
                         <option value="">Sem responsável</option>
                         {internalUsers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                       </select>
                       <select value={ticket.status} onChange={(e) => updateStatus(ticket.id, e.target.value as TicketStatus)} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-700 outline-none focus:border-cyan-400 transition">
                         {(["new", "in_production", "internal_review", "delivered"] as TicketStatus[]).map((s) => <option key={s} value={s}>{TICKET_STATUS_LABELS[s]}</option>)}
                       </select>
+                      {ticket.status === "internal_review" && ticket.reviewFrom && <span className="text-[11px] text-violet-700" title="Quem mandou para revisão — recebe o ticket de volta se houver ajuste">enviado por {getUserName(ticket.reviewFrom)}</span>}
                     </>
                   )}
                   {(canEdit || canDelete) && (
@@ -5828,10 +5921,14 @@ function BimPage({ user }: { user: SeedUser }) {
       const byBlock = new Map(d.items.filter((it) => it.blockId).map((it) => [it.blockId!, it]));
       if (!byBlock.size) return;
       const moved: SeedBlock[] = [];
+      // BIM aprovado com a produção ainda aberta (programação em revisão, por ex.): o bloco
+      // volta a contar essa etapa em vez de publicar — trilhas em paralelo (2026-10-19).
+      const pendingProd = (blockId: string) => TICKETS.find((t) => t.blockId === blockId && isOpenTicket(t) && ticketTrack(t) === "producao" && t.assignedTo !== d.freelancerId);
       setBlocks((prev) => prev.map((b) => {
         const it = byBlock.get(b.id); if (!it) return b;
         const bim = { skp: !!b.bim?.skp || it.done.includes("sketchup"), rvt: !!b.bim?.rvt || it.done.includes("revit"), gsm: !!b.bim?.gsm || it.done.includes("archicad") };
-        const nb = b.status === "bim_conversion" ? withStatus({ ...b, bim }, "published") : { ...b, bim };
+        const prod = pendingProd(b.id);
+        const nb = b.status === "bim_conversion" ? withStatus({ ...b, bim }, prod ? productionStageOf(prod) : "published") : { ...b, bim };
         if (nb.status !== b.status) moved.push(nb);
         return nb;
       }));
@@ -6274,7 +6371,7 @@ function NotificationsMenu({ currentUser, setPage, setSelectedBlock }: { current
       const bimWait = bimPendingBlocks(blocks, tickets, bimDemands);
       if (bimWait.length) items.push({ key: `bim-pending:${bimWait.length}`, title: `${bimWait.length} bloco${bimWait.length === 1 ? "" : "s"} em BIM aguardando você atribuir`, desc: "Fila de Trabalho → Pendências de BIM: escolha Danilo ou Raquel", tone: "warn", go: () => setPage("queue") });
     }
-    const unassigned = tickets.filter((t) => isOpenTicket(t) && !t.assignedTo && !isBimTicket(t, blocks));
+    const unassigned = tickets.filter((t) => isOpenTicket(t) && !t.assignedTo && !isBimTicket(t));
     if (unassigned.length) items.push({ key: `unassigned:${unassigned.length}`, title: `${unassigned.length} ticket${unassigned.length === 1 ? "" : "s"} sem responsável`, tone: "warn", go: () => setPage("tickets") });
     const delivered = bimDemands.filter((d) => d.status === "delivered");
     if (delivered.length) items.push({ key: `bim-deliv:${delivered.map((d) => d.id).join(",")}`, title: `${delivered.length} entrega${delivered.length === 1 ? "" : "s"} BIM aguardando aprovação`, desc: delivered.slice(0, 2).map((d) => d.title).join(" · "), tone: "ok", go: () => setPage("bim") });
