@@ -404,6 +404,14 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### Pipeline do dashboard filtrado por marca (desde 2026-10-23)
+
+Seletor "Todas as marcas / <marca>" no cabeçalho de **Produção em andamento** (Jéssica). Os 15
+cartões de estágio, a linha "na esteira / bloqueados / em espera / arquivados" e o total passam
+a contar só a marca escolhida; "Ver blocos" abre a lista já filtrada por ela. Os KPIs do topo
+(total, bloqueados, aprovações, publicados) seguem gerais. A marca escolhida fica lembrada ao
+trocar de tela (`PIPELINE_CLIENT` em `Portal.tsx`, `InternalDashboard`).
+
 ### Trilhas em paralelo (produção × BIM) e Revisão Interna com a revisora (desde 2026-10-20)
 
 **Relato da Jéssica (2026-10-19):** "quando o Liles marca Revisão Interna, o ticket vai direto

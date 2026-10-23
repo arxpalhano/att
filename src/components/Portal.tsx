@@ -1480,6 +1480,15 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
   const bimLate = bimOpen.filter((d) => bimDaysLeft(d) < 0).length;
   const byStatus: Record<string, number> = {};
   blocks.forEach((b) => { byStatus[b.status] = (byStatus[b.status] || 0) + 1; });
+  // Pipeline por marca: os cartões de estágio contam só a marca escolhida (os KPIs do topo seguem gerais).
+  const [pipelineClient, setPipelineClient] = useState(PIPELINE_CLIENT);
+  useEffect(() => { PIPELINE_CLIENT = pipelineClient; }, [pipelineClient]);
+  const pipelineBlocks = pipelineClient === "all" ? blocks : blocks.filter((b) => b.clientId === pipelineClient);
+  const pipeByStatus: Record<string, number> = {};
+  pipelineBlocks.forEach((b) => { pipeByStatus[b.status] = (pipeByStatus[b.status] || 0) + 1; });
+  const pipelineClients = clients.filter((c) => c.active !== false && blocks.some((b) => b.clientId === c.id)).sort((a, b) => a.name.localeCompare(b.name));
+  // "Ver blocos" abre a lista já filtrada pela marca do pipeline.
+  const openPipeline = (status: BlockStatus | "all") => { BLOCKS_LIST_MEMORY.client = pipelineClient; openBlocks(status); };
   const pending = blocks.filter(isAwaitingClient).length;
   const recent = activities.filter((a) => !isNavigation(a)).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 8);
   const activeClients = clients.map((client) => ({
@@ -1507,8 +1516,8 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
     { s: "bim_conversion", icon: Box, color: "text-teal-600" },
     { s: "published", icon: Globe, color: "text-emerald-600" },
   ];
-  const onPipeline = pipeline.reduce((n, p) => n + (byStatus[p.s] || 0), 0);
-  const paused = (byStatus["blocked"] || 0) + (byStatus["on_hold"] || 0) + (byStatus["archived"] || 0);
+  const onPipeline = pipeline.reduce((n, p) => n + (pipeByStatus[p.s] || 0), 0);
+  const paused = (pipeByStatus["blocked"] || 0) + (pipeByStatus["on_hold"] || 0) + (pipeByStatus["archived"] || 0);
   const inProduction = ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "sketchup_conversion", "bim_conversion"].reduce((n, st) => n + (byStatus[st] || 0), 0);
 
   return (
@@ -1609,15 +1618,21 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
             <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pipeline</p>
             <h3 className="mt-2 text-2xl font-semibold tracking-tight text-slate-900">Produção em andamento</h3>
           </div>
-          <p className="max-w-xl text-sm leading-6 text-slate-500">Todos os estágios, na ordem do fluxo. Clique num estágio para abrir só os blocos que estão nele.</p>
+          <div className="flex flex-col items-end gap-2">
+            <select value={pipelineClient} onChange={(e) => setPipelineClient(e.target.value)} className={`rounded-xl border px-3 py-2 text-sm outline-none transition focus:border-cyan-400 ${pipelineClient === "all" ? "border-slate-200 bg-slate-50 text-slate-700" : "border-cyan-300 bg-cyan-50 font-semibold text-cyan-800"}`} title="Filtrar o pipeline por marca">
+              <option value="all">Todas as marcas</option>
+              {pipelineClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <p className="max-w-xl text-right text-sm leading-6 text-slate-500">Todos os estágios, na ordem do fluxo. Clique num estágio para abrir só os blocos que estão nele{pipelineClient !== "all" ? " (já filtrados pela marca)" : ""}.</p>
+          </div>
         </div>
         <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {pipeline.map(({ s, icon: Icon, color }) => (
-            <button key={s} onClick={() => openBlocks(s)} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
+            <button key={s} onClick={() => openPipeline(s)} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{STATUS_LABELS[s]}</p>
-                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{byStatus[s] || 0}</p>
+                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{pipeByStatus[s] || 0}</p>
                 </div>
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50">
                   <Icon className={`h-5 w-5 ${color}`} />
@@ -1632,10 +1647,10 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-slate-100 pt-4 text-sm text-slate-500">
           <span><span className="font-semibold text-slate-700">{onPipeline}</span> na esteira</span>
-          <button onClick={() => openBlocks("blocked")} className="hover:text-slate-700"><span className="font-semibold text-rose-600">{byStatus["blocked"] || 0}</span> bloqueados</button>
-          <button onClick={() => openBlocks("on_hold")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{byStatus["on_hold"] || 0}</span> em espera</button>
-          <button onClick={() => openBlocks("archived")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{byStatus["archived"] || 0}</span> arquivados</button>
-          <span className="ml-auto text-xs text-slate-400">{onPipeline + paused} = {blocks.length} blocos</span>
+          <button onClick={() => openPipeline("blocked")} className="hover:text-slate-700"><span className="font-semibold text-rose-600">{pipeByStatus["blocked"] || 0}</span> bloqueados</button>
+          <button onClick={() => openPipeline("on_hold")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{pipeByStatus["on_hold"] || 0}</span> em espera</button>
+          <button onClick={() => openPipeline("archived")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{pipeByStatus["archived"] || 0}</span> arquivados</button>
+          <span className="ml-auto text-xs text-slate-400">{onPipeline + paused} = {pipelineBlocks.length} blocos{pipelineClient !== "all" ? ` de ${pipelineClients.find((c) => c.id === pipelineClient)?.name ?? "marca"}` : ""}</span>
         </div>
       </Card>
 
@@ -1994,6 +2009,8 @@ const isClientRole = (u: SeedUser) => u.role === "client" || u.role === "freelan
 // "todas as marcas / todos os status" e ela tinha de filtrar tudo de novo.
 type BlockSort = "recent" | "sku" | "sku_desc" | "title" | "due";
 const BLOCKS_LIST_MEMORY: { search: string; status: string; client: string; sort: BlockSort; grid: boolean } = { search: "", status: "all", client: "all", sort: "recent", grid: false };
+/** Marca escolhida no pipeline do dashboard (Jéssica, 2026-10-23) — lembrada ao voltar para a tela. */
+let PIPELINE_CLIENT = "all";
 /** "2026_21_GH…" < "2026_98_GH…" < "2026_137_GH…" — comparação que entende número dentro do texto. */
 const naturalCompare = (a: string, b: string) => a.localeCompare(b, "pt-BR", { numeric: true, sensitivity: "base" });
 
