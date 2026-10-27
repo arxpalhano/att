@@ -136,7 +136,18 @@ interface SeedUser {
    */
   reviewer?: boolean;
 }
-interface SeedClient { id: string; name: string; code: string; contactEmail: string; active: boolean; }
+interface SeedClient {
+  id: string; name: string; code: string; contactEmail: string; active: boolean;
+  /**
+   * Marca interna (2026-10-27): a "ArchTechTour" existe só para tickets de demandas da própria
+   * equipe (vídeo no site, análise de material de prospect). Não aparece em Clientes,
+   * Contratos, Financeiro, criação de bloco/usuário nem para os agentes.
+   */
+  internal?: boolean;
+}
+const isInternalClient = (c: SeedClient) => !!c.internal;
+/** Marcas comerciais (sem a interna) — para telas de cliente/contrato/financeiro. */
+const commercialClients = (list: SeedClient[]) => list.filter((c) => !isInternalClient(c));
 export interface SeedContract {
   id: string; clientId: string; title: string;
   totalBlocks: number; usedBlocks: number; startDate: string; active: boolean;
@@ -2156,7 +2167,7 @@ function BlocksListPage({ user, setPage, setSelectedBlock, initialStatus = "all"
           {!isClient && (
             <select value={filterClient} onChange={(e) => setFilterClient(e.target.value)} className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
               <option value="all">Todos os Clientes</option>
-              {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {commercialClients(CLIENTS).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
           <select value={sort} onChange={(e) => setSort(e.target.value as BlockSort)} title="Ordenação da lista" className="text-sm border border-slate-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
@@ -2686,7 +2697,7 @@ function CreateBlockModal({ user, onClose, onCreate }: {
               <label className="block text-xs font-medium text-slate-500 mb-1">Cliente *</label>
               <select value={clientId} onChange={(e) => { setClientId(e.target.value); setContractId(""); setPendingFiles({}); }} className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
                 <option value="">Selecione...</option>
-                {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
+                {commercialClients(CLIENTS).map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code})</option>)}
               </select>
             </div>
           )}
@@ -3422,7 +3433,7 @@ function ContractFormModal({ title, onClose, onSave, initial, clients }: {
         <div className="space-y-3">
           <div><label className="text-xs font-medium text-slate-500">Cliente *</label>
             <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm">
-              {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {commercialClients(clients).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div><label className="text-xs font-medium text-slate-500">Título *</label><input value={t} onChange={(e) => setT(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Contrato 2026 – Linha Completa" /></div>
@@ -3583,11 +3594,11 @@ function ClientsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div><h1 className="text-xl font-bold text-slate-800">Clientes</h1><p className="text-sm text-slate-500">{clients.length} clientes · {clients.filter((c) => c.active).length} ativos</p></div>
+        <div><h1 className="text-xl font-bold text-slate-800">Clientes</h1><p className="text-sm text-slate-500">{commercialClients(clients).length} clientes · {commercialClients(clients).filter((c) => c.active).length} ativos</p></div>
         {canCreate && <button onClick={() => setShowAdd(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-white bg-slate-900 rounded-lg hover:bg-slate-800"><Plus className="w-3.5 h-3.5" /> Novo Cliente</button>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {clients.map((cl) => {
+        {commercialClients(clients).map((cl) => {
           const ctrs = contracts.filter((c) => c.clientId === cl.id);
           const total = ctrs.reduce((s, c) => s + c.totalBlocks, 0);
           const used = ctrs.reduce((s, c) => s + usedBlocksOf(c.id, blocks), 0);
@@ -4279,7 +4290,7 @@ function UserFormModal({
                 <select value={clientId} onChange={(e) => setClientId(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/40">
                   <option value="">Selecione...</option>
-                  {CLIENTS.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {commercialClients(CLIENTS).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {missingClient && <p className="mt-1 text-xs font-medium text-rose-600">Escolha a marca — sem ela o usuário entra mas não vê nada.</p>}
               </div>
@@ -5824,7 +5835,7 @@ function BimDemandFormModal({ initial, onClose, onSave, freelancers, clients, bl
               </select></div>
             <div><label className="text-xs font-medium text-slate-500">Marca *</label>
               <select value={clientId} onChange={(e) => setClientId(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
-                {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {commercialClients(clients).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select></div>
           </div>
           <div><label className="text-xs font-medium text-slate-500">Título *</label>
@@ -7106,7 +7117,7 @@ function MonkLighthousePage({ setPage }: { setPage: (p: string) => void }) {
             <label className="text-xs font-medium text-slate-500">Cliente (default: todos)</label>
             <select value={scopeClient} onChange={(e) => setScopeClient(e.target.value)} disabled={!!auditUrl.trim()} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white disabled:bg-slate-50 disabled:text-slate-400">
               <option value="">Todos os clientes (10 produtos por rodada)</option>
-              {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {commercialClients(clients).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <p className="text-xs text-slate-400 mt-1">Para um cliente: até 10 produtos. Para mais, rode novamente.</p>
           </div>
@@ -7251,7 +7262,7 @@ function YodaKanbanPage({ setPage }: { setPage: (p: string) => void }) {
           <label className="text-xs font-medium text-slate-500">Cliente (default: todos)</label>
           <select value={scopeClient} onChange={(e) => setScopeClient(e.target.value)} className="mt-1 w-full md:w-1/2 px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
             <option value="">Portfólio completo (todos clientes ativos)</option>
-            {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {commercialClients(clients).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
           <p className="text-xs text-slate-400 mt-1">Foco em 1 cliente → análise profunda (saúde, riscos, oportunidades).</p>
         </div>
@@ -7393,7 +7404,7 @@ function HarveyCloserPage({ setPage }: { setPage: (p: string) => void }) {
         <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Cliente em foco</p>
         <select value={scopeClient} onChange={(e) => setScopeClient(e.target.value)} className="w-full md:w-1/2 px-3 py-2 rounded-xl border border-slate-200 text-sm bg-white">
           <option value="">Selecione o cliente…</option>
-          {clients.filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {commercialClients(clients).filter((c) => c.active).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <p className="text-xs text-slate-400 mt-1">Harvey cruza o analytics real + portfólio do cliente para montar a estratégia.</p>
       </Card>
@@ -8347,7 +8358,7 @@ export default function Portal() {
       case "contracts": return <ContractsPage user={currentUser} setPage={setPage} setSelectedContract={setSelectedContract} />;
       case "contract_detail": return <ContractDetailPage contractId={selectedContract} user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "clients": return <ClientsPage />;
-      case "finance": return <FinanceView user={currentUser} clients={clients} canEdit={can(currentUser, "finance", "edit")} />;
+      case "finance": return <FinanceView user={currentUser} clients={commercialClients(clients)} canEdit={can(currentUser, "finance", "edit")} />;
       case "approvals": return <ApprovalsPage user={currentUser} />;
       case "queue": return <QueuePage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "tickets": return <ProductionTicketsPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;

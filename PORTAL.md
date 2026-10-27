@@ -404,6 +404,14 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### Marca interna "ArchTechTour" para tickets da própria equipe (desde 2026-10-27)
+
+Jéssica: "tem demandas que são diretamente pra gente" (Lucas subir vídeo no site, Victor analisar
+material de prospect). Cliente `c_att` ("ArchTechTour", código `att`) com `internal: true`:
+aparece no **Novo Ticket** (bloco opcional) e nos filtros de Tickets; **não aparece** em Clientes,
+Contratos, Financeiro, criação de bloco, cadastro de usuário cliente, demanda BIM nem nos agentes
+(`commercialClients()` em `Portal.tsx`). Não entra em Analytics nem em "Carga por marca".
+
 ### Pipeline do dashboard filtrado por marca (desde 2026-10-23)
 
 Seletor "Todas as marcas / <marca>" no cabeçalho de **Produção em andamento** (Jéssica). Os 15
