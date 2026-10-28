@@ -1568,7 +1568,7 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
               ].map((item) => (
                 <button key={item.label} onClick={item.onClick} className="rounded-[22px] border border-white/10 bg-white/6 p-4 text-left backdrop-blur transition hover:bg-white/10">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{item.label}</p>
-                  <p className="mt-3 text-3xl font-semibold text-white">{item.value}</p>
+                  <p className="mt-3 text-3xl font-semibold text-white">{hydrated ? item.value : "—"}</p>
                   <p className="mt-2 text-sm text-slate-300">{item.sub}</p>
                 </button>
               ))}
@@ -1643,7 +1643,7 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{STATUS_LABELS[s]}</p>
-                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{pipeByStatus[s] || 0}</p>
+                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{hydrated ? pipeByStatus[s] || 0 : "—"}</p>
                 </div>
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50">
                   <Icon className={`h-5 w-5 ${color}`} />
@@ -1657,7 +1657,8 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
           ))}
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-slate-100 pt-4 text-sm text-slate-500">
-          <span><span className="font-semibold text-slate-700">{onPipeline}</span> na esteira</span>
+          {!hydrated && <span className="w-full font-semibold text-amber-700">Dados ainda não carregados do banco — os números aparecem quando sincronizar.</span>}
+          <span><span className="font-semibold text-slate-700">{hydrated ? onPipeline : "—"}</span> na esteira</span>
           <button onClick={() => openPipeline("blocked")} className="hover:text-slate-700"><span className="font-semibold text-rose-600">{pipeByStatus["blocked"] || 0}</span> bloqueados</button>
           <button onClick={() => openPipeline("on_hold")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{pipeByStatus["on_hold"] || 0}</span> em espera</button>
           <button onClick={() => openPipeline("archived")} className="hover:text-slate-700"><span className="font-semibold text-slate-700">{pipeByStatus["archived"] || 0}</span> arquivados</button>
@@ -2967,11 +2968,23 @@ function BlockDetailPage({ blockId, user, setPage }: { blockId: string; user: Se
     }
   }, [assets.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const blockIdForLog = block?.id;
+  useEffect(() => {
+    if (!blockIdForLog) return;
+    let alive = true;
+    fetch(`/api/activity?days=0&block=${encodeURIComponent(blockIdForLog)}&exclude=page_view,login,logout`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (alive && j && Array.isArray(j.items) && j.items.length) setActivities((prev) => { const seen = new Set(prev.map((a) => a.id)); const extra = (j.items as SeedActivity[]).filter((a) => !seen.has(a.id)); return extra.length ? [...prev, ...extra] : prev; }); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [blockIdForLog]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (!block) return <EmptyState icon={Package} title="Bloco não encontrado" />;
 
   const contract = CONTRACTS.find((c) => c.id === block.contractId);
   const blockAssets = assets.filter((a) => a.blockId === block.id);
   const blockActivities = activities.filter((a) => a.blockId === block.id && !isNavigation(a)).sort((a, b) => b.at.localeCompare(a.at));
+  // O estado geral só traz 45 dias de log; o histórico do bloco busca tudo dele ao abrir.
   const approvalHistory = blockActivities.filter((a) => a.type === "approval_approved" || a.type === "approval_rejected");
   const approvalRule = APPROVAL_NEXT[block.status];
   const readiness = checkReadiness(block.id, block.svc, assets, isFilled(finishesForBlock(block.id)));
@@ -3976,7 +3989,7 @@ function ActivityPage({ setPage, setSelectedBlock, setSelectedContract }: { setP
   const load = useCallback(async () => {
     setLoading(true); setError("");
     try {
-      const r = await fetch(`/api/activity?days=${days}`);
+      const r = await fetch(`/api/activity?days=${days}&exclude=finance_sync`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !Array.isArray(j.items)) throw new Error(j.error || `HTTP ${r.status}`);
       setItems(j.items as SeedActivity[]);
@@ -8103,8 +8116,14 @@ export default function Portal() {
     };
     (async () => {
       try {
-        const [b, t, a, c, ctr, pub, u, bd, fin] = await Promise.all([
-          load("/api/state/blocks"), load("/api/state/tickets"), load("/api/state/activities?days=90"),
+        // O log de atividades NÃO entra mais no Promise.all: em 28/10 ele passou do limite de
+        // 6 MB da Lambda, deu 500 e o portal inteiro abriu com dados de exemplo. Agora carrega
+        // à parte, sem navegação nem sincronização do financeiro, e se falhar só o log fica vazio.
+        void load("/api/state/activities?days=45&exclude=page_view,login,logout,finance_sync")
+          .then((a) => setActivities(a as SeedActivity[]))
+          .catch((e) => { console.error("Log de atividades não carregou:", e); setActivities([]); });
+        const [b, t, c, ctr, pub, u, bd, fin] = await Promise.all([
+          load("/api/state/blocks"), load("/api/state/tickets"),
           load("/api/state/clients"), load("/api/state/contracts"), load("/api/state/publications"),
           load("/api/state/users"), load("/api/state/bim-demands"), load("/api/state/finishes"),
         ]);
@@ -8122,7 +8141,6 @@ export default function Portal() {
         };
         if (b.length) setBlocks(b as SeedBlock[]); else await seedIfEmpty("/api/state/blocks", b, INITIAL_BLOCKS);
         if (t.length) { setTickets(t as ProductionTicket[]); TICKETS = t as ProductionTicket[]; } else await seedIfEmpty("/api/state/tickets", t, TICKETS);
-        setActivities(a as SeedActivity[]); // só leitura: o log é escrito pelo servidor
         if (c.length) { setClients(c as SeedClient[]); CLIENTS = c as SeedClient[]; } else await seedIfEmpty("/api/state/clients", c, CLIENTS);
         if (ctr.length) { setContracts(ctr as SeedContract[]); CONTRACTS = ctr as SeedContract[]; } else await seedIfEmpty("/api/state/contracts", ctr, CONTRACTS);
         if (pub.length) setPublications(pub as SeedPub[]); else await seedIfEmpty("/api/state/publications", pub, PUBLICATIONS);
@@ -8283,7 +8301,7 @@ export default function Portal() {
         apply[key](server);
       }));
       // Atividades dos últimos 2 dias: o sino usa o log para avisar "caiu um ticket para você".
-      const ra = await fetch("/api/activity?days=2");
+      const ra = await fetch("/api/activity?days=2&exclude=page_view,login,logout,finance_sync");
       if (ra.ok) {
         const ja = await ra.json().catch(() => null);
         if (ja && Array.isArray(ja.items) && ja.items.length) appendActivities(ja.items as SeedActivity[]);

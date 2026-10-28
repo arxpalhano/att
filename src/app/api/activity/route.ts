@@ -11,7 +11,7 @@
  *      → { items } mais recentes primeiro (days=0 = tudo).
  */
 import { NextRequest, NextResponse } from "next/server";
-import { listActivities, readActor, writeActivities } from "@/lib/activity-server";
+import { capActivities, excludeParam, listActivities, readActor, writeActivities } from "@/lib/activity-server";
 import { ActivityEntity, ENTITY_LABELS } from "@/lib/activity";
 
 export const dynamic = "force-dynamic";
@@ -52,8 +52,10 @@ export async function GET(req: NextRequest) {
       userId: q.get("user") || undefined,
       entity: q.get("entity") || undefined,
       clientId: q.get("client") || undefined,
+      blockId: q.get("block") || undefined,
+      exclude: excludeParam(q.get("exclude")),
     });
-    return NextResponse.json({ items });
+    return NextResponse.json(capActivities(items));
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

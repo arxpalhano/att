@@ -8,15 +8,15 @@
  *                           inteiro aqui; ignoramos para não ressuscitar o seed.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { listActivities } from "@/lib/activity-server";
+import { capActivities, excludeParam, listActivities } from "@/lib/activity-server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   try {
     const days = Number(req.nextUrl.searchParams.get("days") ?? "90");
-    const items = await listActivities({ days: Number.isFinite(days) ? days : 90 });
-    return NextResponse.json({ items });
+    const items = await listActivities({ days: Number.isFinite(days) ? days : 90, exclude: excludeParam(req.nextUrl.searchParams.get("exclude")) });
+    return NextResponse.json(capActivities(items));
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }

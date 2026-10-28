@@ -55,7 +55,7 @@ export default function TeamPerformance({ users, blocks, tickets, clients }: Pro
   const load = async () => {
     setLoading(true); setError("");
     try {
-      const r = await fetch(`/api/activity?days=${days}&t=${Date.now()}`);
+      const r = await fetch(`/api/activity?days=${days}&exclude=page_view,login,logout,finance_sync&t=${Date.now()}`);
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !Array.isArray(j.items)) throw new Error(j.error || `HTTP ${r.status}`);
       setItems(j.items as ActivityRecord[]);

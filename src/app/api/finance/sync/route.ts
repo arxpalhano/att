@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { readActor, writeActivities } from "@/lib/activity-server";
-import { syncFromAsaas } from "@/lib/finance-server";
+import { readMeta, syncFromAsaas } from "@/lib/finance-server";
 import { asaasConfigured } from "@/lib/asaas";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +25,14 @@ export async function POST(req: NextRequest) {
     if (!byCron) {
       if (actor.id === "anon") return NextResponse.json({ error: "sem usuário" }, { status: 401 });
       if (actor.role === "client" || actor.role === "freelancer_bim") return NextResponse.json({ error: "sem acesso" }, { status: 403 });
+    }
+    // O destino de API do EventBridge corta em 5 s e a sincronização leva 6–8 s: ele achava
+    // que falhou e repetia por 24 h (a "Rotina diária" rodava a cada ~9 min e lotou o log —
+    // 2026-10-28). Chamada do cron com sincronização do cron nas últimas 20 h responde na hora.
+    if (byCron) {
+      const meta = await readMeta().catch(() => null);
+      const last = meta?.lastSyncBy === "cron" && meta.lastSyncAt ? Date.parse(meta.lastSyncAt) : 0;
+      if (last && Date.now() - last < 20 * 3600_000) return NextResponse.json({ ok: true, skipped: true, lastSyncAt: meta?.lastSyncAt });
     }
     const who = byCron ? "cron" : actor.name;
     const result = await syncFromAsaas(who);

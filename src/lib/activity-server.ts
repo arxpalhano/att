@@ -132,7 +132,7 @@ export async function applyDelta(table: string, entity: ActivityEntity, delta: S
 }
 
 /** Lista atividades dos últimos N dias (0 = tudo), mais recentes primeiro. */
-export async function listActivities(opts: { days?: number; userId?: string; entity?: string; clientId?: string } = {}): Promise<ActivityRecord[]> {
+export async function listActivities(opts: { days?: number; userId?: string; entity?: string; clientId?: string; blockId?: string; exclude?: string[] } = {}): Promise<ActivityRecord[]> {
   const doc = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.APP_AWS_REGION || "us-east-1" }));
   const names: string[] = [];
   const values: Record<string, unknown> = {};
@@ -144,6 +144,7 @@ export async function listActivities(opts: { days?: number; userId?: string; ent
   if (opts.userId) { names.push("userId = :uid"); values[":uid"] = opts.userId; }
   if (opts.entity) { names.push("entity = :ent"); values[":ent"] = opts.entity; }
   if (opts.clientId) { names.push("clientId = :cid"); values[":cid"] = opts.clientId; }
+  if (opts.blockId) { names.push("blockId = :bid"); values[":bid"] = opts.blockId; }
   const items: ActivityRecord[] = [];
   let lastKey: Record<string, unknown> | undefined;
   do {
@@ -156,8 +157,28 @@ export async function listActivities(opts: { days?: number; userId?: string; ent
     items.push(...((res.Items as ActivityRecord[]) || []));
     lastKey = res.LastEvaluatedKey;
   } while (lastKey);
-  return items.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+  const skip = new Set(opts.exclude ?? []);
+  return (skip.size ? items.filter((i) => !skip.has(i.type)) : items).sort((a, b) => (b.at || "").localeCompare(a.at || ""));
 }
+
+/**
+ * Teto da resposta de leitura do log (2026-10-28). A Lambda do Amplify não devolve mais
+ * que 6 MB: em 28/10 o log de 90 dias passou disso, /api/state/activities deu 500 e o
+ * portal inteiro abriu com os dados de exemplo (pipeline da reunião errado). Agora a
+ * resposta corta nos mais recentes que cabem em ~4,5 MB e avisa `truncated`.
+ */
+export const ACTIVITY_MAX_BYTES = 4_500_000;
+export function capActivities(items: ActivityRecord[]): { items: ActivityRecord[]; truncated: boolean } {
+  let total = 2; const out: ActivityRecord[] = [];
+  for (const it of items) { // já vêm do mais recente para o mais antigo
+    total += Buffer.byteLength(JSON.stringify(it)) + 1;
+    if (total > ACTIVITY_MAX_BYTES) return { items: out, truncated: true };
+    out.push(it);
+  }
+  return { items: out, truncated: false };
+}
+/** `?exclude=page_view,finance_sync` → lista de tipos. */
+export const excludeParam = (v: string | null) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []);
 
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status });
 const fail = (e: unknown) => json({ error: (e as Error).message }, 500);

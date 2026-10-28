@@ -404,6 +404,29 @@ ganhou o **compromisso da etapa** (`stageDue`): a data que o responsável assume
   replanejamentos, atraso médio, atrasadas agora. Só conta o histórico feito pela própria pessoa
   dentro do ciclo dela. A tabela "Etapa a etapa" ganhou a coluna Compromisso.
 
+### Incidente 2026-10-28: portal abrindo com dados de exemplo (pipeline errado)
+
+**Sintoma:** dashboard com 148 blocos (50 em programação, 70 publicados) em vez dos 853 reais —
+eram os blocos do seed. Com `hydrated=false` nada que a equipe fazia era gravado.
+**Causa:** `/api/state/activities?days=90` passou do limite de **6 MB** de resposta da Lambda do
+Amplify → HTTP 500 → o `Promise.all` da hidratação abortava tudo e ficava o seed. O log inchou
+porque o cron do Financeiro (EventBridge `finance-sync-daily` → API destination) **repetia a cada
+~9 min por 24 h**: o API destination corta em 5 s, a sincronização leva 6–8 s, o EventBridge
+considerava falha e reenviava (até 185 vezes).
+**Correções:**
+- Hidratação não depende mais do log: ele carrega à parte (45 dias, sem `page_view/login/logout/
+  finance_sync`); se falhar, só o log fica vazio.
+- `listActivities` aceita `exclude` e `blockId`; `/api/activity` e `/api/state/activities` aceitam
+  `?exclude=a,b` e `?block=<id>` e **cortam a resposta em ~4,5 MB** (`capActivities`, `truncated`).
+- Detalhe do bloco busca o histórico completo daquele bloco ao abrir (`?days=0&block=`).
+- Sino (refresh 60 s), Atividade e Desempenho pedem o log sem o ruído (`exclude`).
+- `/api/finance/sync`: chamada do cron com sincronização do cron nas últimas 20 h responde na hora
+  (`skipped`) — o reenvio do EventBridge recebe 200 e para.
+- Dashboard mostra "—" (e aviso) enquanto não sincronizou, nunca número de exemplo.
+- **Pendente (precisa do dono):** `RetryPolicy {MaximumRetryAttempts: 0}` no target do
+  `finance-sync-daily` (`aws events put-targets …`) — a proteção acima já resolve, isso só evita
+  as chamadas inúteis.
+
 ### Marca interna "ArchTechTour" para tickets da própria equipe (desde 2026-10-27)
 
 Jéssica: "tem demandas que são diretamente pra gente" (Lucas subir vídeo no site, Victor analisar
