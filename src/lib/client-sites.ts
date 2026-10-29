@@ -88,7 +88,7 @@ export function isIgnoredHost(host: string): boolean {
   const h = siteHost(host);
   if (!h || !h.includes(".") || /[<>\s]/.test(h)) return true;
   if (h === "localhost" || /^\d+(\.\d+){3}$/.test(h)) return true;
-  return /(^|\.)archtechtour\.com$|google\.|facebook\.com$|instagram\.com$|baidu\.com$|bing\.com$|chatgpt\.com$|openai\.com$|seleniumbase\.io$|gather\.town$|admin\.shopify\.com$|shopifypreview\.com$|filesusr\.com$|linkedin\.com$|whatsapp\.com$|t\.co$/.test(h);
+  return /(^|\.)archtechtour\.com$|google\.|facebook\.com$|instagram\.com$|baidu\.com$|bing\.com$|chatgpt\.com$|openai\.com$|seleniumbase\.io$|gather\.town$|admin\.shopify\.com$|shopifypreview\.com$|filesusr\.com$|linkedin\.com$|whatsapp\.com$|t\.co$|notion\.so$|notion\.site$|cloud\.microsoft$|office\.com$|sharepoint\.com$|cloudfront\.net$|mdnplay\.dev$|aocr\.org$/.test(h);
 }
 
 export interface ClientSiteStatus {
