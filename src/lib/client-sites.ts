@@ -112,3 +112,31 @@ export function pubClientSite(
   if (hit) return { live: true, source: "auto", host: hit.host, since: hit.firstSeen, lastSeen: hit.lastSeen, sessions: hit.sessions };
   return { live: false };
 }
+
+// ── Página do produto no site do cliente (2026-10-29) ─────────────────────────
+// O analytics só guarda o DOMÍNIO (o navegador corta o resto do referrer). Para dar
+// o link da página, o servidor lê o sitemap do site da marca, escolhe as páginas
+// cujo endereço tem as palavras do produto e procura nelas o link do customizador
+// (…/<pasta>/index.html). Site sem sitemap ou montado só por JavaScript (Estúdio
+// Bola) não dá — a tela oferece "procurar no Google" restrito ao site.
+export interface ClientPageEntry {
+  clientId: string;
+  /** Página onde o iframe do customizador foi encontrado. */
+  url?: string;
+  checkedAt: string;
+  /** Quantas páginas candidatas foram abertas (0 = nenhuma parecida no sitemap). */
+  tried: number;
+}
+export interface ClientPagesStore {
+  id: string;
+  updatedAt: string;
+  pages: Record<string, ClientPageEntry>; // pubId → resultado
+}
+export const CLIENT_PAGES_ID = "client-sites#pages";
+/** Não achou: tenta de novo depois desse tempo (o cliente pode ter publicado). */
+export const CLIENT_PAGES_RETRY_DAYS = 7;
+
+/** Busca no Google só dentro do site da marca — plano B quando não achamos a página. */
+export function googleSiteSearch(host: string, title: string): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(`site:${siteHost(host)} "${title}"`)}`;
+}

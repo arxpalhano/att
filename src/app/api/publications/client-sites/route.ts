@@ -6,14 +6,23 @@
  * POST → roda a verificação no Athena (~10–30 s) e grava o relatório.
  *        ?auto=1: só roda se o relatório tiver mais de CLIENT_SITES_MAX_AGE_H horas
  *        (a tela chama assim ao abrir, e o primeiro do dia dispara a verificação).
+ * POST ?step=pages → procura um lote (~20 s) das PÁGINAS dos produtos nos sites das marcas
+ *        (sitemap + link do customizador no HTML). Devolve { remaining }: a tela chama de
+ *        novo enquanto houver. O GET devolve `pages` (id da publicação → página).
  */
 import { NextRequest, NextResponse } from "next/server";
 import { readActor, writeActivities } from "@/lib/activity-server";
-import { readClientSitesReport, runClientSitesCheck } from "@/lib/client-sites-server";
-import { CLIENT_SITES_MAX_AGE_H, ClientSiteReport } from "@/lib/client-sites";
+import { readClientPages, readClientSitesReport, runClientPagesBatch, runClientSitesCheck } from "@/lib/client-sites-server";
+import { CLIENT_SITES_MAX_AGE_H, ClientPagesStore, ClientSiteReport } from "@/lib/client-sites";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
+
+function pagesFor(store: ClientPagesStore | null, role: string, clientId?: string) {
+  if (!store) return {};
+  if (role !== "client") return store.pages;
+  return Object.fromEntries(Object.entries(store.pages).filter(([, e]) => e.clientId === clientId));
+}
 
 function forActor(report: ClientSiteReport | null, role: string, clientId?: string) {
   if (!report || role !== "client") return report;
@@ -24,8 +33,8 @@ function forActor(report: ClientSiteReport | null, role: string, clientId?: stri
 export async function GET(req: NextRequest) {
   try {
     const { actor } = await readActor(req);
-    const report = await readClientSitesReport();
-    return NextResponse.json({ report: forActor(report, actor.role, actor.clientId) }, { headers: { "Cache-Control": "no-store" } });
+    const [report, pages] = await Promise.all([readClientSitesReport(), readClientPages().catch(() => null)]);
+    return NextResponse.json({ report: forActor(report, actor.role, actor.clientId), pages: pagesFor(pages, actor.role, actor.clientId) }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
@@ -36,6 +45,11 @@ export async function POST(req: NextRequest) {
     const { actor, sessionEmail } = await readActor(req);
     if (actor.id === "anon") return NextResponse.json({ error: "sem usuário" }, { status: 401 });
     if (actor.role === "client" || actor.role === "freelancer_bim") return NextResponse.json({ error: "sem acesso" }, { status: 403 });
+    if (req.nextUrl.searchParams.get("step") === "pages") {
+      const r = await runClientPagesBatch(20000);
+      const store = await readClientPages();
+      return NextResponse.json({ ok: true, ...r, pages: store?.pages ?? {} });
+    }
     const auto = req.nextUrl.searchParams.get("auto") === "1";
     const prev = await readClientSitesReport();
     if (auto && prev && Date.now() - Date.parse(prev.checkedAt) < CLIENT_SITES_MAX_AGE_H * 3600_000) {

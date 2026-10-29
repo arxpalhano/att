@@ -32,6 +32,17 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: "2026-10-29c",
+    date: "2026-10-29",
+    title: "Link da página do produto no site do cliente",
+    audience: "equipe",
+    items: [
+      { kind: "novo", title: "\"Ver no site do cliente\" em cada publicação", desc: "Em Publicações, quem está no ar no site da marca ganha o link da página exata do produto, para conferir. O portal acha a página lendo o mapa do site da marca e procurando o customizador dentro dela." },
+      { kind: "novo", title: "\"Procurar no site\" quando a página não aparece", desc: "Se o site da marca não tem mapa do site ou é montado de um jeito que não dá para ler (caso do Estúdio Bola), o link abre uma busca no Google só dentro do site dela." },
+      { kind: "novo", audience: "todos", title: "Link para a página do seu site", desc: "Nas Publicações, cada customizador que já está no seu site tem o link da página onde ele aparece." },
+    ],
+  },
+  {
     id: "2026-10-29b",
     date: "2026-10-29",
     title: "Novidades no portal, pipeline em duas faixas e \"no site do cliente\"",

@@ -9,14 +9,16 @@ import { getItem, putItem, scanAll, TABLES } from "./dynamo";
 import {
   ClientSiteHit, ClientSiteReport, CLIENT_SITES_REPORT_ID,
   hostMatches, isIgnoredHost, matchProduct, pubFolderKey, siteHost,
+  ClientPagesStore, CLIENT_PAGES_ID, CLIENT_PAGES_RETRY_DAYS,
 } from "./client-sites";
 
 const DB = process.env.ATHENA_DB || "customizador_events";
 const DAYS = 365;
 
-interface Pub { id: string; blockId: string; url: string }
+interface Pub { id: string; blockId: string; url: string; clientSite?: { url?: string } }
 interface Block { id: string; clientId: string }
 interface Client { id: string; sites?: string[]; internal?: boolean }
+interface SitemapCache { id: string; fetchedAt: string; urls: string[] }
 
 export async function readClientSitesReport(): Promise<ClientSiteReport | null> {
   return getItem<ClientSiteReport>(TABLES.AGENT_ROUTINES, CLIENT_SITES_REPORT_ID);
@@ -98,4 +100,110 @@ export async function runClientSitesCheck(by: string): Promise<ClientSiteReport>
   };
   await putItem(TABLES.AGENT_ROUTINES, report);
   return report;
+}
+
+// ── Página do produto no site do cliente ──────────────────────────────────────
+const UA = "Mozilla/5.0 (compatible; ArchTechTour-portal/1.0; +https://app.archtechtour.com)";
+async function fetchText(url: string, ms = 8000): Promise<string> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), ms);
+  try {
+    const r = await fetch(url, { headers: { "User-Agent": UA }, signal: ctl.signal, redirect: "follow", cache: "no-store" });
+    if (!r.ok) return "";
+    const text = await r.text();
+    return text.length > 3_000_000 ? text.slice(0, 3_000_000) : text;
+  } catch { return ""; } finally { clearTimeout(t); }
+}
+
+/** URLs de páginas do sitemap do domínio (segue sitemap index; cache de 3 dias no DynamoDB). */
+async function sitemapUrls(domain: string): Promise<string[]> {
+  const id = `client-sites#sitemap#${domain}`;
+  const cached = await getItem<SitemapCache>(TABLES.AGENT_ROUTINES, id).catch(() => null);
+  if (cached && Date.now() - Date.parse(cached.fetchedAt) < 3 * 86400_000) return cached.urls;
+  const queue: string[] = [];
+  for (const base of [`https://www.${domain}`, `https://${domain}`]) {
+    const robots = await fetchText(`${base}/robots.txt`, 6000);
+    queue.push(...Array.from(robots.matchAll(/^sitemap:\s*(\S+)/gim)).map((m) => m[1]));
+    queue.push(`${base}/sitemap.xml`, `${base}/sitemap_index.xml`);
+    if (robots) break; // o domínio respondeu: não precisa tentar a outra variação
+  }
+  const seen = new Set<string>(); const out = new Set<string>();
+  while (queue.length && seen.size < 60) {
+    const u = queue.shift()!;
+    if (seen.has(u)) continue;
+    seen.add(u);
+    const xml = await fetchText(u, 10000);
+    for (const m of Array.from(xml.matchAll(/<loc>\s*([^<\s]+)/g))) {
+      const loc = m[1].replace(/&amp;/g, "&");
+      if (/sitemap[^/]*\.xml/i.test(loc)) queue.push(loc); else out.add(loc);
+    }
+  }
+  const urls = Array.from(out).slice(0, 4000);
+  await putItem(TABLES.AGENT_ROUTINES, { id, fetchedAt: new Date().toISOString(), urls } as SitemapCache).catch(() => undefined);
+  return urls;
+}
+
+const fold = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const GENERIC = new Set(["de", "da", "do", "das", "dos", "com", "e", "the", "cadeira", "mesa", "poltrona", "banco", "banqueta", "sofa", "luminaria", "puff", "apoio", "centro", "lateral", "versao", "index"]);
+
+export async function readClientPages(): Promise<ClientPagesStore | null> {
+  return getItem<ClientPagesStore>(TABLES.AGENT_ROUTINES, CLIENT_PAGES_ID);
+}
+
+/**
+ * Procura a página de um lote de publicações no ar nos sites das marcas, dentro de um
+ * orçamento de tempo (a função do Amplify não pode rodar minutos). A tela chama de novo
+ * enquanto `remaining > 0`. Prioriza quem nunca foi procurado.
+ */
+export async function runClientPagesBatch(budgetMs = 20000): Promise<{ done: number; found: number; remaining: number }> {
+  const t0 = Date.now();
+  const [report, store0, pubs, blocks, clients] = await Promise.all([
+    readClientSitesReport(), readClientPages(),
+    scanAll<Pub>(TABLES.PUBLICATIONS), scanAll<Block>(TABLES.BLOCKS), scanAll<Client>(TABLES.CLIENTS),
+  ]);
+  const store: ClientPagesStore = store0 ?? { id: CLIENT_PAGES_ID, updatedAt: "", pages: {} };
+  const clientOf = new Map(blocks.map((b) => [b.id, b.clientId]));
+  const sitesOf = new Map(clients.map((c) => [c.id, c.sites ?? []]));
+  const retryMs = CLIENT_PAGES_RETRY_DAYS * 86400_000;
+  // No ar no site do cliente (analytics ou marcado à mão sem link) e com site cadastrado.
+  const todo = pubs
+    .filter((p) => (report?.hits[p.id] || (p.clientSite && !p.clientSite.url)))
+    .map((p) => ({ pub: p, clientId: report?.hits[p.id]?.clientId ?? clientOf.get(p.blockId) ?? "" }))
+    .filter(({ clientId }) => (sitesOf.get(clientId) ?? []).length > 0)
+    .filter(({ pub }) => { const e = store.pages[pub.id]; return !e || (!e.url && Date.now() - Date.parse(e.checkedAt) > retryMs); })
+    .sort((a, b) => Number(!!store.pages[a.pub.id]) - Number(!!store.pages[b.pub.id]));
+
+  const sitemapByClient = new Map<string, Promise<string[]>>();
+  const urlsFor = (clientId: string) => {
+    if (!sitemapByClient.has(clientId)) {
+      sitemapByClient.set(clientId, Promise.all((sitesOf.get(clientId) ?? []).slice(0, 3).map((d) => sitemapUrls(siteHost(d)))).then((l) => l.flat()));
+    }
+    return sitemapByClient.get(clientId)!;
+  };
+
+  let done = 0, found = 0, i = 0;
+  const worker = async () => {
+    while (i < todo.length && Date.now() - t0 < budgetMs) {
+      const { pub, clientId } = todo[i++];
+      const m = pub.url.match(/\/([^/]+)\/index\.html?/i);
+      const folder = m ? m[1] : "";
+      if (!folder) continue;
+      const tokens = fold(folder).split(/[^a-z0-9]+/).filter((t) => t.length > 2 && !GENERIC.has(t));
+      const words = tokens.length ? tokens : [fold(folder)];
+      const urls = await urlsFor(clientId);
+      const cands = urls.filter((u) => { const f = fold(u); return words.every((w) => f.includes(w)); }).slice(0, 6);
+      const needle = new RegExp(`/${folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/index\\.html`, "i");
+      let page: string | undefined;
+      for (const c of cands) {
+        if (Date.now() - t0 > budgetMs + 8000) break;
+        if (needle.test(await fetchText(c))) { page = c; break; }
+      }
+      store.pages[pub.id] = { clientId, url: page, checkedAt: new Date().toISOString(), tried: cands.length };
+      done++; if (page) found++;
+    }
+  };
+  await Promise.all(Array.from({ length: 6 }, worker));
+  store.updatedAt = new Date().toISOString();
+  await putItem(TABLES.AGENT_ROUTINES, store);
+  return { done, found, remaining: Math.max(0, todo.length - done) };
 }

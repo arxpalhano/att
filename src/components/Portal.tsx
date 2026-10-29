@@ -15,7 +15,7 @@ import { KbRecord, KbBase, KbAttachment, canViewBase, isKbBase, KB_ALLOWED_EXTEN
 import { KB_SEED } from "@/data/kb-seed";
 import { ActivityRecord, BLOCK_STATUS_LABELS, TICKET_STATUS_LABELS as SHARED_TICKET_STATUS_LABELS, ENTITY_LABELS, TYPE_LABELS, PAGE_LABELS, isNavigation } from "@/lib/activity";
 import { setActivityActor, actorHeaders, logActivity } from "@/lib/activity-client";
-import { ClientSiteReport, pubClientSite, siteHost, CLIENT_SITES_MAX_AGE_H } from "@/lib/client-sites";
+import { ClientSiteReport, ClientPageEntry, pubClientSite, siteHost, googleSiteSearch, CLIENT_SITES_MAX_AGE_H } from "@/lib/client-sites";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
@@ -934,6 +934,8 @@ interface AppState {
   setProfiles: React.Dispatch<React.SetStateAction<AccessProfile[]>>;
   /** Verificação automática "no site do cliente" pelo analytics (null = ainda não carregou). */
   siteReport: ClientSiteReport | null;
+  /** Página do produto no site do cliente, por id da publicação (achada pelo sitemap). */
+  sitePages: Record<string, ClientPageEntry>;
   siteChecking: boolean;
   checkClientSites: (auto?: boolean) => Promise<void>;
 }
@@ -6728,7 +6730,7 @@ type PubSiteFilter = "all" | "live" | "pending";
 const PUBS_LIST_MEMORY: { search: string; sort: PubSort; site: PubSiteFilter; client: string } = { search: "", sort: "default", site: "all", client: "" };
 
 function PublicationsPage({ user }: { user: SeedUser }) {
-  const { blocks, setBlocks, setTickets, publications, setPublications, clients, currentUser, siteReport, siteChecking, checkClientSites } = useContext(AppContext);
+  const { blocks, setBlocks, setTickets, publications, setPublications, clients, currentUser, siteReport, sitePages, siteChecking, checkClientSites } = useContext(AppContext);
   const [showImport, setShowImport] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
@@ -6912,7 +6914,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
             </div>
             {!isClient && (
               <div className="ml-auto flex items-center gap-2 text-xs text-slate-400">
-                <span>{siteChecking ? "Verificando no analytics…" : siteReport ? `Verificado pelo analytics em ${new Date(siteReport.checkedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "Ainda não verificado"}</span>
+                <span>{siteChecking ? "Verificando no analytics e procurando as páginas…" : siteReport ? `Verificado pelo analytics em ${new Date(siteReport.checkedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "Ainda não verificado"}</span>
                 <button onClick={() => checkClientSites(false)} disabled={siteChecking} className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-600 hover:border-slate-300 disabled:opacity-40"><RefreshCw className={`w-3 h-3 ${siteChecking ? "animate-spin" : ""}`} /> Verificar agora</button>
               </div>
             )}
@@ -6978,7 +6980,15 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                           )}
                           {canEdit && !st.live && <button onClick={() => markClientSite(pub)} className="text-[11px] font-semibold text-cyan-700 hover:underline">Marcar como no site</button>}
                           {canEdit && st.source === "manual" && <button onClick={() => unmarkClientSite(pub)} className="text-[11px] text-slate-400 hover:text-slate-600 hover:underline">desmarcar</button>}
-                          {st.url && <a href={st.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-cyan-700 hover:underline">ver no site</a>}
+                          {(() => {
+                            // Link para conferir: o que foi marcado à mão > página achada no sitemap > busca no Google no site da marca.
+                            if (!st.live) return null;
+                            const page = st.url || sitePages[pub.id]?.url;
+                            if (page) return <a href={page} target="_blank" rel="noopener noreferrer" title={page} className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-700 hover:underline"><ExternalLink className="h-3 w-3" /> ver no site do cliente</a>;
+                            const host = st.host || client?.sites?.[0];
+                            if (!host) return null;
+                            return <a href={googleSiteSearch(host, block?.title ?? "")} target="_blank" rel="noopener noreferrer" title={sitePages[pub.id] ? "Não achamos a página exata no mapa do site da marca; abre uma busca no Google só dentro do site dela" : "Ainda procurando a página exata; enquanto isso, abre uma busca no Google só dentro do site da marca"} className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-cyan-700 hover:underline"><Search className="h-3 w-3" /> procurar no site</a>;
+                          })()}
                         </div>
                       );
                     })()}
@@ -8332,6 +8342,19 @@ export default function Portal() {
   const [hydrated, setHydrated] = useState(false);
   const [siteReport, setSiteReport] = useState<ClientSiteReport | null>(null);
   const [siteChecking, setSiteChecking] = useState(false);
+  const [sitePages, setSitePages] = useState<Record<string, ClientPageEntry>>({});
+  // Depois da verificação, procura as páginas dos produtos em lotes de ~20 s (a função do
+  // servidor não pode rodar minutos). Para sozinho quando não sobra nada (ou após 15 lotes).
+  const findClientPages = useCallback(async () => {
+    for (let n = 0; n < 15; n++) {
+      try {
+        const r = await fetch("/api/publications/client-sites?step=pages", { method: "POST", headers: actorHeaders() });
+        const j = await r.json();
+        if (j.pages) setSitePages(j.pages);
+        if (!j.ok || !j.remaining || !j.done) break;
+      } catch { break; }
+    }
+  }, []);
   const checkClientSites = useCallback(async (auto = false) => {
     setSiteChecking(true);
     try {
@@ -8339,9 +8362,10 @@ export default function Portal() {
       const j = await r.json();
       if (j.report) setSiteReport(j.report);
       else if (!auto && j.error) alert(`Não consegui verificar agora: ${j.error}`);
+      if (j.report && (!auto || !j.skipped)) await findClientPages();
     } catch (e) { if (!auto) alert(`Não consegui verificar agora: ${(e as Error).message}`); }
     finally { setSiteChecking(false); }
-  }, []);
+  }, [findClientPages]);
   // Relatório "no site do cliente": carrega ao entrar; se tiver mais de 20 h, o primeiro
   // da equipe a abrir o portal no dia dispara a verificação no Athena (em segundo plano).
   useEffect(() => {
@@ -8353,6 +8377,7 @@ export default function Portal() {
         if (!alive) return;
         const rep = (j.report ?? null) as ClientSiteReport | null;
         setSiteReport(rep);
+        setSitePages(j.pages ?? {});
         const internal = currentUser.role !== "client" && currentUser.role !== "freelancer_bim";
         const stale = !rep || Date.now() - Date.parse(rep.checkedAt) > CLIENT_SITES_MAX_AGE_H * 3600_000;
         if (internal && stale) void checkClientSites(true);
@@ -8626,7 +8651,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, siteChecking, checkClientSites }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, sitePages, siteChecking, checkClientSites }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -8684,7 +8709,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, siteChecking, checkClientSites }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, sitePages, siteChecking, checkClientSites }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} unseenNews={unseenNews} />
