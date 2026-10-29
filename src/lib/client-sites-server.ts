@@ -127,16 +127,20 @@ async function sitemapUrls(domain: string): Promise<string[]> {
     queue.push(`${base}/sitemap.xml`, `${base}/sitemap_index.xml`);
     if (robots) break; // o domínio respondeu: não precisa tentar a outra variação
   }
+  // Em ondas paralelas (sitemap index → filhos): sequencial estourava o limite da função.
   const seen = new Set<string>(); const out = new Set<string>();
-  while (queue.length && seen.size < 60) {
-    const u = queue.shift()!;
-    if (seen.has(u)) continue;
-    seen.add(u);
-    const xml = await fetchText(u, 10000);
-    for (const m of Array.from(xml.matchAll(/<loc>\s*([^<\s]+)/g))) {
-      const loc = m[1].replace(/&amp;/g, "&");
-      if (/sitemap[^/]*\.xml/i.test(loc)) queue.push(loc); else out.add(loc);
+  let wave = Array.from(new Set(queue));
+  for (let depth = 0; depth < 3 && wave.length && seen.size < 80; depth++) {
+    wave.forEach((u) => seen.add(u));
+    const xmls = await Promise.all(wave.slice(0, 40).map((u) => fetchText(u, 5000)));
+    const next: string[] = [];
+    for (const xml of xmls) {
+      for (const m of Array.from(xml.matchAll(/<loc>\s*([^<\s]+)/g))) {
+        const loc = m[1].replace(/&amp;/g, "&");
+        if (/sitemap[^/]*\.xml/i.test(loc)) { if (!seen.has(loc)) next.push(loc); } else out.add(loc);
+      }
     }
+    wave = Array.from(new Set(next));
   }
   const urls = Array.from(out).slice(0, 4000);
   await putItem(TABLES.AGENT_ROUTINES, { id, fetchedAt: new Date().toISOString(), urls } as SitemapCache).catch(() => undefined);
@@ -155,7 +159,7 @@ export async function readClientPages(): Promise<ClientPagesStore | null> {
  * orçamento de tempo (a função do Amplify não pode rodar minutos). A tela chama de novo
  * enquanto `remaining > 0`. Prioriza quem nunca foi procurado.
  */
-export async function runClientPagesBatch(budgetMs = 20000): Promise<{ done: number; found: number; remaining: number }> {
+export async function runClientPagesBatch(budgetMs = 12000): Promise<{ done: number; found: number; remaining: number }> {
   const t0 = Date.now();
   const [report, store0, pubs, blocks, clients] = await Promise.all([
     readClientSitesReport(), readClientPages(),
@@ -171,7 +175,8 @@ export async function runClientPagesBatch(budgetMs = 20000): Promise<{ done: num
     .map((p) => ({ pub: p, clientId: report?.hits[p.id]?.clientId ?? clientOf.get(p.blockId) ?? "" }))
     .filter(({ clientId }) => (sitesOf.get(clientId) ?? []).length > 0)
     .filter(({ pub }) => { const e = store.pages[pub.id]; return !e || (!e.url && Date.now() - Date.parse(e.checkedAt) > retryMs); })
-    .sort((a, b) => Number(!!store.pages[a.pub.id]) - Number(!!store.pages[b.pub.id]));
+    // Nunca procurados primeiro; agrupados por marca para um lote ler poucos sitemaps.
+    .sort((a, b) => Number(!!store.pages[a.pub.id]) - Number(!!store.pages[b.pub.id]) || a.clientId.localeCompare(b.clientId));
 
   const sitemapByClient = new Map<string, Promise<string[]>>();
   const urlsFor = (clientId: string) => {
@@ -194,10 +199,12 @@ export async function runClientPagesBatch(budgetMs = 20000): Promise<{ done: num
       const cands = urls.filter((u) => { const f = fold(u); return words.every((w) => f.includes(w)); }).slice(0, 6);
       const needle = new RegExp(`/${folder.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/index\\.html`, "i");
       let page: string | undefined;
-      for (const c of cands) {
-        if (Date.now() - t0 > budgetMs + 8000) break;
-        if (needle.test(await fetchText(c))) { page = c; break; }
-      }
+      // As candidatas em paralelo, com prazo curto: o Amplify corta a resposta em ~28 s.
+      const left = budgetMs + 5000 - (Date.now() - t0);
+      if (left < 2000) break;
+      const htmls = await Promise.all(cands.map((c) => fetchText(c, Math.min(6000, left))));
+      page = cands.find((_, k) => needle.test(htmls[k]));
+      if (!page && cands.length && htmls.every((h) => !h)) continue; // site não respondeu: tenta no próximo lote
       store.pages[pub.id] = { clientId, url: page, checkedAt: new Date().toISOString(), tried: cands.length };
       done++; if (page) found++;
     }

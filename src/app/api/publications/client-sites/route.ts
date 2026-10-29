@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
     if (actor.id === "anon") return NextResponse.json({ error: "sem usuário" }, { status: 401 });
     if (actor.role === "client" || actor.role === "freelancer_bim") return NextResponse.json({ error: "sem acesso" }, { status: 403 });
     if (req.nextUrl.searchParams.get("step") === "pages") {
-      const r = await runClientPagesBatch(20000);
+      const r = await runClientPagesBatch();
       const store = await readClientPages();
       return NextResponse.json({ ok: true, ...r, pages: store?.pages ?? {} });
     }
