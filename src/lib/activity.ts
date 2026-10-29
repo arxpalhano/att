@@ -220,7 +220,7 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       if (!after) return [base({ ...ctx, type: "client_deleted", desc: `Cliente excluído: ${label}` })];
       const out: ActivityDraft[] = [];
       if (!!before.active !== !!after.active) out.push(base({ ...ctx, type: "client_toggled", desc: `Cliente ${after.active ? "ativado" : "desativado"}: ${label}` }));
-      const fields = changedFields(before, after, { name: "nome", code: "código", contactEmail: "e-mail de contato" });
+      const fields = changedFields(before, after, { name: "nome", code: "código", contactEmail: "e-mail de contato", sites: "sites da marca" });
       if (fields.length) out.push(base({ ...ctx, type: "client_edited", desc: `Cliente editado: ${label}${listOf(fields)}` }));
       return out;
     }
@@ -239,7 +239,12 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       const ctx = { blockId: (cur.blockId as string) || "", entityLabel: label };
       if (!before) return [base({ ...ctx, type: "publication_created", desc: `Publicação configurada: ${label} · ${cur.url ?? ""}` })];
       if (!after) return [base({ ...ctx, type: "publication_deleted", desc: `Publicação removida: ${label}` })];
-      const fields = changedFields(before, after, { url: "URL", v: "versão", env: "ambiente", blockId: "bloco" });
+      // Marcação manual "no site do cliente" (src/lib/client-sites.ts) vira uma frase própria.
+      if (!before.clientSite !== !after.clientSite) {
+        const cs = after.clientSite as { url?: string } | undefined;
+        return [base({ ...ctx, type: "publication_client_site", desc: cs ? `Marcado como no ar no site do cliente: ${label}${cs.url ? ` · ${cs.url}` : ""}` : `Desmarcado "no site do cliente": ${label}` })];
+      }
+      const fields = changedFields(before, after, { url: "URL", v: "versão", env: "ambiente", blockId: "bloco", clientSite: "no site do cliente" });
       return fields.length ? [base({ ...ctx, type: "publication_updated", desc: `Publicação editada: ${label}${listOf(fields)}` })] : [];
     }
 

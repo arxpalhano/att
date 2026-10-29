@@ -15,6 +15,7 @@ import { KbRecord, KbBase, KbAttachment, canViewBase, isKbBase, KB_ALLOWED_EXTEN
 import { KB_SEED } from "@/data/kb-seed";
 import { ActivityRecord, BLOCK_STATUS_LABELS, TICKET_STATUS_LABELS as SHARED_TICKET_STATUS_LABELS, ENTITY_LABELS, TYPE_LABELS, PAGE_LABELS, isNavigation } from "@/lib/activity";
 import { setActivityActor, actorHeaders, logActivity } from "@/lib/activity-client";
+import { ClientSiteReport, pubClientSite, siteHost, CLIENT_SITES_MAX_AGE_H } from "@/lib/client-sites";
 import { MIGRATED_BLOCKS, MIGRATED_CONTRACTS, MIGRATED_PUBLICATIONS, MIGRATED_TICKETS } from "@/data/seed";
 import {
   LayoutDashboard, Package, FileText, Users, CheckCircle, Activity,
@@ -144,6 +145,12 @@ interface SeedClient {
    * Contratos, Financeiro, criação de bloco/usuário nem para os agentes.
    */
   internal?: boolean;
+  /**
+   * Sites da marca (domínios, ex. "ricco.com.br"), 2026-10-29: a verificação automática
+   * "no site do cliente" procura no analytics os produtos abertos nesses domínios
+   * (subdomínios entram: en.jaderalmeida.com). src/lib/client-sites.ts
+   */
+  sites?: string[];
 }
 const isInternalClient = (c: SeedClient) => !!c.internal;
 /** Marcas comerciais (sem a interna) — para telas de cliente/contrato/financeiro. */
@@ -207,6 +214,8 @@ export interface SeedPub {
   /** Quando a publicação entrou no portal / foi alterada pela última vez (ISO). Antigas não têm. */
   createdAt?: string;
   updatedAt?: string;
+  /** Marcado à mão como no ar no site do cliente (a detecção automática fica em ClientSiteReport). */
+  clientSite?: { at: string; by: string; url?: string };
 }
 
 // Rótulos vivem em src/lib/activity.ts (o servidor usa os mesmos para descrever o log).
@@ -922,15 +931,19 @@ interface AppState {
   /** Perfis de acesso: padrões do código + att-profiles (src/lib/access.ts). */
   profiles: AccessProfile[];
   setProfiles: React.Dispatch<React.SetStateAction<AccessProfile[]>>;
+  /** Verificação automática "no site do cliente" pelo analytics (null = ainda não carregou). */
+  siteReport: ClientSiteReport | null;
+  siteChecking: boolean;
+  checkClientSites: (auto?: boolean) => Promise<void>;
 }
 const AppContext = createContext<AppState>({} as AppState);
 
 // ============================================================
 // BASE UI COMPONENTS
 // ============================================================
-function Badge({ children, className = "" }: { children: ReactNode; className?: string }) {
+function Badge({ children, className = "", title }: { children: ReactNode; className?: string; title?: string }) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] ${className}`}>
+    <span title={title} className={`inline-flex items-center rounded-full border px-3 py-1 text-[11px] font-semibold leading-none tracking-[0.02em] ${className}`}>
       {children}
     </span>
   );
@@ -1485,7 +1498,7 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
 function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedContract }: { setPage: (p: string) => void; openBlocks: (status: BlockStatus | "all") => void; setSelectedBlock: (id: string) => void; setSelectedContract: (id: string) => void }) {
   // Tudo aqui sai do estado vivo do app (hidratado do DynamoDB e atualizado
   // por qualquer tela). Nada de constantes de seed: elas congelam o número.
-  const { blocks, activities, clients, hydrated, bimDemands } = useContext(AppContext);
+  const { blocks, activities, clients, hydrated, bimDemands, tickets, publications, users, siteReport } = useContext(AppContext);
   const bimOpen = bimDemands.filter(bimIsOpen);
   const bimOpenProducts = bimOpen.reduce((n, d) => n + d.productCount, 0);
   const bimLate = bimOpen.filter((d) => bimDaysLeft(d) < 0).length;
@@ -1523,11 +1536,54 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
     { s: "internal_review", icon: Eye, color: "text-fuchsia-500" },
     { s: "awaiting_client_final_validation", icon: UserCheck, color: "text-amber-500" },
     { s: "approved", icon: ThumbsUp, color: "text-emerald-600" },
-    { s: "sketchup_conversion", icon: Box, color: "text-orange-500" },
-    { s: "bim_conversion", icon: Box, color: "text-teal-600" },
-    { s: "published", icon: Globe, color: "text-emerald-600" },
   ];
-  const onPipeline = pipeline.reduce((n, p) => n + (pipeByStatus[p.s] || 0), 0);
+
+  // ── Duas faixas (2026-10-29) ─────────────────────────────────────────────
+  // ① Esteira do customizador: cada bloco aparece UMA vez, na etapa de produção
+  //    em que está — a soma dá o total. Bloco em Conversão BIM com ticket de
+  //    produção aberto conta na etapa desse ticket; sem ticket de produção, o
+  //    customizador está pronto e só espera o BIM para publicar.
+  //    Publicado se divide em "só no site ATT" e "no site do cliente".
+  // ② Trilha BIM: trabalho paralelo, por responsável. Um bloco pode estar nas
+  //    duas faixas (é o caso "em programação e em BIM ao mesmo tempo").
+  const openByBlock = new Map<string, ProductionTicket[]>();
+  tickets.filter(isOpenTicket).forEach((t) => { if (!openByBlock.has(t.blockId)) openByBlock.set(t.blockId, []); openByBlock.get(t.blockId)!.push(t); });
+  const demandOwner = new Map<string, string>();
+  bimDemands.filter(bimIsOpen).forEach((d) => d.items.forEach((it) => { if (it.blockId) demandOwner.set(it.blockId, d.freelancerId); }));
+  const pubsByBlock = new Map<string, SeedPub[]>();
+  publications.forEach((p) => { if (!pubsByBlock.has(p.blockId)) pubsByBlock.set(p.blockId, []); pubsByBlock.get(p.blockId)!.push(p); });
+  const onClientSite = (b: SeedBlock) => (pubsByBlock.get(b.id) ?? []).some((p) => pubClientSite(p, siteReport).live);
+  const lane: Record<string, number> = {};
+  const add = (k: string) => { lane[k] = (lane[k] || 0) + 1; };
+  const bimLane = new Map<string, { label: string; n: number; freelancer: boolean }>();
+  let bimTotal = 0, bimWaitingOnly = 0, bimAlsoProd = 0, bimAfterPub = 0;
+  pipelineBlocks.forEach((b) => {
+    const open = openByBlock.get(b.id) ?? [];
+    const prodOpen = open.filter((t) => ticketTrack(t) === "producao");
+    const bimOpen = open.filter((t) => ticketTrack(t) === "bim");
+    const inBim = isBimStatus(b.status);
+    if (inBim) add(prodOpen.length ? productionStageOf(prodOpen[0]) : "ready_waiting_bim");
+    else if (b.status === "published") add(onClientSite(b) ? "pub_client" : "pub_att");
+    else add(b.status);
+    if (!inBim && !bimOpen.length) return;
+    bimTotal++;
+    if (b.status === "published") bimAfterPub++;
+    else if (inBim && !prodOpen.length) bimWaitingOnly++;
+    else bimAlsoProd++;
+    const who = bimOpen.find((t) => t.assignedTo)?.assignedTo ?? demandOwner.get(b.id);
+    const u = who ? users.find((x) => x.id === who) : undefined;
+    const key = !who ? "queue" : u && isFreelancerId(u.id) ? u.id : "internal";
+    const label = key === "queue" ? "Na fila, sem responsável" : key === "internal" ? "Equipe interna" : (u?.name.split(" ")[0] ?? "—");
+    const cur = bimLane.get(key) ?? { label, n: 0, freelancer: key !== "queue" && key !== "internal" };
+    cur.n++; bimLane.set(key, cur);
+  });
+  const bimCols = Array.from(bimLane.entries()).sort(([a, x], [b, y]) => (a === "queue" ? -1 : b === "queue" ? 1 : a === "internal" ? 1 : b === "internal" ? -1 : y.n - x.n));
+  const laneTail: { k: string; label: string; hint: string; icon: any; color: string; go: () => void }[] = [
+    { k: "ready_waiting_bim", label: "Pronto · aguardando BIM", hint: "Customizador pronto; só publica quando o BIM terminar", icon: Box, color: "text-teal-600", go: () => openPipeline("bim_conversion") },
+    { k: "pub_att", label: "Publicado · só no site ATT", hint: "No ar no explorar da ATT, ainda não visto no site do cliente", icon: Globe, color: "text-emerald-600", go: () => { Object.assign(PUBS_LIST_MEMORY, { site: "pending", client: pipelineClient === "all" ? "" : pipelineClient }); setPage("publications"); } },
+    { k: "pub_client", label: "No site do cliente", hint: "Visto pelo analytics no site da marca ou marcado à mão", icon: CheckCircle, color: "text-cyan-600", go: () => { Object.assign(PUBS_LIST_MEMORY, { site: "live", client: pipelineClient === "all" ? "" : pipelineClient }); setPage("publications"); } },
+  ];
+  const onPipeline = pipeline.reduce((n, p) => n + (lane[p.s] || 0), 0) + laneTail.reduce((n, t) => n + (lane[t.k] || 0), 0);
   const paused = (pipeByStatus["blocked"] || 0) + (pipeByStatus["on_hold"] || 0) + (pipeByStatus["archived"] || 0);
   const inProduction = ["ready_to_start", "in_modeling", "in_texturing", "approved_for_programming", "in_programming", "internal_review", "sketchup_conversion", "bim_conversion"].reduce((n, st) => n + (byStatus[st] || 0), 0);
 
@@ -1634,16 +1690,17 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
               <option value="all">Todas as marcas</option>
               {pipelineClients.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
-            <p className="max-w-xl text-right text-sm leading-6 text-slate-500">Todos os estágios, na ordem do fluxo. Clique num estágio para abrir só os blocos que estão nele{pipelineClient !== "all" ? " (já filtrados pela marca)" : ""}.</p>
+            <p className="max-w-xl text-right text-sm leading-6 text-slate-500">Cada bloco aparece uma vez na esteira do customizador; o BIM roda em paralelo, na faixa de baixo. Clique para abrir os blocos{pipelineClient !== "all" ? " (já filtrados pela marca)" : ""}.</p>
           </div>
         </div>
-        <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <p className="mt-6 text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">① Esteira do customizador <span className="normal-case tracking-normal font-normal text-slate-400">· cada bloco uma vez · a soma é o total</span></p>
+        <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {pipeline.map(({ s, icon: Icon, color }) => (
             <button key={s} onClick={() => openPipeline(s)} className="group rounded-[24px] border border-slate-200/80 bg-white/75 p-4 text-left transition hover:border-slate-300 hover:bg-slate-50">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">{STATUS_LABELS[s]}</p>
-                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{hydrated ? pipeByStatus[s] || 0 : "—"}</p>
+                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{hydrated ? lane[s] || 0 : "—"}</p>
                 </div>
                 <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-50">
                   <Icon className={`h-5 w-5 ${color}`} />
@@ -1655,6 +1712,47 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
               </div>
             </button>
           ))}
+          {laneTail.map(({ k, label, hint, icon: Icon, color, go }) => (
+            <button key={k} onClick={go} title={hint} className={`group rounded-[24px] border p-4 text-left transition hover:border-slate-300 ${k === "pub_client" ? "border-cyan-200 bg-cyan-50/60 hover:bg-cyan-50" : k === "ready_waiting_bim" ? "border-teal-200 bg-teal-50/50 hover:bg-teal-50" : "border-slate-200/80 bg-white/75 hover:bg-slate-50"}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">{label}</p>
+                  <p className="mt-4 text-3xl font-semibold tracking-tight text-slate-900">{hydrated ? lane[k] || 0 : "—"}</p>
+                </div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200/80 bg-white">
+                  <Icon className={`h-5 w-5 ${color}`} />
+                </div>
+              </div>
+              <div className="mt-5 flex items-center justify-between gap-2 text-xs leading-4 text-slate-500">
+                <span>{hint}</span>
+                <ChevronRight className="h-4 w-4 flex-shrink-0 transition group-hover:translate-x-0.5" />
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 rounded-[24px] border border-teal-200/80 bg-teal-50/40 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-teal-800">② Trilha BIM <span className="normal-case tracking-normal font-normal text-teal-700/70">· em paralelo à esteira</span></p>
+            <p className="text-sm text-teal-900"><span className="text-xl font-semibold">{hydrated ? bimTotal : "—"}</span> blocos com BIM aberto</p>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            {bimCols.map(([key, c]) => (
+              <button key={key} onClick={() => (key === "queue" ? openPipeline("bim_conversion") : setPage("bim"))} className="group rounded-2xl border border-teal-200/70 bg-white/80 p-3 text-left transition hover:border-teal-300 hover:bg-white">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{c.freelancer ? "Terceirizado" : key === "queue" ? "Coordenação" : "Interno"}</p>
+                <div className="mt-1 flex items-baseline justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-700">{c.label}</p>
+                  <p className={`text-2xl font-semibold ${key === "queue" ? "text-amber-600" : "text-slate-900"}`}>{hydrated ? c.n : "—"}</p>
+                </div>
+              </button>
+            ))}
+            {bimCols.length === 0 && <p className="text-sm text-teal-800/70">Nenhum BIM em andamento{pipelineClient !== "all" ? " nesta marca" : ""}.</p>}
+          </div>
+          {bimTotal > 0 && (
+            <p className="mt-3 text-xs leading-5 text-teal-900/80">
+              Desses {bimTotal}: <b>{bimWaitingOnly}</b> com o customizador pronto, esperando só o BIM · <b>{bimAlsoProd}</b> ainda em produção ao mesmo tempo{bimAfterPub ? <> · <b>{bimAfterPub}</b> já publicados</> : null}
+            </p>
+          )}
         </div>
         <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-slate-100 pt-4 text-sm text-slate-500">
           {!hydrated && <span className="w-full font-semibold text-amber-700">Dados ainda não carregados do banco — os números aparecem quando sincronizar.</span>}
@@ -3555,9 +3653,11 @@ function ContractDetailPage({ contractId, user, setPage, setSelectedBlock }: { c
 
 function ClientFormModal({ title, onClose, onSave, initial }: {
   title: string; onClose: () => void;
-  onSave: (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean }) => void;
+  onSave: (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean; sites: string[] }) => void;
   initial?: SeedClient;
 }) {
+  const [sitesText, setSitesText] = useState((initial?.sites ?? []).join("\n"));
+  const sites = Array.from(new Set(sitesText.split(/[\s,;]+/).map(siteHost).filter((h) => h.includes("."))));
   const [name, setName] = useState(initial?.name ?? "");
   const [code, setCode] = useState(initial?.code ?? "");
   const [contactEmail, setEmail] = useState(initial?.contactEmail ?? "");
@@ -3574,11 +3674,16 @@ function ClientFormModal({ title, onClose, onSave, initial }: {
           <div><label className="text-xs font-medium text-slate-500">Nome *</label><input value={name} onChange={(e) => setName(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="Ex: Tidelli" /></div>
           <div><label className="text-xs font-medium text-slate-500">Code (alias para analytics — lowercase) *</label><input value={code} onChange={(e) => setCode(e.target.value.toLowerCase())} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder="tidelli" /></div>
           <div><label className="text-xs font-medium text-slate-500">E-mail de contato</label><input value={contactEmail} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" placeholder="contato@empresa.com.br" /></div>
+          <div>
+            <label className="text-xs font-medium text-slate-500">Sites da marca (um por linha)</label>
+            <textarea value={sitesText} onChange={(e) => setSitesText(e.target.value)} rows={3} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder={"ricco.com.br\nloja.ricco.com.br"} />
+            <p className="mt-1 text-[11px] leading-4 text-slate-400">Usado para descobrir sozinho, pelo analytics, quais customizadores já estão no ar no site do cliente. Subdomínios entram automaticamente (en.marca.com).</p>
+          </div>
           <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Ativo</label>
         </div>
         <div className="flex justify-end gap-2 mt-5">
           <button onClick={onClose} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-slate-50">Cancelar</button>
-          <button onClick={() => onSave({ id: initial?.id, name: name.trim(), code: code.trim(), contactEmail: contactEmail.trim(), active })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
+          <button onClick={() => onSave({ id: initial?.id, name: name.trim(), code: code.trim(), contactEmail: contactEmail.trim(), active, sites })} disabled={!canSave} className="px-5 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-30 hover:bg-slate-800">Salvar</button>
         </div>
       </div>
     </div>
@@ -3594,11 +3699,11 @@ function ClientsPage() {
   const canEdit = can(currentUser, "clients", "edit");
   const canDelete = can(currentUser, "clients", "delete");
 
-  const handleSave = (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean }) => {
+  const handleSave = (d: { id?: string; name: string; code: string; contactEmail: string; active: boolean; sites: string[] }) => {
     if (d.id) {
-      setClients(clients.map((c) => c.id === d.id ? { ...c, name: d.name, code: d.code, contactEmail: d.contactEmail, active: d.active } : c));
+      setClients(clients.map((c) => c.id === d.id ? { ...c, name: d.name, code: d.code, contactEmail: d.contactEmail, active: d.active, sites: d.sites } : c));
     } else {
-      setClients([...clients, { id: `c_${Date.now()}`, name: d.name, code: d.code, contactEmail: d.contactEmail, active: d.active }]);
+      setClients([...clients, { id: `c_${Date.now()}`, name: d.name, code: d.code, contactEmail: d.contactEmail, active: d.active, sites: d.sites }]);
     }
     setShowAdd(false); setEditing(null);
   };
@@ -3636,6 +3741,7 @@ function ClientsPage() {
                 <div><p className="text-lg font-bold text-emerald-600">{total - used}</p><p className="text-xs text-slate-400">Disponíveis</p></div>
               </div>
               <p className="text-xs text-slate-400 mt-3">{cl.contactEmail || "—"}</p>
+              <p className="text-xs mt-1 truncate" title="Sites da marca (verificação 'no site do cliente')">{cl.sites?.length ? <span className="text-slate-500"><Globe className="inline w-3 h-3 mr-1 -mt-0.5" />{cl.sites.join(" · ")}</span> : <span className="text-amber-600">Sem site cadastrado</span>}</p>
             </Card>
           );
         })}
@@ -6568,10 +6674,12 @@ function EmbedInstructions({ defaultOpen }: { defaultOpen: boolean }) {
 }
 
 type PubSort = "default" | "changed" | "published" | "name";
-const PUBS_LIST_MEMORY: { search: string; sort: PubSort } = { search: "", sort: "default" };
+type PubSiteFilter = "all" | "live" | "pending";
+/** Também é como o pipeline do dashboard abre Publicações já filtrada (marca + situação no site do cliente). */
+const PUBS_LIST_MEMORY: { search: string; sort: PubSort; site: PubSiteFilter; client: string } = { search: "", sort: "default", site: "all", client: "" };
 
 function PublicationsPage({ user }: { user: SeedUser }) {
-  const { blocks, setBlocks, setTickets, publications, setPublications, clients, currentUser } = useContext(AppContext);
+  const { blocks, setBlocks, setTickets, publications, setPublications, clients, currentUser, siteReport, siteChecking, checkClientSites } = useContext(AppContext);
   const [showImport, setShowImport] = useState(false);
   const [importMsg, setImportMsg] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
@@ -6581,12 +6689,13 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   const canCreate = can(currentUser, "publications", "create");
   const canEdit = can(currentUser, "publications", "edit");
   const canDelete = can(currentUser, "publications", "delete");
-  const [filterClient, setFilterClient] = useState<string>("");
+  const [filterClient, setFilterClient] = useState<string>(PUBS_LIST_MEMORY.client);
+  const [siteFilter, setSiteFilter] = useState<PubSiteFilter>(PUBS_LIST_MEMORY.site);
   // Busca e ordenação (Jéssica, 2026-09-24): conferir a importação por TXT sem
   // rolar a lista inteira. Guardadas ao sair e voltar da tela.
   const [search, setSearch] = useState(PUBS_LIST_MEMORY.search);
   const [sort, setSort] = useState<PubSort>(PUBS_LIST_MEMORY.sort);
-  useEffect(() => { Object.assign(PUBS_LIST_MEMORY, { search, sort }); }, [search, sort]);
+  useEffect(() => { Object.assign(PUBS_LIST_MEMORY, { search, sort, site: siteFilter, client: filterClient }); }, [search, sort, siteFilter, filterClient]);
   const norm = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
   const term = norm(search.trim());
 
@@ -6598,6 +6707,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
     const block = blocks.find((b) => b.id === p.blockId);
     if (isClient && block?.clientId !== user.clientId) return false;
     if (filterClient && block?.clientId !== filterClient) return false;
+    if (siteFilter !== "all" && pubClientSite(p, siteReport).live !== (siteFilter === "live")) return false;
     if (term && !norm(`${block?.title ?? ""} ${block?.sku ?? ""} ${block?.csku ?? ""} ${p.url} ${block ? getClientName(block.clientId) : ""}`).includes(term)) return false;
     return true;
   }).sort((a, b) => {
@@ -6628,6 +6738,30 @@ function PublicationsPage({ user }: { user: SeedUser }) {
     if (!confirm("Remover esta publicação?")) return;
     setPublications(publications.filter((p) => p.id !== id));
   };
+  // "No site do cliente": marcação manual (a automática vem do analytics, src/lib/client-sites.ts).
+  const markClientSite = (pub: SeedPub) => {
+    const url = prompt("Link da página no site do cliente onde o customizador está (opcional — pode deixar em branco):", "");
+    if (url === null) return;
+    setPublications(publications.map((p) => p.id === pub.id ? { ...p, clientSite: { at: new Date().toISOString(), by: currentUser?.name ?? "", url: url.trim() || undefined } } : p));
+  };
+  const unmarkClientSite = (pub: SeedPub) => {
+    if (!confirm("Desmarcar 'no ar no site do cliente' desta publicação?")) return;
+    setPublications(publications.map((p) => { if (p.id !== pub.id) return p; const { clientSite: _drop, ...rest } = p; return rest; }));
+  };
+  // Resumo da situação no site do cliente, respeitando a marca (não o próprio filtro de situação).
+  const scope = publications.filter((p) => {
+    const block = blocks.find((b) => b.id === p.blockId);
+    if (isClient && block?.clientId !== user.clientId) return false;
+    return !filterClient || block?.clientId === filterClient;
+  });
+  const liveCount = scope.filter((p) => pubClientSite(p, siteReport).live).length;
+  const scopeClients = clients.filter((c) => (filterClient ? c.id === filterClient : scope.some((p) => blocks.find((b) => b.id === p.blockId)?.clientId === c.id)));
+  const semSite = scopeClients.filter((c) => !c.sites?.length);
+  const sugestoes = Object.entries(siteReport?.unknownHosts ?? {})
+    .filter(([cid]) => !filterClient || cid === filterClient)
+    .flatMap(([cid, hosts]) => Object.entries(hosts).filter(([, n]) => n >= 3).map(([h, n]) => ({ client: getClientName(cid), host: h, n })))
+    .sort((a, b) => b.n - a.n).slice(0, 6);
+  const daysSince = (iso: string) => Math.max(0, Math.floor((Date.now() - Date.parse(iso.length === 10 ? `${iso}T12:00:00` : iso)) / 86400_000));
 
   const embedFor = (url: string) => `<iframe width="100%" height="640px" frameborder="0" src="${url}" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>`;
   // Importação em lote (Liles, 2026-09-21): um TXT com os links vira publicações
@@ -6664,7 +6798,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
     });
     const hoje = new Date().toLocaleDateString("pt-BR");
     const linhas: string[] = [
-      `ArchTechTour · Links dos customizadores${brandName ? ` · ${brandName}` : " · todas as marcas"}`,
+      `ArchTechTour · Links dos customizadores${brandName ? ` · ${brandName}` : " · todas as marcas"}${siteFilter === "pending" ? " · ainda não publicados no site da marca" : siteFilter === "live" ? " · já no site da marca" : ""}`,
       `Gerado em ${hoje} · ${pubs.length} publicação(ões)`,
       "",
     ];
@@ -6716,6 +6850,33 @@ function PublicationsPage({ user }: { user: SeedUser }) {
       {showImport && <LinkImportModal blocks={blocks} clients={clients} publications={publications} statusLabel={(st) => STATUS_LABELS[st as BlockStatus] ?? st ?? ""} onClose={() => setShowImport(false)} onApply={applyImport} />}
       {importMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{importMsg}</div>}
       <EmbedInstructions defaultOpen={isClient} />
+      {scope.length > 0 && (
+        <Card className="p-4">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{isClient ? "No seu site" : "No site do cliente"}</p>
+              <p className="mt-1 text-sm text-slate-600">
+                <button onClick={() => setSiteFilter(siteFilter === "live" ? "all" : "live")} className="hover:underline"><span className="text-lg font-semibold text-emerald-600">{liveCount}</span> no ar</button>
+                <span className="mx-2 text-slate-300">·</span>
+                <button onClick={() => setSiteFilter(siteFilter === "pending" ? "all" : "pending")} className="hover:underline"><span className="text-lg font-semibold text-amber-600">{scope.length - liveCount}</span> {isClient ? "ainda não publicados no seu site" : "aguardando o cliente publicar"}</button>
+              </p>
+            </div>
+            {!isClient && (
+              <div className="ml-auto flex items-center gap-2 text-xs text-slate-400">
+                <span>{siteChecking ? "Verificando no analytics…" : siteReport ? `Verificado pelo analytics em ${new Date(siteReport.checkedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "Ainda não verificado"}</span>
+                <button onClick={() => checkClientSites(false)} disabled={siteChecking} className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 font-semibold text-slate-600 hover:border-slate-300 disabled:opacity-40"><RefreshCw className={`w-3 h-3 ${siteChecking ? "animate-spin" : ""}`} /> Verificar agora</button>
+              </div>
+            )}
+          </div>
+          {!isClient && (semSite.length > 0 || sugestoes.length > 0) && (
+            <div className="mt-3 space-y-1 border-t border-slate-100 pt-3 text-xs leading-5 text-slate-500">
+              {semSite.length > 0 && <p><span className="font-semibold text-amber-700">Sem site cadastrado</span> (a verificação automática não consegue olhar): {semSite.map((c) => c.name).join(", ")}. Cadastre em Clientes → editar → Sites da marca.</p>}
+              {sugestoes.length > 0 && <p><span className="font-semibold text-slate-700">Domínios onde produtos apareceram e não estão cadastrados:</span> {sugestoes.map((g) => `${g.host} (${g.client}, ${g.n} sessões)`).join(" · ")}. Se for site da marca, cadastre para contar.</p>}
+            </div>
+          )}
+          {!isClient && <p className="mt-2 text-[11px] leading-4 text-slate-400">Automático: o analytics registra em qual site cada customizador foi aberto. Se ninguém abriu ainda, não dá para saber — marque à mão em cada publicação. Para cobrar, filtre "aguardando" e use Baixar links (.txt).</p>}
+        </Card>
+      )}
       <Card className="p-4">
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative flex-1 min-w-[220px]">
@@ -6728,7 +6889,12 @@ function PublicationsPage({ user }: { user: SeedUser }) {
             <option value="published">Ordem: data de publicação (recente primeiro)</option>
             <option value="name">Ordem: nome do produto</option>
           </select>
-          {(search || sort !== "default") && <button onClick={() => { setSearch(""); setSort("default"); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-1">Limpar</button>}
+          <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value as PubSiteFilter)} title="Situação no site do cliente" className={`text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${siteFilter === "all" ? "border-slate-200 bg-white" : "border-cyan-300 bg-cyan-50 font-semibold text-cyan-800"}`}>
+            <option value="all">Site do cliente: todos</option>
+            <option value="live">Já no site do cliente</option>
+            <option value="pending">Aguardando o cliente publicar</option>
+          </select>
+          {(search || sort !== "default" || siteFilter !== "all") && <button onClick={() => { setSearch(""); setSort("default"); setSiteFilter("all"); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-1">Limpar</button>}
         </div>
         {search && <p className="mt-2 text-[11px] text-slate-400">{pubs.length} publicação(ões) encontrada(s)</p>}
       </Card>
@@ -6747,7 +6913,26 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{client?.name} · v{pub.v}</p>
                     <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
                     <p className="mt-1 text-[11px] text-slate-400">{block?.sku}{pubDate(pub, block) ? ` · publicado em ${fmtDate(pubDate(pub, block))}` : ""}{pub.updatedAt ? ` · alterado em ${fmtDate(pub.updatedAt.slice(0, 10))}` : ""}</p>
-                    <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>
+                    {(() => {
+                      const st = pubClientSite(pub, siteReport);
+                      return (
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <Badge className="border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado · ATT</Badge>
+                          {st.live ? (
+                            <Badge className="border-cyan-200/80 bg-cyan-50 text-cyan-800" title={st.source === "auto" ? `Detectado pelo analytics: aberto em ${st.host} · ${st.sessions} sessão(ões) · primeira em ${fmtDate(st.since!)}, última em ${fmtDate(st.lastSeen!)}` : `Marcado por ${st.by} em ${fmtDate(st.since!)}${st.url ? ` · ${st.url}` : ""}`}>
+                              {isClient ? "No seu site" : "No site do cliente"}{st.host ? ` · ${st.host}` : ""}{st.source === "auto" ? " · auto" : ""}
+                            </Badge>
+                          ) : (
+                            <Badge className="border-amber-200/80 bg-amber-50 text-amber-700" title="O analytics ainda não viu este customizador aberto num site cadastrado da marca">
+                              {isClient ? "Ainda não está no seu site" : "Não está no site do cliente"}{pubDate(pub, block) ? ` · ${daysSince(pubDate(pub, block))} dias` : ""}
+                            </Badge>
+                          )}
+                          {canEdit && !st.live && <button onClick={() => markClientSite(pub)} className="text-[11px] font-semibold text-cyan-700 hover:underline">Marcar como no site</button>}
+                          {canEdit && st.source === "manual" && <button onClick={() => unmarkClientSite(pub)} className="text-[11px] text-slate-400 hover:text-slate-600 hover:underline">desmarcar</button>}
+                          {st.url && <a href={st.url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-cyan-700 hover:underline">ver no site</a>}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {(canEdit || canDelete) && (
                     <div className="flex gap-1">
@@ -8096,6 +8281,36 @@ export default function Portal() {
   const [profilesError, setProfilesError] = useState<string | null>(null);
   PROFILES = profiles; // can()/special()/podeAcessar leem daqui — atribuído antes de desenhar os filhos
   const [hydrated, setHydrated] = useState(false);
+  const [siteReport, setSiteReport] = useState<ClientSiteReport | null>(null);
+  const [siteChecking, setSiteChecking] = useState(false);
+  const checkClientSites = useCallback(async (auto = false) => {
+    setSiteChecking(true);
+    try {
+      const r = await fetch(`/api/publications/client-sites${auto ? "?auto=1" : ""}`, { method: "POST", headers: actorHeaders() });
+      const j = await r.json();
+      if (j.report) setSiteReport(j.report);
+      else if (!auto && j.error) alert(`Não consegui verificar agora: ${j.error}`);
+    } catch (e) { if (!auto) alert(`Não consegui verificar agora: ${(e as Error).message}`); }
+    finally { setSiteChecking(false); }
+  }, []);
+  // Relatório "no site do cliente": carrega ao entrar; se tiver mais de 20 h, o primeiro
+  // da equipe a abrir o portal no dia dispara a verificação no Athena (em segundo plano).
+  useEffect(() => {
+    if (!currentUser) return;
+    let alive = true;
+    fetch("/api/publications/client-sites", { headers: actorHeaders(), cache: "no-store" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!alive) return;
+        const rep = (j.report ?? null) as ClientSiteReport | null;
+        setSiteReport(rep);
+        const internal = currentUser.role !== "client" && currentUser.role !== "freelancer_bim";
+        const stale = !rep || Date.now() - Date.parse(rep.checkedAt) > CLIENT_SITES_MAX_AGE_H * 3600_000;
+        if (internal && stale) void checkClientSites(true);
+      })
+      .catch((e) => console.error("client-sites:", e));
+    return () => { alive = false; };
+  }, [currentUser?.id, checkClientSites]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load mutable state from DynamoDB on mount. Seed tables on first use.
   //
@@ -8345,7 +8560,7 @@ export default function Portal() {
 
   if (!currentUser) {
     return (
-      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles }}>
+      <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, siteChecking, checkClientSites }}>
         <LoginPage />
       </AppContext.Provider>
     );
@@ -8402,7 +8617,7 @@ export default function Portal() {
   };
 
   return (
-    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles }}>
+    <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, siteChecking, checkClientSites }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
         <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />

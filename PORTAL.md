@@ -443,6 +443,41 @@ a contar só a marca escolhida; "Ver blocos" abre a lista já filtrada por ela. 
 (total, bloqueados, aprovações, publicados) seguem gerais. A marca escolhida fica lembrada ao
 trocar de tela (`PIPELINE_CLIENT` em `Portal.tsx`, `InternalDashboard`).
 
+### Pipeline em duas faixas + "No site do cliente" (desde 2026-10-29)
+
+**Pedido do Matheus:** o card "Conversão BIM" no meio da sequência confundia na reunião com o
+CEO (o bloco pode estar em programação **e** em BIM ao mesmo tempo); e "Publicado" precisa
+separar "no nosso site" de "no site do cliente", porque a marca recebe o embed e às vezes
+demora a publicar — a equipe precisa saber quem cobrar.
+
+**Pipeline (`InternalDashboard`):**
+- **① Esteira do customizador** — cada bloco aparece uma vez (a soma = total). Bloco em
+  SketchUp/BIM com ticket de **produção** aberto conta na etapa desse ticket
+  (`productionStageOf`); sem ticket de produção conta em **"Pronto · aguardando BIM"** (regra
+  do negócio: só publica depois do BIM). Publicado vira **"Publicado · só no site ATT"** e
+  **"No site do cliente"** (bloco com alguma publicação no ar no site da marca). Os dois
+  abrem Publicações já filtrada (`PUBS_LIST_MEMORY.site/client`).
+- **② Trilha BIM** — blocos em status BIM ou com ticket BIM aberto, por responsável (ticket
+  BIM → demanda BIM aberta → "Na fila, sem responsável"), com a linha "X só esperando o BIM ·
+  Y ainda em produção · Z já publicados".
+
+**No site do cliente (`src/lib/client-sites.ts`, `client-sites-server.ts`,
+`/api/publications/client-sites`):**
+- Manual: em Publicações, "Marcar como no site" (link opcional) → `SeedPub.clientSite`.
+- Automático: o Athena guarda, em cada `session_start`, o produto e o `referrer` (só o domínio
+  da página onde o iframe está, ex. `https://www.estudiobola.com/`). A verificação cruza
+  produto × domínio dos últimos 365 dias com as publicações e com `SeedClient.sites` (cadastro
+  em Clientes → editar → "Sites da marca"; subdomínios entram). Produto do evento casa com a
+  pasta do customizador na URL quando o nome do evento **termina** com ela
+  (`jader-almeida-cadeira-milla` ↔ `…/cadeira-milla/index.html`).
+- Relatório em `att-agent-routines`, id `client-sites#report` (**separado** de att-publications
+  para editar uma publicação nunca apagar o que a verificação achou). Roda sozinho quando o
+  primeiro da equipe abre o portal e o relatório tem mais de 20 h; botão "Verificar agora".
+- Também lista domínios onde produtos de uma marca abriram e que não estão cadastrados
+  (sugestão — ex. lojas Shopify), e marcas sem site cadastrado.
+- Limite: "não detectado" não prova que não está no site (ninguém abriu ainda, ou o site usa
+  `referrer-policy: no-referrer`). Para esses casos, a marcação manual.
+
 ### Trilhas em paralelo (produção × BIM) e Revisão Interna com a revisora (desde 2026-10-20)
 
 **Relato da Jéssica (2026-10-19):** "quando o Liles marca Revisão Interna, o ticket vai direto

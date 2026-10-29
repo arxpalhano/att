@@ -54,7 +54,7 @@ function produtoDisplay(slug: string): string {
 // Filtro de tráfego não-humano: exclui bots/crawlers conhecidos e tráfego interno.
 // COALESCE garante que linhas com user_agent/referrer NULL NÃO sejam descartadas.
 // _e = versão com alias "e." para queries com JOIN.
-const BOT_FILTER = `
+export const BOT_FILTER = `
   AND NOT (
     lower(COALESCE(user_agent,'')) LIKE '%bot%' OR lower(COALESCE(user_agent,'')) LIKE '%crawl%'
     OR lower(COALESCE(user_agent,'')) LIKE '%spider%' OR lower(COALESCE(user_agent,'')) LIKE '%headless%'
