@@ -80,7 +80,7 @@ export const ENTITY_LABELS: Record<ActivityEntity, string> = {
 
 export const PAGE_LABELS: Record<string, string> = {
   dashboard: "Dashboard", onboarding: "Onboarding", blocks: "Blocos", block_detail: "Detalhe do bloco",
-  contracts: "Contratos", contract_detail: "Detalhe do contrato", clients: "Clientes", approvals: "Aprovações",
+  novidades: "Novidades", contracts: "Contratos", contract_detail: "Detalhe do contrato", clients: "Clientes", approvals: "Aprovações",
   queue: "Fila de Trabalho", tickets: "Tickets", publications: "Publicações", analytics: "Analytics",
   activity: "Atividade", users: "Usuários", profiles: "Perfis de acesso", performance: "Desempenho da equipe", finishes: "Acabamentos", bim: "BIM · Terceirizados",
   bim_minhas: "Minhas demandas", kb: "Base de Conhecimento", agents: "Agentes AI", finance: "Financeiro",

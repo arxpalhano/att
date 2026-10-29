@@ -38,7 +38,12 @@ Contém **dois produtos** no mesmo app Next.js 14 (App Router, SSR no AWS Amplif
    analytics é um dashboard de **demonstração** com números fictícios, usado em
    vídeos comerciais — `src/lib/analytics-demo.ts`, isolado dos clientes reais
    (PORTAL.md §7).
-3. **Env vars do Amplify SSR** precisam estar em `next.config.js` (`env: {...}`) —
+3. **Toda atualização que alguém vai perceber ganha nota em `src/data/changelog.ts`**
+   (entrada nova no TOPO, mesmo commit do deploy). É o que alimenta a tela **Novidades** e a
+   faixa azul "o portal foi atualizado" no topo. Escrever para a equipe, em português simples:
+   o que mudou, onde clicar, por quê — sem nome de arquivo/código. `audience: "todos"` só no que
+   o usuário de cliente também vê. PORTAL.md §6 "Novidades".
+4. **Env vars do Amplify SSR** precisam estar em `next.config.js` (`env: {...}`) —
    o Amplify SSR Lambda NÃO injeta env vars em runtime; só o que estiver ali chega.
    No `.env.local`, valor que começa com `$` (chave do Asaas) precisa de `\$` — o Next expande.
 

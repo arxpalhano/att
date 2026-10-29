@@ -24,8 +24,9 @@ import {
   Settings, UserCheck, Clipboard, Box, FileUp, ExternalLink, Zap,
   Play, ThumbsUp, ThumbsDown, Hash, Pause, Lock, Archive,
   BarChart3, ChevronRight, Filter, MessageSquare, Sparkles, Send, Bot, RefreshCw, BookOpen, Download,
-  Wallet,
+  Wallet, Megaphone,
 } from "lucide-react";
+import { changelogFor, ChangeEntry, ChangeKind } from "@/data/changelog";
 import AnalyticsDashboard from "./AnalyticsDashboard";
 import AnalyticsClientsAdmin from "./AnalyticsClientsAdmin";
 
@@ -1067,6 +1068,7 @@ function podeAcessar(user: SeedUser, page: string): boolean {
   // uma), dentro da própria tela. Quem não tem base liberada vê a tela vazia e
   // nem enxerga o item no menu (Sidebar filtra por temBaseLiberada).
   if (page === "kb") return true;
+  if (page === "novidades") return true; // notas de atualização: todo mundo vê (filtradas por público)
   if (isSuperAdmin(user)) return true;
   if (page === "performance") return false; // só super admin
   // Atividade é auditoria de uso da equipe: só o dono do portal enxerga.
@@ -1371,8 +1373,52 @@ function LoginPage() {
 // ============================================================
 // SIDEBAR
 // ============================================================
-function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
+// ============================================================
+// NOVIDADES — notas de atualização (conteúdo em src/data/changelog.ts)
+// ============================================================
+const CHANGE_KIND_LABEL: Record<ChangeKind, string> = { novo: "Novo", melhorado: "Melhorado", corrigido: "Corrigido" };
+const CHANGE_KIND_COLOR: Record<ChangeKind, string> = {
+  novo: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  melhorado: "border-sky-200 bg-sky-50 text-sky-700",
+  corrigido: "border-amber-200 bg-amber-50 text-amber-700",
+};
+function NewsPage({ entries }: { entries: ChangeEntry[] }) {
+  const version = (process.env.APP_VERSION || "").slice(0, 7);
+  return (
+    <div className="space-y-6">
+      <SectionHeader eyebrow="Ajuda" title="Novidades" description="O que mudou em cada atualização do portal. Quando sai uma nova, aparece uma faixa azul no topo com o link para cá." />
+      {version && !version.startsWith("dev-") && <p className="-mt-3 text-xs text-slate-400">Versão no ar: {version}</p>}
+      <Card className="p-6 lg:p-8">
+        {entries.length === 0 ? <EmptyState icon={Megaphone} title="Nenhuma novidade ainda" /> : (
+          <div className="max-w-3xl divide-y divide-slate-100">
+            {entries.map((e) => (
+              <section key={e.id} className="py-6 first:pt-0 last:pb-0">
+                <h3 className="text-lg font-semibold text-slate-900">{fmtDate(e.date)} — {e.title}</h3>
+                {(["novo", "melhorado", "corrigido"] as ChangeKind[]).map((kind) => {
+                  const items = e.items.filter((it) => it.kind === kind);
+                  if (!items.length) return null;
+                  return (
+                    <div key={kind} className="mt-4">
+                      <Badge className={CHANGE_KIND_COLOR[kind]}>{CHANGE_KIND_LABEL[kind]}</Badge>
+                      <ul className="mt-3 space-y-2.5 pl-5 text-sm leading-6 text-slate-600 list-disc marker:text-slate-300">
+                        {items.map((it, i) => <li key={i}><b className="font-semibold text-slate-800">{it.title}.</b> {it.desc}</li>)}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </section>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function Sidebar({ page, setPage, user, collapsed, setCollapsed, unseenNews = 0 }: {
   page: string; setPage: (p: string) => void; user: SeedUser; collapsed: boolean; setCollapsed: (c: boolean) => void;
+  /** Atualizações que a pessoa ainda não abriu (bolinha no item Novidades). */
+  unseenNews?: number;
 }) {
   const { blocks } = useContext(AppContext);
   const isClient = user.role === "client";
@@ -1382,7 +1428,10 @@ function Sidebar({ page, setPage, user, collapsed, setCollapsed }: {
   const { kb } = useContext(AppContext);
   // Item "Base de Conhecimento" só aparece para quem tem ao menos uma base liberada (admin sempre).
   const temBaseLiberada = user.role === "admin" || kb.some((r) => isKbBase(r) && canViewBase(r as KbBase, user));
-  const itemKb: Array<{ id: string; icon: any; label: string; badge?: number }> = temBaseLiberada ? [{ id: "kb", icon: BookOpen, label: "Base de Conhecimento" }] : [];
+  const itemKb: Array<{ id: string; icon: any; label: string; badge?: number }> = [
+    ...(temBaseLiberada ? [{ id: "kb", icon: BookOpen, label: "Base de Conhecimento" }] : []),
+    { id: "novidades", icon: Megaphone, label: "Novidades", badge: unseenNews },
+  ];
   const todosItens = isFreelancer
     ? [{ id: "bim_minhas", icon: Box, label: "Minhas demandas" }, ...itemKb]
     : isClient
@@ -8482,6 +8531,23 @@ export default function Portal() {
   // assim que o teste do retorno de etapa "passou direto" em 07/10). Compara a versão
   // embutida no bundle com a do servidor e pede para recarregar.
   const [newVersion, setNewVersion] = useState(false);
+  // Novidades (src/data/changelog.ts): a faixa azul aparece até a pessoa abrir a tela ou fechar
+  // a faixa. O "último visto" fica no navegador, por usuário.
+  const news: ChangeEntry[] = useMemo(() => (currentUser ? changelogFor(currentUser.role) : []), [currentUser?.role]); // eslint-disable-line react-hooks/exhaustive-deps
+  const seenKey = currentUser ? `att_news_seen_${currentUser.id}` : "";
+  const [newsSeen, setNewsSeen] = useState<string | null>("");
+  useEffect(() => {
+    if (!seenKey) return;
+    try { setNewsSeen(localStorage.getItem(seenKey)); } catch { setNewsSeen(null); }
+  }, [seenKey]);
+  const markNewsSeen = useCallback(() => {
+    const latest = news[0]?.id;
+    if (!latest || !seenKey) return;
+    try { localStorage.setItem(seenKey, latest); } catch { /* aba privada: só esconde nesta sessão */ }
+    setNewsSeen(latest);
+  }, [news, seenKey]);
+  const unseenNews = newsSeen === "" ? 0 : news.filter((e) => !newsSeen || e.id > newsSeen).length;
+  useEffect(() => { if (page === "novidades" && unseenNews > 0) markNewsSeen(); }, [page, unseenNews, markNewsSeen]);
   const checkVersion = useCallback(async () => {
     try {
       const r = await fetch(`/api/version?t=${Date.now()}`, { cache: "no-store" });
@@ -8605,6 +8671,7 @@ export default function Portal() {
       case "finishes": return <FinishesPage user={currentUser} setPage={setPage} setSelectedBlock={setSelectedBlock} />;
       case "bim": return <BimPage user={currentUser} />;
       case "bim_minhas": return <BimMinhasDemandasPage user={currentUser} />;
+      case "novidades": return <NewsPage entries={news} />;
       case "kb": return <KnowledgeBase user={currentUser} users={users} records={kb} setRecords={setKb} loadError={kbError} />;
       case "agents": return <AgentsPage setPage={setPage} />;
       case "agent_sherlock_codes": return <SherlockCodesPage setPage={setPage} />;
@@ -8620,7 +8687,7 @@ export default function Portal() {
     <AppContext.Provider value={{ currentUser, setCurrentUser, hydrated, blocks, setBlocks, activities, setActivities, assets, setAssets, tickets, setTickets, clients, setClients, contracts, setContracts, publications, setPublications, bimDemands, setBimDemands, finishes, setFinishes, users, setUsers, kb, setKb, kbError, profiles, setProfiles, siteReport, siteChecking, checkClientSites }}>
       <div className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.08),transparent_26%),radial-gradient(circle_at_100%_0%,_rgba(16,185,129,0.06),transparent_22%),linear-gradient(180deg,#f8fbff_0%,#f3f7fb_100%)]">
         <div className="pointer-events-none fixed inset-0 opacity-[0.045] [background-image:linear-gradient(rgba(15,23,42,0.36)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.36)_1px,transparent_1px)] [background-size:72px_72px]" />
-        <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} />
+        <Sidebar page={page} setPage={setPage} user={currentUser} collapsed={collapsed} setCollapsed={setCollapsed} unseenNews={unseenNews} />
         <div className={`relative transition-all duration-300 ${collapsed ? "ml-[88px]" : "ml-[280px]"}`}>
           <header className="sticky top-0 z-30 border-b border-white/70 bg-white/70 backdrop-blur-xl">
             <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-6 py-4 lg:px-8">
@@ -8641,6 +8708,16 @@ export default function Portal() {
                 <RefreshCw className="h-4 w-4 flex-shrink-0" />
                 <span className="flex-1"><b>Saiu uma versão nova do portal.</b> Esta aba ainda está com a versão antiga — recarregue para pegar as novidades e evitar gravar por cima do que mudou.</span>
                 <button onClick={() => window.location.reload()} className="rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">Recarregar agora</button>
+              </div>
+            </div>
+          )}
+          {unseenNews > 0 && page !== "novidades" && news[0] && (
+            <div className="mx-auto w-full max-w-[1400px] px-6 pt-4 lg:px-8">
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                <Megaphone className="h-4 w-4 flex-shrink-0 text-sky-600" />
+                <span className="flex-1"><b>O portal foi atualizado</b> ({fmtDate(news[0].date)}): {news[0].title}.{unseenNews > 1 ? ` E mais ${unseenNews - 1} atualização(ões) que você ainda não viu.` : ""}</span>
+                <button onClick={() => setPage("novidades")} className="rounded-xl bg-sky-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-sky-700">Ver o que mudou</button>
+                <button onClick={markNewsSeen} title="Fechar (dá para ver depois em Novidades, no menu)" className="rounded-lg p-1 text-sky-500 hover:bg-sky-100 hover:text-sky-800"><X className="h-4 w-4" /></button>
               </div>
             </div>
           )}

@@ -443,6 +443,17 @@ a contar só a marca escolhida; "Ver blocos" abre a lista já filtrada por ela. 
 (total, bloqueados, aprovações, publicados) seguem gerais. A marca escolhida fica lembrada ao
 trocar de tela (`PIPELINE_CLIENT` em `Portal.tsx`, `InternalDashboard`).
 
+### Novidades — notas de atualização (desde 2026-10-29)
+
+Item **Novidades** no menu (todo perfil, `podeAcessar` libera sempre) e faixa azul no topo
+"O portal foi atualizado (data): título · Ver o que mudou" enquanto a pessoa não abrir a tela ou
+fechar a faixa. Conteúdo em `src/data/changelog.ts` (`CHANGELOG`, mais recente primeiro);
+`changelogFor(role)` filtra por público: cliente vê só itens `audience: "todos"`, terceirizado
+BIM vê "todos" + "terceirizados", equipe vê tudo. "Último visto" fica no navegador
+(`localStorage att_news_seen_<userId>`), comparando pelo `id` da entrada (data + letra,
+crescente). Diferente da faixa **amarela** de versão nova, que pede recarregar a aba.
+**Regra:** todo deploy com mudança perceptível ganha entrada no topo do changelog no mesmo commit.
+
 ### Pipeline em duas faixas + "No site do cliente" (desde 2026-10-29)
 
 **Pedido do Matheus:** o card "Conversão BIM" no meio da sequência confundia na reunião com o
