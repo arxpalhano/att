@@ -486,6 +486,12 @@ demora a publicar — a equipe precisa saber quem cobrar.
   primeiro da equipe abre o portal e o relatório tem mais de 20 h; botão "Verificar agora".
 - Também lista domínios onde produtos de uma marca abriram e que não estão cadastrados
   (sugestão — ex. lojas Shopify), e marcas sem site cadastrado.
+- **Página do produto** (`runClientPagesBatch`, `POST …/client-sites?step=pages`): o referrer só
+  traz o domínio, então o servidor lê o sitemap da marca (robots.txt → sitemap index; cache de
+  3 dias em `client-sites#sitemap#<domínio>`), abre até 6 páginas cujo endereço tem as palavras
+  do produto e procura `/<pasta>/index.html` no HTML. Lotes de ~20 s; a tela repete enquanto
+  houver `remaining`. Resultado em `client-sites#pages` (não achou → tenta de novo em 7 dias).
+  Sem página: link "procurar no site" (Google `site:`). Estúdio Bola é app Expo sem sitemap.
 - Limite: "não detectado" não prova que não está no site (ninguém abriu ainda, ou o site usa
   `referrer-policy: no-referrer`). Para esses casos, a marcação manual.
 
