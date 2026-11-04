@@ -277,6 +277,10 @@ export function describeChange(entity: ActivityEntity, before: Item | null, afte
       if (before.status !== after.status) out.push(base({ ...ctx, type: "bim_status", desc: `Demanda BIM "${cur.title}": ${BIM_DEMAND_STATUS_LABELS[before.status] ?? before.status} → ${BIM_DEMAND_STATUS_LABELS[after.status] ?? after.status}` }));
       const db = doneCount(before), da = doneCount(after);
       if (db !== da) out.push(base({ ...ctx, type: "bim_files", desc: `Demanda BIM "${cur.title}": arquivos entregues ${db} → ${da}` }));
+      // Pagamento ao terceirizado vira frase própria (aba Pagamentos da tela BIM).
+      const pb = before.payment as { paidAt?: string; amount?: number } | undefined, pa = after.payment as { paidAt?: string; amount?: number; note?: string } | undefined;
+      if (!pb && pa) out.push(base({ ...ctx, type: "bim_paid", desc: `Demanda BIM "${cur.title}" marcada como paga a ${names.user(cur.freelancerId)} em ${pa.paidAt}${pa.amount != null ? ` · R$ ${pa.amount.toLocaleString("pt-BR")}` : ""}${pa.note ? ` · ${pa.note}` : ""}` }));
+      else if (pb && !pa) out.push(base({ ...ctx, type: "bim_unpaid", desc: `Pagamento desfeito: demanda BIM "${cur.title}"` }));
       const fields = changedFields(before, after, { title: "título", productCount: "qtd. produtos", dueAt: "prazo", requestedAt: "data do pedido", freelancerId: "terceirizado", unitPrice: "valor", notes: "orientações", freelancerNotes: "observações do terceirizado", items: "lista de produtos" });
       const rest = fields.filter((f) => f !== "lista de produtos" || db === da);
       if (rest.length) out.push(base({ ...ctx, type: "bim_edited", desc: `Demanda BIM editada: ${label}${listOf(rest)}` }));

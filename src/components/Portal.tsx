@@ -2,7 +2,7 @@
 import React, { useState, useMemo, useEffect, createContext, useContext, useCallback, ReactNode, useRef } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useT } from "@/lib/i18n";
-import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_PRICE_TIERS, bimTierPrice, bimItemPrice, bimDemandTotal, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug } from "@/lib/bim";
+import { BimDemand, BimDemandItem, BimDemandStatus, BimFormat, BIM_PRICE_TIERS, bimTierPrice, bimItemPrice, bimDemandTotal, BIM_STATUS_LABELS, BIM_STATUS_COLORS, BIM_STATUS_ORDER, BIM_FORMAT_LABELS, bimProgress, bimIsOpen, bimDaysLeft, bimMonthKey, bimFileSlug, BimPayment, bimDemandValue, bimPayState, bimPayMonth, fmtBRL } from "@/lib/bim";
 import { FinishCatalog, BlockFinishes, FinishRecord, FinishGroup, catalogId, blockFinishesId, slugId, SUGGESTED_GROUPS, emptyCatalog, emptyBlockFinishes, isFilled } from "@/lib/finishes";
 import LanguageSwitcher from "./LanguageSwitcher";
 import KnowledgeBase from "./KnowledgeBase";
@@ -5790,6 +5790,11 @@ function BimDemandCard({ d, mode, clientName, freelancerName, onToggle, onStatus
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <Badge className={BIM_STATUS_COLORS[d.status]}>{BIM_STATUS_LABELS[d.status]}</Badge>
             {late && <Badge className="border-rose-200 bg-rose-50 text-rose-700">{Math.abs(days)}d atrasada</Badge>}
+            {d.payment ? (
+              <Badge className="border-emerald-200 bg-emerald-50 text-emerald-700" title={d.payment.note || undefined}>Paga em {fmtDate(d.payment.paidAt)}{d.payment.amount != null && (mode === "internal" || bimDemandValue(d).visibleToFreelancer) ? ` · ${fmtBRL(d.payment.amount)}` : ""}</Badge>
+            ) : d.status === "approved" ? (
+              <Badge className="border-amber-200 bg-amber-50 text-amber-700">A pagar</Badge>
+            ) : null}
             {soon && <Badge className="border-amber-200 bg-amber-50 text-amber-700">{days === 0 ? "vence hoje" : `${days}d p/ o prazo`}</Badge>}
           </div>
           <p className="text-base font-semibold text-slate-900">{d.title}</p>
@@ -6078,6 +6083,135 @@ function BimDemandFormModal({ initial, onClose, onSave, freelancers, clients, bl
 }
 
 /** Tela da equipe interna: todas as demandas, filtros, criação/edição, aprovação. */
+/**
+ * Aba "Pagamentos" da tela BIM (2026-11-04, Jéssica): o que já foi pago aos terceirizados
+ * e o que falta pagar, por mês — no Notion era separado por mês, mas sem dizer o que foi pago.
+ * A pagar = demanda aprovada sem pagamento. Pago = tem `payment`. Entregue e ainda não
+ * aprovada aparece só como aviso (não dá para pagar o que não foi aprovado).
+ */
+function BimPaymentsPanel({ demands, clientOf, nameOf, canPay, onPay, onUnpay }: {
+  demands: BimDemand[];
+  clientOf: (id: string) => string;
+  nameOf: (id: string) => string;
+  canPay: boolean;
+  onPay: (ids: string[], p: { paidAt: string; note?: string; amounts: Record<string, number | undefined> }) => void;
+  onUnpay: (id: string) => void;
+}) {
+  const [tab, setTab] = useState<"to_pay" | "paid">("to_pay");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [paying, setPaying] = useState(false);
+  const today = new Date().toISOString().slice(0, 10);
+  const [paidAt, setPaidAt] = useState(today);
+  const [note, setNote] = useState("");
+  const [amounts, setAmounts] = useState<Record<string, string>>({});
+
+  const toPay = demands.filter((d) => bimPayState(d) === "to_pay");
+  const paid = demands.filter((d) => bimPayState(d) === "paid");
+  const toApprove = demands.filter((d) => bimPayState(d) === "to_approve");
+  const sum = (ds: BimDemand[], pick: (d: BimDemand) => number | null | undefined) => ds.reduce((n, d) => n + (pick(d) ?? 0), 0);
+  const toPayTotal = sum(toPay, (d) => bimDemandValue(d).value);
+  const noValue = toPay.filter((d) => bimDemandValue(d).value == null).length;
+  const month = today.slice(0, 7);
+  const paidMonth = paid.filter((d) => d.payment!.paidAt.slice(0, 7) === month);
+  const byFreelancer = Array.from(new Set(toPay.map((d) => d.freelancerId))).map((id) => ({ id, ds: toPay.filter((d) => d.freelancerId === id) }));
+
+  const list = (tab === "to_pay" ? toPay : paid).slice().sort((a, b) => bimPayMonth(b).localeCompare(bimPayMonth(a)) || (b.approvedAt || "").localeCompare(a.approvedAt || ""));
+  const groups = list.reduce<Record<string, BimDemand[]>>((acc, d) => { (acc[bimPayMonth(d)] ||= []).push(d); return acc; }, {});
+  const monthLabel = (ym: string) => bimMonthKey(`${ym}-15`).replace(/^\d{2}\. /, "");
+  const toggle = (id: string) => setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const startPay = (ids: string[]) => {
+    setSelected(new Set(ids)); setPaidAt(today); setNote("");
+    setAmounts(Object.fromEntries(ids.map((id) => { const v = bimDemandValue(demands.find((d) => d.id === id)!).value; return [id, v != null ? String(v) : ""]; })));
+    setPaying(true);
+  };
+  const confirmPay = () => {
+    const ids = Array.from(selected);
+    onPay(ids, { paidAt, note: note.trim() || undefined, amounts: Object.fromEntries(ids.map((id) => [id, amounts[id] ? Number(amounts[id].replace(",", ".")) : undefined])) });
+    setPaying(false); setSelected(new Set());
+  };
+  const selTotal = Array.from(selected).reduce((n, id) => n + (Number((amounts[id] || "").replace(",", ".")) || 0), 0);
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={Wallet} label="A pagar" value={fmtBRL(toPayTotal)} sub={`${toPay.length} demanda(s) aprovada(s)${noValue ? ` · ${noValue} sem valor definido` : ""}`} color={toPay.length ? "text-amber-600" : "text-slate-900"} />
+        <MetricCard icon={CheckCircle} label="Pago neste mês" value={fmtBRL(sum(paidMonth, (d) => d.payment!.amount))} sub={`${paidMonth.length} demanda(s)`} color="text-emerald-600" />
+        <MetricCard icon={Clock} label="Aguardando aprovação" value={toApprove.length} sub="Entregues; só entram em A pagar depois de aprovadas" />
+        <MetricCard icon={Users} label="A pagar por terceirizado" value={byFreelancer.length || "—"} sub={byFreelancer.map((f) => `${nameOf(f.id).split(" ")[0]}: ${fmtBRL(sum(f.ds, (d) => bimDemandValue(d).value))}`).join(" · ") || "Nada a pagar"} />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <TabBtn active={tab === "to_pay"} label="A pagar" count={toPay.length} onClick={() => { setTab("to_pay"); setSelected(new Set()); }} />
+        <TabBtn active={tab === "paid"} label="Pagos" count={paid.length} onClick={() => { setTab("paid"); setSelected(new Set()); }} />
+        {tab === "to_pay" && canPay && toPay.length > 0 && (
+          <div className="ml-auto flex items-center gap-2">
+            {selected.size > 0 && <span className="text-xs text-slate-500">{selected.size} selecionada(s)</span>}
+            <button onClick={() => startPay(Array.from(selected))} disabled={!selected.size} className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-30">Marcar selecionadas como pagas</button>
+          </div>
+        )}
+      </div>
+
+      {paying && (
+        <Card className="p-4 border-emerald-200 bg-emerald-50/50">
+          <p className="text-sm font-semibold text-slate-800">Registrar pagamento de {selected.size} demanda(s) · {fmtBRL(selTotal)}</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-[160px_1fr]">
+            <div><label className="text-xs font-medium text-slate-500">Data do pagamento</label><input type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+            <div><label className="text-xs font-medium text-slate-500">Observação (opcional)</label><input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ex.: PIX, pago junto com a remessa 02" className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm" /></div>
+          </div>
+          <div className="mt-3 space-y-1.5">
+            {Array.from(selected).map((id) => { const d = demands.find((x) => x.id === id)!; return (
+              <div key={id} className="flex items-center gap-3 text-sm">
+                <span className="flex-1 min-w-0 truncate text-slate-700">{d.title} <span className="text-slate-400">· {nameOf(d.freelancerId)}</span></span>
+                <span className="text-xs text-slate-400">R$</span>
+                <input value={amounts[id] ?? ""} onChange={(e) => setAmounts((a) => ({ ...a, [id]: e.target.value }))} placeholder="valor" className="w-28 px-2 py-1 rounded-lg border border-slate-200 text-sm text-right" />
+              </div>
+            ); })}
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={() => setPaying(false)} className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 hover:bg-white">Cancelar</button>
+            <button onClick={confirmPay} disabled={!paidAt} className="px-5 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-30">Confirmar pagamento</button>
+          </div>
+        </Card>
+      )}
+
+      {list.length === 0 ? (
+        <Card className="p-4"><EmptyState icon={Wallet} title={tab === "to_pay" ? "Nada a pagar" : "Nenhum pagamento registrado ainda"} desc={tab === "to_pay" ? "Demandas aprovadas e ainda não pagas aparecem aqui." : "Ao marcar uma demanda como paga, ela vem para cá, no mês do pagamento."} /></Card>
+      ) : Object.entries(groups).map(([ym, ds]) => (
+        <Card key={ym} className="p-0 overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
+            <p className="text-sm font-semibold capitalize text-slate-700">{monthLabel(ym)} <span className="font-normal normal-case text-slate-400">· {tab === "to_pay" ? "aprovadas no mês" : "pagas no mês"}</span></p>
+            <div className="flex items-center gap-3 text-sm">
+              <span className="font-semibold text-slate-800">{fmtBRL(sum(ds, (d) => (tab === "paid" ? d.payment!.amount : bimDemandValue(d).value)))}</span>
+              {tab === "to_pay" && canPay && <button onClick={() => startPay(ds.map((d) => d.id))} className="text-xs font-semibold text-emerald-700 hover:underline">pagar o mês</button>}
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {ds.map((d) => { const v = bimDemandValue(d); return (
+              <div key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
+                {tab === "to_pay" && canPay && <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggle(d.id)} className="h-4 w-4" />}
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-slate-800">{d.title}</p>
+                  <p className="text-xs text-slate-500">{clientOf(d.clientId)} · {nameOf(d.freelancerId)} · {d.productCount} produto(s){d.approvedAt ? ` · aprovada em ${fmtDate(d.approvedAt)}` : ""}</p>
+                  {d.payment && <p className="text-xs text-emerald-700">Paga em {fmtDate(d.payment.paidAt)}{d.payment.note ? ` · ${d.payment.note}` : ""} · registrado por {d.payment.by}</p>}
+                </div>
+                <div className="text-right">
+                  {tab === "paid" ? (
+                    <p className="font-semibold text-emerald-700">{d.payment!.amount != null ? fmtBRL(d.payment!.amount) : "—"}</p>
+                  ) : v.value != null ? (
+                    <p className="font-semibold text-slate-800">{fmtBRL(v.value)}{v.partial && <span className="ml-1 text-[11px] font-normal text-amber-700">+ itens a combinar</span>}</p>
+                  ) : <p className="text-xs font-semibold text-amber-700">sem valor definido</p>}
+                </div>
+                {tab === "to_pay" && canPay && <button onClick={() => startPay([d.id])} className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">Pagar</button>}
+                {tab === "paid" && canPay && <button onClick={() => { if (confirm(`Desfazer o pagamento de "${d.title}"? Ela volta para A pagar.`)) onUnpay(d.id); }} className="text-xs text-slate-400 hover:text-slate-700 hover:underline">desfazer</button>}
+              </div>
+            ); })}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
 function BimPage({ user }: { user: SeedUser }) {
   const { bimDemands, setBimDemands, users, clients, blocks, setBlocks, setTickets } = useContext(AppContext);
   const [filterFreelancer, setFilterFreelancer] = useState("");
@@ -6085,6 +6219,7 @@ function BimPage({ user }: { user: SeedUser }) {
   const [filterStatus, setFilterStatus] = useState<"open" | "all" | BimDemandStatus>("open");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<BimDemand | null>(null);
+  const [view, setView] = useState<"demandas" | "pagamentos">("demandas");
 
   const freelancers = users.filter((u) => u.role === "freelancer_bim" && u.active);
   const canCreate = can(user, "bim", "create");
@@ -6137,6 +6272,11 @@ function BimPage({ user }: { user: SeedUser }) {
     upsert({ ...d, items: d.items.map((i) => (i.id === itemId ? { ...i, done: i.done.includes(fmt) ? i.done.filter((f) => f !== fmt) : [...i.done, fmt] } : i)), updatedAt: new Date().toISOString() });
   };
   const remove = (d: BimDemand) => { if (confirm(`Excluir a demanda "${d.title}"?`)) setBimDemands((prev) => prev.filter((x) => x.id !== d.id)); };
+  const pay = (ids: string[], p: { paidAt: string; note?: string; amounts: Record<string, number | undefined> }) => {
+    const now = new Date().toISOString();
+    setBimDemands((prev) => prev.map((x) => (ids.includes(x.id) ? { ...x, payment: { paidAt: p.paidAt, amount: p.amounts[x.id], note: p.note, by: user.name, markedAt: now } as BimPayment, updatedAt: now } : x)));
+  };
+  const unpay = (id: string) => setBimDemands((prev) => prev.map((x) => { if (x.id !== id) return x; const { payment: _drop, ...rest } = x; return { ...rest, updatedAt: new Date().toISOString() }; }));
 
   const nameOf = (id: string) => users.find((u) => u.id === id)?.name || "—";
   const clientOf = (id: string) => clients.find((c) => c.id === id)?.name || "—";
@@ -6156,6 +6296,27 @@ function BimPage({ user }: { user: SeedUser }) {
         }
       />
 
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3">
+        <TabBtn active={view === "demandas"} label="Demandas" count={bimDemands.length} onClick={() => setView("demandas")} />
+        <TabBtn active={view === "pagamentos"} label="Pagamentos" count={bimDemands.filter((d) => bimPayState(d) === "to_pay").length} onClick={() => setView("pagamentos")} />
+        {view === "pagamentos" && (
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <select value={filterFreelancer} onChange={(e) => setFilterFreelancer(e.target.value)} className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600">
+              <option value="">Todos os terceirizados</option>
+              {freelancers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+            </select>
+            <select value={filterClient} onChange={(e) => setFilterClient(e.target.value)} className="text-xs px-3 py-1.5 rounded-xl border border-slate-200 bg-white text-slate-600">
+              <option value="">Todas as marcas</option>
+              {clients.filter((c) => bimDemands.some((d) => d.clientId === c.id)).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {view === "pagamentos" ? (
+        <BimPaymentsPanel demands={bimDemands.filter((d) => (!filterFreelancer || d.freelancerId === filterFreelancer) && (!filterClient || d.clientId === filterClient))}
+          clientOf={clientOf} nameOf={nameOf} canPay={canEdit} onPay={pay} onUnpay={unpay} />
+      ) : (<>
       {freelancers.length === 0 && (
         <Card className="p-4 border-amber-200 bg-amber-50"><p className="text-sm text-amber-800">Nenhum usuário com perfil <b>Terceirizado BIM</b> ainda. Cadastre Danilo e Raquel em <b>Usuários</b> com esse perfil — eles entram com e-mail e senha e veem só as próprias demandas.</p></Card>
       )}
@@ -6196,6 +6357,7 @@ function BimPage({ user }: { user: SeedUser }) {
           ))}
         </div>
       )}
+      </>)}
     </div>
   );
 }
@@ -6238,6 +6400,30 @@ function BimMinhasDemandasPage({ user }: { user: SeedUser }) {
         <MetricCard icon={AlertTriangle} label="Atrasadas" value={late} color={late ? "text-rose-600" : "text-slate-900"} sub={late ? "Prazo vencido — fale com a equipe" : "Tudo dentro do prazo"} />
         <MetricCard icon={CheckCircle} label="Entregues no mês" value={deliveredMonth} sub="produtos" color="text-emerald-600" />
       </div>
+
+      {(() => {
+        // Extrato do terceirizado (2026-11-04): o que já recebeu e o que falta receber.
+        const aReceber = mine.filter((d) => bimPayState(d) === "to_pay");
+        const pagas = mine.filter((d) => d.payment).sort((a, b) => b.payment!.paidAt.localeCompare(a.payment!.paidAt));
+        if (!aReceber.length && !pagas.length) return null;
+        const val = (d: BimDemand) => { const v = bimDemandValue(d); return v.visibleToFreelancer ? v.value : null; };
+        const somaAReceber = aReceber.reduce((n, d) => n + (val(d) ?? 0), 0);
+        return (
+          <Card className="p-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Pagamentos</p>
+            <div className="mt-2 grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="text-sm text-slate-600"><span className="text-lg font-semibold text-amber-600">{aReceber.length}</span> demanda(s) aprovada(s) a receber{somaAReceber ? ` · ${fmtBRL(somaAReceber)}` : ""}</p>
+                <ul className="mt-2 space-y-1 text-xs text-slate-500">{aReceber.map((d) => <li key={d.id}>{d.title}{d.approvedAt ? ` · aprovada em ${fmtDate(d.approvedAt)}` : ""}{val(d) != null ? ` · ${fmtBRL(val(d)!)}` : ""}</li>)}</ul>
+              </div>
+              <div>
+                <p className="text-sm text-slate-600"><span className="text-lg font-semibold text-emerald-600">{pagas.length}</span> demanda(s) já paga(s)</p>
+                <ul className="mt-2 space-y-1 text-xs text-slate-500">{pagas.slice(0, 12).map((d) => <li key={d.id}>{d.title} · paga em {fmtDate(d.payment!.paidAt)}{d.payment!.amount != null && bimDemandValue(d).visibleToFreelancer ? ` · ${fmtBRL(d.payment!.amount)}` : ""}</li>)}</ul>
+              </div>
+            </div>
+          </Card>
+        );
+      })()}
 
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400 mb-3">Em aberto</p>

@@ -120,6 +120,8 @@ export interface BimDemand {
   notes?: string;
   /** Observações do freelancer para a equipe (dúvidas, pendências). */
   freelancerNotes?: string;
+  /** Pagamento ao terceirizado (2026-11-04, pedido da Jéssica): sem isto, a demanda aprovada está "a pagar". */
+  payment?: BimPayment;
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -164,3 +166,47 @@ export function bimFileSlug(name: string): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join("");
 }
+
+// ── Pagamento ao terceirizado (2026-11-04) ─────────────────────────────────────
+// A Raquel perguntou quais remessas já foram pagas e ninguém sabia: no Notion era
+// separado por mês. Agora cada demanda guarda o pagamento; a tela BIM tem a aba
+// "Pagamentos" (A pagar / Pagos, por mês) e o terceirizado vê o próprio extrato.
+export interface BimPayment {
+  /** Data em que o dinheiro saiu (YYYY-MM-DD). */
+  paidAt: string;
+  /** Valor pago (pode diferir do calculado: desconto, ajuste). */
+  amount?: number;
+  /** Ex.: "PIX 03/11", "junto com a remessa 02". */
+  note?: string;
+  by: string;
+  markedAt: string;
+}
+
+/**
+ * Valor da demanda: tabela por produto (itens com modelos/proposta) ou, nas antigas,
+ * valor por produto × quantidade. `partial` = há item com valor a aprovar/a combinar.
+ * `visibleToFreelancer`: o valor por produto das demandas antigas é só da equipe.
+ */
+export function bimDemandValue(d: BimDemand): { value: number | null; partial: boolean; visibleToFreelancer: boolean } {
+  const usesTable = d.items.some((it) => it.models || it.proposedPrice != null);
+  if (usesTable) {
+    const t = bimDemandTotal(d);
+    return { value: t.priced ? t.total : null, partial: t.pending > 0 || t.open > 0 || t.priced < d.items.length, visibleToFreelancer: true };
+  }
+  if (d.unitPrice) return { value: d.unitPrice * d.productCount, partial: false, visibleToFreelancer: false };
+  return { value: null, partial: false, visibleToFreelancer: false };
+}
+
+/** paid = pago · to_pay = aprovada, falta pagar · to_approve = entregue, equipe ainda não aprovou · open = em produção. */
+export type BimPayState = "paid" | "to_pay" | "to_approve" | "open";
+export function bimPayState(d: BimDemand): BimPayState {
+  if (d.payment) return "paid";
+  if (d.status === "approved") return "to_pay";
+  if (d.status === "delivered") return "to_approve";
+  return "open";
+}
+/** Mês em que a demanda entra no extrato: do pagamento (pagas) ou da aprovação/entrega (a pagar). */
+export function bimPayMonth(d: BimDemand): string {
+  return (d.payment?.paidAt || d.approvedAt || d.deliveredAt || d.requestedAt).slice(0, 7);
+}
+export const fmtBRL = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });

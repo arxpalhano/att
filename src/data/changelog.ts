@@ -32,6 +32,19 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: "2026-11-04a",
+    date: "2026-11-04",
+    title: "BIM: o que já foi pago e o que falta pagar",
+    audience: "equipe",
+    items: [
+      { kind: "novo", title: "Aba Pagamentos em BIM · Terceirizados", desc: "Ao lado de Demandas, a aba Pagamentos separa \"A pagar\" (demandas aprovadas ainda não pagas) e \"Pagos\", agrupados por mês e com o total de cada mês. Dá para filtrar por terceirizado e marca." },
+      { kind: "novo", title: "Marcar como paga", desc: "Pague uma demanda, várias de uma vez (caixinhas) ou o mês inteiro (\"pagar o mês\"). Informe a data, o valor (já vem preenchido) e uma observação, como \"PIX\". Errou? \"desfazer\" devolve para A pagar." },
+      { kind: "novo", title: "Selo no card da demanda", desc: "Cada demanda aprovada mostra \"A pagar\" ou \"Paga em dd/mm\"." },
+      { kind: "novo", audience: "terceirizados", title: "Seus pagamentos", desc: "Em Minhas demandas, o quadro Pagamentos mostra o que já foi pago (com a data) e o que está aprovado e falta receber. Cada demanda também tem o selo \"A pagar\" ou \"Paga em dd/mm\"." },
+      { kind: "melhorado", title: "Primeira vez: marque o que já foi pago", desc: "As demandas antigas não tinham registro de pagamento, então todas as aprovadas começam em A pagar. Marque as que já foram pagas (dá para selecionar várias) para o extrato ficar certo." },
+    ],
+  },
+  {
     id: "2026-10-29c",
     date: "2026-10-29",
     title: "Link da página do produto no site do cliente",

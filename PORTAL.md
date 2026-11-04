@@ -443,6 +443,24 @@ a contar só a marca escolhida; "Ver blocos" abre a lista já filtrada por ela. 
 (total, bloqueados, aprovações, publicados) seguem gerais. A marca escolhida fica lembrada ao
 trocar de tela (`PIPELINE_CLIENT` em `Portal.tsx`, `InternalDashboard`).
 
+### BIM · Pagamentos aos terceirizados (desde 2026-11-04)
+
+**Pedido da Jéssica:** a Raquel perguntou quais remessas já foram pagas e ninguém sabia (no
+Notion era só separado por mês). `BimDemand.payment` (`paidAt`, `amount`, `note`, `by`,
+`markedAt`) em `src/lib/bim.ts`; `bimPayState`: **paid** (tem payment) · **to_pay** (aprovada
+sem pagamento) · **to_approve** (entregue, a aprovar) · open. `bimDemandValue`: tabela por
+produto (itens com modelos) ou `unitPrice × productCount` nas antigas (esse valor por produto
+continua só para a equipe).
+- Tela BIM ganhou abas **Demandas | Pagamentos**. Pagamentos: KPIs (a pagar, pago no mês,
+  aguardando aprovação, a pagar por terceirizado), sub-abas **A pagar / Pagos** agrupadas por mês
+  (aprovação ou pagamento), pagar uma, várias (caixinhas) ou "pagar o mês"; "desfazer".
+  Quem paga: permissão de **editar** BIM no perfil.
+- Card da demanda: selo "A pagar" / "Paga em dd/mm". "Minhas demandas" (terceirizado): quadro
+  Pagamentos com a receber e já pagas.
+- Log: "Demanda BIM … marcada como paga a X em data · R$" / "Pagamento desfeito".
+- As demandas aprovadas antes de 2026-11-04 começaram todas em **A pagar** (não havia registro):
+  a Jéssica marca as já pagas.
+
 ### Novidades — notas de atualização (desde 2026-10-29)
 
 Item **Novidades** no menu (todo perfil, `podeAcessar` libera sempre) e faixa azul no topo
