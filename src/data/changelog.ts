@@ -32,6 +32,17 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: "2026-11-05a",
+    date: "2026-11-05",
+    title: "Importar links do bra (S3 de São Paulo)",
+    audience: "equipe",
+    items: [
+      { kind: "corrigido", title: "\"Importar links (.txt)\" aceita os links do bra", desc: "Antes, só os links do explorar.archtechtour.com entravam; os do bra-sao (customizadores antigos ainda embedados nos sites das marcas) eram recusados. Agora entram, e a prévia mostra \"Nova publicação (bra)\"." },
+      { kind: "melhorado", title: "Link do bra não apaga o do explorar", desc: "Se o produto já tem link do explorar, o link do bra entra como mais uma publicação do mesmo bloco, em vez de trocar o link. Os dois aparecem em Publicações." },
+      { kind: "corrigido", title: "Link do Espelho Heron (Escal)", desc: "Estava com o endereço digitado errado e não abria. Corrigido." },
+    ],
+  },
+  {
     id: "2026-11-04a",
     date: "2026-11-04",
     title: "BIM: o que já foi pago e o que falta pagar",

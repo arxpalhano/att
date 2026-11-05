@@ -154,7 +154,8 @@ export async function POST(req: NextRequest) {
         const client = block ? clientById[String(block.clientId)] : undefined;
         const url = pub.url;
         // Em modo ad-hoc, tenta inferir cliente/produto pela URL
-        const slugFromUrl = url.match(/explorar\.archtechtour\.com\/([^/]+)\/ver-\d+\/([^/]+)/i);
+        // explorar e bra-sao (S3 de São Paulo, usado em embeds antigos): …/<marca>/ver-N/<produto> ou …/<marca>-ver-N/<produto>
+        const slugFromUrl = url.match(/(?:explorar\.archtechtour\.com|bra-sao\.s3[.-][a-z0-9-]*\.?amazonaws\.com)\/([^/]+?)(?:-ver-\d+)?\/(?:ver-\d+\/)?([^/]+)\/index/i);
         const clientName = client?.name ? String(client.name) : (pub._adhoc && slugFromUrl ? slugFromUrl[1] : "?");
         const productTitle = block?.title ? String(block.title) : (pub._adhoc && slugFromUrl ? slugFromUrl[2].replace(/-/g, " ") : "?");
         const clientCode = client?.code ? String(client.code).toLowerCase() : (pub._adhoc && slugFromUrl ? slugFromUrl[1] : "");

@@ -9,6 +9,10 @@
  * Formatos de URL que existem em produção:
  *   https://explorar.archtechtour.com/<alias>/ver-<N>/<produto>/index.html
  *   https://explorar.archtechtour.com/jader-ver-20/<produto>/index.html   (versão no alias)
+ *   https://bra-sao.s3.sa-east-1.amazonaws.com/jader-ver-12/<produto>/index.html
+ *     (bucket "bra" de São Paulo: customizadores mais antigos, ainda embedados nos sites
+ *      de várias marcas — 2026-11-05, Jéssica: a importação recusava esses links)
+ *   https://s3.<região>.amazonaws.com/<bucket>/… (endereço "path-style" do S3, mesmo conteúdo)
  *
  * O alias da URL NÃO é o `code` do cliente em várias marcas (estudio-bola ×
  * estudiobola, minnimal × minimal, rs × rsdesign, cadeiras-rosa2…). Por isso a
@@ -66,6 +70,14 @@ function similarity(a: string, b: string): number {
   return Math.round((0.5 * dice + 0.5 * cover) * 100) / 100;
 }
 
+/** Buckets/hosts onde ficam customizadores publicados. */
+const CUSTOMIZER_BUCKETS = ["explorar.archtechtour.com", "bra-sao"];
+export function isCustomizerHost(host: string): boolean {
+  return /^explorar\.archtechtour\.com$/i.test(host) || /^bra-sao\.s3([.-][a-z0-9-]+)?\.amazonaws\.com$/i.test(host);
+}
+/** "bra" quando o link é do bucket de São Paulo — a prévia mostra, para não confundir com o explorar. */
+export const linkSource = (url: string) => (/bra-sao/i.test(url) ? "bra" : "explorar");
+
 export function parseLinks(text: string): { links: ParsedLink[]; ignored: Array<{ line: number; raw: string; why: string }> } {
   const links: ParsedLink[] = []; const ignored: Array<{ line: number; raw: string; why: string }> = [];
   const seen = new Set<string>();
@@ -76,8 +88,10 @@ export function parseLinks(text: string): { links: ParsedLink[]; ignored: Array<
     if (!m) { ignored.push({ line: i + 1, raw, why: "linha sem link" }); return; }
     let u: URL;
     try { u = new URL(m[1]); } catch { ignored.push({ line: i + 1, raw, why: "link inválido" }); return; }
-    if (!/explorar\.archtechtour\.com$/i.test(u.hostname)) { ignored.push({ line: i + 1, raw, why: "não é um link do explorar.archtechtour.com" }); return; }
-    const segs = u.pathname.split("/").filter(Boolean).filter((s) => !/^index\.html?$/i.test(s));
+    let segs = u.pathname.split("/").filter(Boolean).filter((s) => !/^index\.html?$/i.test(s));
+    // S3 "path-style" (s3.sa-east-1.amazonaws.com/bra-sao/…): o bucket vem como 1ª pasta.
+    if (/^s3([.-][a-z0-9-]+)?\.amazonaws\.com$/i.test(u.hostname) && CUSTOMIZER_BUCKETS.includes((segs[0] || "").toLowerCase())) segs = segs.slice(1);
+    else if (!isCustomizerHost(u.hostname)) { ignored.push({ line: i + 1, raw, why: "não é um link de customizador (explorar.archtechtour.com ou bra-sao)" }); return; }
     if (segs.length < 2) { ignored.push({ line: i + 1, raw, why: "link sem pasta de produto" }); return; }
     let alias = decodeURIComponent(segs[0]); let version = 0; let slug = "";
     const verSeg = /^ver-(\d+)$/i.exec(segs[1] || "");
@@ -120,7 +134,8 @@ export function matchLinks(text: string, data: { blocks: LinkBlock[]; clients: L
   const { links, ignored } = parseLinks(text);
   const blockById = new Map(data.blocks.map((b) => [b.id, b]));
   const learned = learnAliases(data.publications, blockById);
-  const pubByBlock = new Map<string, LinkPub>(); data.publications.forEach((p) => { const cur = pubByBlock.get(p.blockId); if (!cur || p.v > cur.v) pubByBlock.set(p.blockId, p); });
+  // Publicação existente por bloco E origem (explorar × bra): link do bra não substitui o do explorar.
+  const pubByBlock = new Map<string, LinkPub>(); data.publications.forEach((p) => { const k = `${p.blockId}|${linkSource(p.url)}`; const cur = pubByBlock.get(k); if (!cur || p.v > cur.v) pubByBlock.set(k, p); });
   // produto já publicado: (alias sem versão, slug) → bloco
   const bySlug = new Map<string, string>();
   data.publications.forEach((p) => { const l = parseLinks(p.url).links[0]; if (l) bySlug.set(`${l.alias.replace(/-ver-\d+$/, "")}/${slugify(l.slug)}`, p.blockId); });
@@ -139,14 +154,14 @@ export function matchLinks(text: string, data: { blocks: LinkBlock[]; clients: L
     if (!blockId) {
       let t = pool.filter((b) => slugify(b.title) === want);
       // Produto cadastrado duas vezes com o mesmo nome: fica com o que ainda não tem publicação.
-      if (t.length > 1) { const free = t.filter((b) => !pubByBlock.has(b.id)); if (free.length === 1) t = free; }
+      if (t.length > 1) { const free = t.filter((b) => !pubByBlock.has(`${b.id}|${linkSource(l.url)}`)); if (free.length === 1) t = free; }
       if (t.length === 1) { blockId = t[0].id; how = "title"; score = 1; }
     }
     if (!blockId) { const t = pool.filter((b) => (b.sku && slugify(b.sku) === want) || (b.csku && slugify(b.csku) === want)); if (t.length === 1) { blockId = t[0].id; how = "sku"; score = 0.95; } }
     const ranked = pool.map((b) => ({ blockId: b.id, score: Math.max(similarity(l.slug, b.title), similarity(l.slug, b.sku || "")) })).filter((c) => c.score >= 0.4).sort((a, b) => b.score - a.score).slice(0, 6);
     if (!blockId && ranked.length && ranked[0].score >= 0.6 && (ranked.length === 1 || ranked[0].score - ranked[1].score >= 0.08)) { blockId = ranked[0].blockId; how = "similar"; score = ranked[0].score; }
 
-    const pub = blockId ? pubByBlock.get(blockId) ?? null : null;
+    const pub = blockId ? pubByBlock.get(`${blockId}|${linkSource(l.url)}`) ?? null : null;
     const m: LinkMatch = { ...base, blockId, how, score, candidates: ranked, existingPubId: pub?.id ?? null, existingUrl: pub?.url ?? null };
     if (!blockId) m.problem = ranked.length ? "Mais de um bloco parecido — escolha na lista." : "Nenhum bloco parecido nesta marca — escolha na lista ou crie o bloco antes.";
     else if (taken.has(blockId)) m.problem = `Mesmo bloco da linha ${taken.get(blockId)} — confira.`;

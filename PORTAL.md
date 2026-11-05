@@ -443,6 +443,20 @@ a contar só a marca escolhida; "Ver blocos" abre a lista já filtrada por ela. 
 (total, bloqueados, aprovações, publicados) seguem gerais. A marca escolhida fica lembrada ao
 trocar de tela (`PIPELINE_CLIENT` em `Portal.tsx`, `InternalDashboard`).
 
+### Links do bucket "bra" (bra-sao) na importação (desde 2026-11-05)
+
+**Relato da Jéssica:** a importação de links (Publicações → Importar links .txt) só aceitava
+`explorar.archtechtour.com`; os customizadores antigos do bucket **bra-sao**
+(`https://bra-sao.s3.sa-east-1.amazonaws.com/<alias>[-ver-N]/[ver-N/]<produto>/index.html`),
+ainda embedados em sites de marcas (Jader, Cadeiras Rosa…), eram recusados. `src/lib/link-import.ts`
+aceita bra-sao (e o formato path-style `s3.<região>.amazonaws.com/<bucket>/…`); `linkSource()`
+separa explorar × bra: link do bra num bloco que já tem link do explorar vira **publicação a mais**
+(não troca). Monk Lighthouse também lê URLs do bra. `reconcile-publications` e `import-orphans`
+continuam olhando só o bucket do explorar.
+Levantamento em 2026-11-05: 221 index.html no bra-sao, 150 produtos na última versão (sem
+pastas de teste); 47 já estavam no portal com o mesmo link, os demais ficam para a equipe
+importar pela prévia (muitos são de marcas antigas: Christie, Dengo, Studio Ambientes, Granistone).
+
 ### BIM · Pagamentos aos terceirizados (desde 2026-11-04)
 
 **Pedido da Jéssica:** a Raquel perguntou quais remessas já foram pagas e ninguém sabia (no

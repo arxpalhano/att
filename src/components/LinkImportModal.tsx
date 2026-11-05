@@ -6,7 +6,7 @@
  */
 import React, { useMemo, useRef, useState } from "react";
 import { X, Upload, AlertTriangle, Check, FileText } from "lucide-react";
-import { matchLinks, HOW_LABELS, LinkBlock, LinkClient, LinkPub, LinkMatch } from "@/lib/link-import";
+import { matchLinks, HOW_LABELS, LinkBlock, LinkClient, LinkPub, LinkMatch, linkSource } from "@/lib/link-import";
 
 export interface LinkImportRow { blockId: string; url: string; v: number; existingPubId: string | null }
 
@@ -33,10 +33,12 @@ export default function LinkImportModal({ blocks, clients, publications, statusL
   };
   const readFile = async (f: File) => { const t = await f.text(); setText(t); analyze(t); };
 
-  const pubOf = (blockId: string | null) => (blockId ? publications.filter((p) => p.blockId === blockId).sort((a, b) => b.v - a.v)[0] ?? null : null);
+  // Só troca o link da MESMA origem: um link do bra num bloco que já tem link do explorar
+  // vira uma publicação a mais (os dois podem estar embedados em sites diferentes).
+  const pubOf = (blockId: string | null, url: string) => (blockId ? publications.filter((p) => p.blockId === blockId && linkSource(p.url) === linkSource(url)).sort((a, b) => b.v - a.v)[0] ?? null : null);
   const rows = useMemo(() => (analyzed?.matches ?? []).map((m) => {
     const c = choices[m.line] ?? { clientId: m.clientId, blockId: m.blockId, include: false };
-    const pub = pubOf(c.blockId);
+    const pub = pubOf(c.blockId, m.url);
     const version = m.version || pub?.v || 1;
     const kind: "new" | "update" | "same" | "pending" = !c.blockId ? "pending" : !pub ? "new" : pub.url === m.url ? "same" : "update";
     return { m, c, pub, version, kind };
@@ -72,7 +74,7 @@ export default function LinkImportModal({ blocks, clients, publications, statusL
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {!analyzed ? (
             <div className="space-y-3">
-              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={12} placeholder={"https://explorar.archtechtour.com/greenhouse/ver-23/mesa-jantar-modo/index.html\nhttps://explorar.archtechtour.com/dexco/ver-7/acionamento-para-torneira-de-mesa-redondo/index.html"} className="w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs leading-6 text-slate-800 outline-none focus:border-cyan-400" />
+              <textarea value={text} onChange={(e) => setText(e.target.value)} rows={12} placeholder={"https://explorar.archtechtour.com/greenhouse/ver-23/mesa-jantar-modo/index.html\nhttps://bra-sao.s3.sa-east-1.amazonaws.com/jader-ver-12/cadeira-milla/index.html"} className="w-full resize-y rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs leading-6 text-slate-800 outline-none focus:border-cyan-400" />
               <div
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) readFile(f); }}
@@ -105,7 +107,7 @@ export default function LinkImportModal({ blocks, clients, publications, statusL
                       const first = pool.filter((b) => cand.includes(b.id)).sort((a, b) => cand.indexOf(a.id) - cand.indexOf(b.id));
                       const rest = pool.filter((b) => !cand.includes(b.id));
                       const dup = !!c.blockId && dupBlocks.has(c.blockId);
-                      const opt = (b: LinkBlock) => <option key={b.id} value={b.id}>#{b.n ?? "—"} · {b.title}{b.sku ? ` · ${b.sku.slice(0, 28)}` : ""} · {statusLabel(b.status)}{pubOf(b.id) ? " · já tem link" : ""}</option>;
+                      const opt = (b: LinkBlock) => <option key={b.id} value={b.id}>#{b.n ?? "—"} · {b.title}{b.sku ? ` · ${b.sku.slice(0, 28)}` : ""} · {statusLabel(b.status)}{pubOf(b.id, m.url) ? " · já tem link" : ""}</option>;
                       return (
                         <tr key={m.line} className={`border-t border-slate-100 align-top ${c.include ? "" : "opacity-60"}`}>
                           <td className="px-3 py-2.5"><input type="checkbox" checked={c.include} disabled={!c.blockId || kind === "same"} onChange={(e) => set(m.line, { include: e.target.checked })} className="h-4 w-4 rounded border-slate-300 accent-slate-900" /></td>
@@ -132,9 +134,9 @@ export default function LinkImportModal({ blocks, clients, publications, statusL
                           </td>
                           <td className="px-3 py-2.5">
                             <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-semibold ${chip(kind)}`}>
-                              {kind === "new" ? `Nova publicação · v${version}` : kind === "update" ? `Troca o link · v${pub?.v} → v${version}` : kind === "same" ? "Já está com este link" : "Falta escolher"}
+                              {kind === "new" ? `Nova publicação${linkSource(m.url) === "bra" ? " (bra)" : ""} · v${version}` : kind === "update" ? `Troca o link · v${pub?.v} → v${version}` : kind === "same" ? "Já está com este link" : "Falta escolher"}
                             </span>
-                            {kind === "update" && pub && <p className="mt-1 break-all font-mono text-[10px] text-slate-400" title={pub.url}>era: {pub.url.replace(/^https?:\/\/explorar\.archtechtour\.com\//, "").slice(0, 60)}</p>}
+                            {kind === "update" && pub && <p className="mt-1 break-all font-mono text-[10px] text-slate-400" title={pub.url}>era: {pub.url.replace(/^https?:\/\/(explorar\.archtechtour\.com|bra-sao\.s3[.-][a-z0-9-]*\.?amazonaws\.com)\//, (_m, h: string) => (h.startsWith("bra") ? "bra: " : "")).slice(0, 60)}</p>}
                           </td>
                         </tr>
                       );
