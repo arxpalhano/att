@@ -6874,19 +6874,29 @@ function PublicationFormModal({ title, onClose, onSave, initial, blocks, default
 const EMBED_TEMPLATE = '<iframe width="100%" height="640px" frameborder="0" src="SUBSTITUA O LINK DO PRODUTO AQUI" allow="camera; gyroscope; accelerometer; xr-spatial-tracking; fullscreen"></iframe>';
 
 /** Instruções de uso dos embeds (texto que a Jéssica mantinha no Notion, "Cadastro de Produtos"). */
+/** Guia de embed em PDF (feito pela Jéssica), servido de public/docs. */
+const EMBED_GUIDE_PDF = "/docs/como-colocar-o-customizador-no-seu-site.pdf";
 function EmbedInstructions({ defaultOpen }: { defaultOpen: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   const [copied, setCopied] = useState(false);
   const copy = () => { navigator.clipboard.writeText(EMBED_TEMPLATE).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); };
   return (
     <Card className="p-5">
-      <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between gap-3 text-left">
-        <div>
-          <p className="text-sm font-semibold text-slate-800">Como colocar o customizador no seu site</p>
-          <p className="mt-0.5 text-xs text-slate-500">Passo a passo do embed por iFrame — vale para todos os produtos abaixo.</p>
-        </div>
-        <ChevronDown className={`h-4 w-4 flex-shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
-      </button>
+      <div className="flex items-center gap-3">
+        <button onClick={() => setOpen(!open)} className="flex min-w-0 flex-1 items-center justify-between gap-3 text-left">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Como colocar o customizador no seu site</p>
+            <p className="mt-0.5 text-xs text-slate-500">Passo a passo do embed por iFrame — vale para todos os produtos abaixo.</p>
+          </div>
+          <ChevronDown className={`h-4 w-4 flex-shrink-0 text-slate-400 transition ${open ? "rotate-180" : ""}`} />
+        </button>
+        {/* Guia em PDF feito pela Jéssica (2026-11-06) — para o cliente repassar a quem cuida do site. */}
+        <a href={EMBED_GUIDE_PDF} target="_blank" rel="noopener noreferrer" download="Como colocar o customizador no seu site - ArchTechTour.pdf"
+          onClick={() => logActivity({ type: "export", entity: "publications", desc: "Baixou o guia de embed (PDF)" })}
+          className="flex flex-shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 hover:border-slate-300 hover:text-slate-900 transition">
+          <Download className="h-3.5 w-3.5" /> Guia em PDF
+        </a>
+      </div>
       {open && (
         <div className="mt-4 space-y-3 text-sm leading-6 text-slate-600">
           <p>O customizador deve ser implementado na <b>página do respectivo produto</b> do seu site, a partir de um embed de iFrame.</p>

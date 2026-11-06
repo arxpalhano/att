@@ -528,6 +528,10 @@ demora a publicar — a equipe precisa saber quem cobrar.
   Publicações mostra só o selo "Publicado" — sem quadro "no ar / não publicados", filtro ou selos de
   situação (marca sem site cadastrado aparecia toda como "não publicado"). Rótulos internos
   passaram de "site do cliente" para **"site da marca"**.
+- **Guia em PDF** (2026-11-06, feito pela Jéssica): `public/docs/como-colocar-o-customizador-no-seu-site.pdf`,
+  botão "Guia em PDF" no quadro de instruções de embed (cliente e equipe). Para trocar o guia,
+  substitua o arquivo com o mesmo nome. `/api/activity` passou a aceitar os tipos `export` e
+  `import` (Baixar/Importar links e o download do guia eram recusados em silêncio).
 - Limite: "não detectado" não prova que não está no site (ninguém abriu ainda, ou o site usa
   `referrer-policy: no-referrer`). Para esses casos, a marcação manual.
 

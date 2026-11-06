@@ -32,6 +32,16 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: "2026-11-06b",
+    date: "2026-11-06",
+    title: "Guia em PDF de como colocar o customizador no site",
+    audience: "todos",
+    items: [
+      { kind: "novo", title: "Botão \"Guia em PDF\" em Publicações", desc: "No quadro \"Como colocar o customizador no seu site\", o botão baixa o passo a passo completo em PDF, com imagens, para repassar a quem cuida do site." },
+      { kind: "corrigido", audience: "equipe", title: "Downloads e importações de links no histórico", desc: "\"Baixar links (.txt)\" e \"Importar links\" não estavam sendo gravados na tela Atividade. Agora são, junto com o download do guia." },
+    ],
+  },
+  {
     id: "2026-11-06a",
     date: "2026-11-06",
     title: "\"Site do cliente\" virou \"site da marca\" e saiu da visão do cliente",
