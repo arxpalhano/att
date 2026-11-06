@@ -524,6 +524,10 @@ demora a publicar — a equipe precisa saber quem cobrar.
   do produto e procura `/<pasta>/index.html` no HTML. Lotes de ~20 s; a tela repete enquanto
   houver `remaining`. Resultado em `client-sites#pages` (não achou → tenta de novo em 7 dias).
   Sem página: link "procurar no site" (Google `site:`). Estúdio Bola é app Expo sem sitemap.
+- **Só a equipe vê** (2026-11-06, Jéssica testando a visão do cliente): para usuário de cliente,
+  Publicações mostra só o selo "Publicado" — sem quadro "no ar / não publicados", filtro ou selos de
+  situação (marca sem site cadastrado aparecia toda como "não publicado"). Rótulos internos
+  passaram de "site do cliente" para **"site da marca"**.
 - Limite: "não detectado" não prova que não está no site (ninguém abriu ainda, ou o site usa
   `referrer-policy: no-referrer`). Para esses casos, a marcação manual.
 

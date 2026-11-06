@@ -1631,8 +1631,8 @@ function InternalDashboard({ setPage, openBlocks, setSelectedBlock, setSelectedC
   const bimCols = Array.from(bimLane.entries()).sort(([a, x], [b, y]) => (a === "queue" ? -1 : b === "queue" ? 1 : a === "internal" ? 1 : b === "internal" ? -1 : y.n - x.n));
   const laneTail: { k: string; label: string; hint: string; icon: any; color: string; go: () => void }[] = [
     { k: "ready_waiting_bim", label: "Pronto · aguardando BIM", hint: "Customizador pronto; só publica quando o BIM terminar", icon: Box, color: "text-teal-600", go: () => openPipeline("bim_conversion") },
-    { k: "pub_att", label: "Publicado · só no site ATT", hint: "No ar no explorar da ATT, ainda não visto no site do cliente", icon: Globe, color: "text-emerald-600", go: () => { Object.assign(PUBS_LIST_MEMORY, { site: "pending", client: pipelineClient === "all" ? "" : pipelineClient }); setPage("publications"); } },
-    { k: "pub_client", label: "No site do cliente", hint: "Visto pelo analytics no site da marca ou marcado à mão", icon: CheckCircle, color: "text-cyan-600", go: () => { Object.assign(PUBS_LIST_MEMORY, { site: "live", client: pipelineClient === "all" ? "" : pipelineClient }); setPage("publications"); } },
+    { k: "pub_att", label: "Publicado · só no site ATT", hint: "No ar no explorar da ATT, ainda não visto no site da marca", icon: Globe, color: "text-emerald-600", go: () => { Object.assign(PUBS_LIST_MEMORY, { site: "pending", client: pipelineClient === "all" ? "" : pipelineClient }); setPage("publications"); } },
+    { k: "pub_client", label: "No site da marca", hint: "Visto pelo analytics no site da marca ou marcado à mão", icon: CheckCircle, color: "text-cyan-600", go: () => { Object.assign(PUBS_LIST_MEMORY, { site: "live", client: pipelineClient === "all" ? "" : pipelineClient }); setPage("publications"); } },
   ];
   const onPipeline = pipeline.reduce((n, p) => n + (lane[p.s] || 0), 0) + laneTail.reduce((n, t) => n + (lane[t.k] || 0), 0);
   const paused = (pipeByStatus["blocked"] || 0) + (pipeByStatus["on_hold"] || 0) + (pipeByStatus["archived"] || 0);
@@ -3728,7 +3728,7 @@ function ClientFormModal({ title, onClose, onSave, initial }: {
           <div>
             <label className="text-xs font-medium text-slate-500">Sites da marca (um por linha)</label>
             <textarea value={sitesText} onChange={(e) => setSitesText(e.target.value)} rows={3} className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-mono" placeholder={"ricco.com.br\nloja.ricco.com.br"} />
-            <p className="mt-1 text-[11px] leading-4 text-slate-400">Usado para descobrir sozinho, pelo analytics, quais customizadores já estão no ar no site do cliente. Subdomínios entram automaticamente (en.marca.com).</p>
+            <p className="mt-1 text-[11px] leading-4 text-slate-400">Usado para descobrir sozinho, pelo analytics, quais customizadores já estão no ar no site da marca. Subdomínios entram automaticamente (en.marca.com).</p>
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-600"><input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} /> Ativo</label>
         </div>
@@ -3792,7 +3792,7 @@ function ClientsPage() {
                 <div><p className="text-lg font-bold text-emerald-600">{total - used}</p><p className="text-xs text-slate-400">Disponíveis</p></div>
               </div>
               <p className="text-xs text-slate-400 mt-3">{cl.contactEmail || "—"}</p>
-              <p className="text-xs mt-1 truncate" title="Sites da marca (verificação 'no site do cliente')">{cl.sites?.length ? <span className="text-slate-500"><Globe className="inline w-3 h-3 mr-1 -mt-0.5" />{cl.sites.join(" · ")}</span> : <span className="text-amber-600">Sem site cadastrado</span>}</p>
+              <p className="text-xs mt-1 truncate" title="Sites da marca (verificação 'no site da marca')">{cl.sites?.length ? <span className="text-slate-500"><Globe className="inline w-3 h-3 mr-1 -mt-0.5" />{cl.sites.join(" · ")}</span> : <span className="text-amber-600">Sem site cadastrado</span>}</p>
             </Card>
           );
         })}
@@ -6944,7 +6944,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
     const block = blocks.find((b) => b.id === p.blockId);
     if (isClient && block?.clientId !== user.clientId) return false;
     if (filterClient && block?.clientId !== filterClient) return false;
-    if (siteFilter !== "all" && pubClientSite(p, siteReport).live !== (siteFilter === "live")) return false;
+    if (!isClient && siteFilter !== "all" && pubClientSite(p, siteReport).live !== (siteFilter === "live")) return false;
     if (term && !norm(`${block?.title ?? ""} ${block?.sku ?? ""} ${block?.csku ?? ""} ${p.url} ${block ? getClientName(block.clientId) : ""}`).includes(term)) return false;
     return true;
   }).sort((a, b) => {
@@ -6977,12 +6977,12 @@ function PublicationsPage({ user }: { user: SeedUser }) {
   };
   // "No site do cliente": marcação manual (a automática vem do analytics, src/lib/client-sites.ts).
   const markClientSite = (pub: SeedPub) => {
-    const url = prompt("Link da página no site do cliente onde o customizador está (opcional — pode deixar em branco):", "");
+    const url = prompt("Link da página no site da marca onde o customizador está (opcional — pode deixar em branco):", "");
     if (url === null) return;
     setPublications(publications.map((p) => p.id === pub.id ? { ...p, clientSite: { at: new Date().toISOString(), by: currentUser?.name ?? "", url: url.trim() || undefined } } : p));
   };
   const unmarkClientSite = (pub: SeedPub) => {
-    if (!confirm("Desmarcar 'no ar no site do cliente' desta publicação?")) return;
+    if (!confirm("Desmarcar 'no ar no site da marca' desta publicação?")) return;
     setPublications(publications.map((p) => { if (p.id !== pub.id) return p; const { clientSite: _drop, ...rest } = p; return rest; }));
   };
   // Resumo da situação no site do cliente, respeitando a marca (não o próprio filtro de situação).
@@ -7087,15 +7087,16 @@ function PublicationsPage({ user }: { user: SeedUser }) {
       {showImport && <LinkImportModal blocks={blocks} clients={clients} publications={publications} statusLabel={(st) => STATUS_LABELS[st as BlockStatus] ?? st ?? ""} onClose={() => setShowImport(false)} onApply={applyImport} />}
       {importMsg && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">{importMsg}</div>}
       <EmbedInstructions defaultOpen={isClient} />
-      {scope.length > 0 && (
+      {/* Situação no site da marca é controle interno (cobrança): o cliente não vê (Jéssica, 2026-11-06). */}
+      {!isClient && scope.length > 0 && (
         <Card className="p-4">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
             <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{isClient ? "No seu site" : "No site do cliente"}</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">No site da marca</p>
               <p className="mt-1 text-sm text-slate-600">
                 <button onClick={() => setSiteFilter(siteFilter === "live" ? "all" : "live")} className="hover:underline"><span className="text-lg font-semibold text-emerald-600">{liveCount}</span> no ar</button>
                 <span className="mx-2 text-slate-300">·</span>
-                <button onClick={() => setSiteFilter(siteFilter === "pending" ? "all" : "pending")} className="hover:underline"><span className="text-lg font-semibold text-amber-600">{scope.length - liveCount}</span> {isClient ? "ainda não publicados no seu site" : "aguardando o cliente publicar"}</button>
+                <button onClick={() => setSiteFilter(siteFilter === "pending" ? "all" : "pending")} className="hover:underline"><span className="text-lg font-semibold text-amber-600">{scope.length - liveCount}</span> aguardando a marca publicar</button>
               </p>
             </div>
             {!isClient && (
@@ -7126,11 +7127,11 @@ function PublicationsPage({ user }: { user: SeedUser }) {
             <option value="published">Ordem: data de publicação (recente primeiro)</option>
             <option value="name">Ordem: nome do produto</option>
           </select>
-          <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value as PubSiteFilter)} title="Situação no site do cliente" className={`text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${siteFilter === "all" ? "border-slate-200 bg-white" : "border-cyan-300 bg-cyan-50 font-semibold text-cyan-800"}`}>
-            <option value="all">Site do cliente: todos</option>
-            <option value="live">Já no site do cliente</option>
-            <option value="pending">Aguardando o cliente publicar</option>
-          </select>
+          {!isClient && (<select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value as PubSiteFilter)} title="Situação no site da marca" className={`text-sm border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 ${siteFilter === "all" ? "border-slate-200 bg-white" : "border-cyan-300 bg-cyan-50 font-semibold text-cyan-800"}`}>
+            <option value="all">Site da marca: todos</option>
+            <option value="live">Já no site da marca</option>
+            <option value="pending">Aguardando a marca publicar</option>
+          </select>)}
           {(search || sort !== "default" || siteFilter !== "all") && <button onClick={() => { setSearch(""); setSort("default"); setSiteFilter("all"); }} className="text-xs font-semibold text-slate-500 hover:text-slate-800 px-1">Limpar</button>}
         </div>
         {search && <p className="mt-2 text-[11px] text-slate-400">{pubs.length} publicação(ões) encontrada(s)</p>}
@@ -7151,17 +7152,18 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                     <h4 className="text-base font-semibold text-slate-900 mt-1">{block?.title || pub.blockId}</h4>
                     <p className="mt-1 text-[11px] text-slate-400">{block?.sku}{pubDate(pub, block) ? ` · publicado em ${fmtDate(pubDate(pub, block))}` : ""}{pub.updatedAt ? ` · alterado em ${fmtDate(pub.updatedAt.slice(0, 10))}` : ""}</p>
                     {(() => {
+                      if (isClient) return <Badge className="mt-2 border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado</Badge>;
                       const st = pubClientSite(pub, siteReport);
                       return (
                         <div className="mt-2 flex flex-wrap items-center gap-1.5">
                           <Badge className="border-emerald-200/80 bg-emerald-50 text-emerald-700">Publicado · ATT</Badge>
                           {st.live ? (
                             <Badge className="border-cyan-200/80 bg-cyan-50 text-cyan-800" title={st.source === "auto" ? `Detectado pelo analytics: aberto em ${st.host} · ${st.sessions} sessão(ões) · primeira em ${fmtDate(st.since!)}, última em ${fmtDate(st.lastSeen!)}` : `Marcado por ${st.by} em ${fmtDate(st.since!)}${st.url ? ` · ${st.url}` : ""}`}>
-                              {isClient ? "No seu site" : "No site do cliente"}{st.host ? ` · ${st.host}` : ""}{st.source === "auto" ? " · auto" : ""}
+                              No site da marca{st.host ? ` · ${st.host}` : ""}{st.source === "auto" ? " · auto" : ""}
                             </Badge>
                           ) : (
                             <Badge className="border-amber-200/80 bg-amber-50 text-amber-700" title="O analytics ainda não viu este customizador aberto num site cadastrado da marca">
-                              {isClient ? "Ainda não está no seu site" : "Não está no site do cliente"}{pubDate(pub, block) ? ` · ${daysSince(pubDate(pub, block))} dias` : ""}
+                              Não está no site da marca{pubDate(pub, block) ? ` · ${daysSince(pubDate(pub, block))} dias` : ""}
                             </Badge>
                           )}
                           {canEdit && !st.live && <button onClick={() => markClientSite(pub)} className="text-[11px] font-semibold text-cyan-700 hover:underline">Marcar como no site</button>}
@@ -7170,7 +7172,7 @@ function PublicationsPage({ user }: { user: SeedUser }) {
                             // Link para conferir: o que foi marcado à mão > página achada no sitemap > busca no Google no site da marca.
                             if (!st.live) return null;
                             const page = st.url || sitePages[pub.id]?.url;
-                            if (page) return <a href={page} target="_blank" rel="noopener noreferrer" title={page} className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-700 hover:underline"><ExternalLink className="h-3 w-3" /> ver no site do cliente</a>;
+                            if (page) return <a href={page} target="_blank" rel="noopener noreferrer" title={page} className="inline-flex items-center gap-1 text-[11px] font-semibold text-cyan-700 hover:underline"><ExternalLink className="h-3 w-3" /> ver no site da marca</a>;
                             const host = st.host || client?.sites?.[0];
                             if (!host) return null;
                             return <a href={googleSiteSearch(host, block?.title ?? "")} target="_blank" rel="noopener noreferrer" title={sitePages[pub.id] ? "Não achamos a página exata no mapa do site da marca; abre uma busca no Google só dentro do site dela" : "Ainda procurando a página exata; enquanto isso, abre uma busca no Google só dentro do site da marca"} className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-cyan-700 hover:underline"><Search className="h-3 w-3" /> procurar no site</a>;

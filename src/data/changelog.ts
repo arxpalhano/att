@@ -32,6 +32,16 @@ export interface ChangeEntry {
 
 export const CHANGELOG: ChangeEntry[] = [
   {
+    id: "2026-11-06a",
+    date: "2026-11-06",
+    title: "\"Site do cliente\" virou \"site da marca\" e saiu da visão do cliente",
+    audience: "equipe",
+    items: [
+      { kind: "melhorado", title: "O cliente não vê mais a situação no site dele", desc: "Em Publicações, o usuário de cliente vê só o selo \"Publicado\", as instruções de embed e os links. O quadro \"no ar / ainda não publicados\", o filtro e os selos de situação ficaram só para a equipe, porque é controle nosso de cobrança (e marca sem site cadastrado aparecia toda como \"não publicado\")." },
+      { kind: "melhorado", title: "Nome novo: \"site da marca\"", desc: "No Dashboard e em Publicações, \"No site do cliente\" passou a se chamar \"No site da marca\", e o filtro \"Aguardando a marca publicar\"." },
+    ],
+  },
+  {
     id: "2026-11-05a",
     date: "2026-11-05",
     title: "Importar links do bra (S3 de São Paulo)",
@@ -63,7 +73,6 @@ export const CHANGELOG: ChangeEntry[] = [
     items: [
       { kind: "novo", title: "\"Ver no site do cliente\" em cada publicação", desc: "Em Publicações, quem está no ar no site da marca ganha o link da página exata do produto, para conferir. O portal acha a página lendo o mapa do site da marca e procurando o customizador dentro dela." },
       { kind: "novo", title: "\"Procurar no site\" quando a página não aparece", desc: "Se o site da marca não tem mapa do site ou é montado de um jeito que não dá para ler (caso do Estúdio Bola), o link abre uma busca no Google só dentro do site dela." },
-      { kind: "novo", audience: "todos", title: "Link para a página do seu site", desc: "Nas Publicações, cada customizador que já está no seu site tem o link da página onde ele aparece." },
     ],
   },
   {
@@ -78,7 +87,6 @@ export const CHANGELOG: ChangeEntry[] = [
       { kind: "novo", title: "Publicado dividido em dois: \"só no site ATT\" e \"no site do cliente\"", desc: "O portal descobre sozinho, pelo analytics, em qual site cada customizador foi aberto. Se abriu no site da marca, conta como \"no site do cliente\". Clique no card para ver a lista." },
       { kind: "novo", title: "Cobrança de quem não publicou", desc: "Em Publicações, filtre \"Aguardando o cliente publicar\" e a marca, e use \"Baixar links (.txt)\" para mandar ao cliente. Cada publicação também tem \"Marcar como no site\", para quando o analytics ainda não viu." },
       { kind: "novo", title: "Sites da marca no cadastro do cliente", desc: "Em Clientes → editar, o campo \"Sites da marca\" diz onde procurar. Marca sem site cadastrado não é verificada; a tela de Publicações avisa quais faltam e sugere domínios encontrados." },
-      { kind: "novo", audience: "todos", title: "Publicações mostram se o customizador já está no seu site", desc: "Cada publicação tem um selo dizendo se o 3D já está no ar no site da marca ou se ainda falta publicar." },
     ],
   },
   {
